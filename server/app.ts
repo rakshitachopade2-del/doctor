@@ -3,6 +3,7 @@ import { registerClinical } from './clinical.ts';
 import { createFollowUp } from './follow-up.ts';
 import { createWaitlist } from './waitlist.ts';
 import { registerInsights } from './insights.ts';
+import { registerInventory } from './inventory.ts';
 import { registerCareSummary } from './care-summary.ts';
 import {
   registerImageAnnotations,
@@ -1154,6 +1155,7 @@ export function createApp(options: AppOptions = {}) {
     publishedAnnotations: (patientId) => publishedImageAnnotationsForPatient(db, patientId),
   });
   registerInsights(app, { db, actor, audit, fail });
+  registerInventory(app, { db, actor, audit, fail });
   followUp.register(app);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   const dist = resolve('dist');

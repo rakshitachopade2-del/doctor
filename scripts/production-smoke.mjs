@@ -177,6 +177,50 @@ try {
   assert.equal(exported.status, 200);
   assert.match(exported.headers.get('content-disposition'), /attachment/);
   assert.match(exported.headers.get('content-type'), /text\/csv/);
+  const inventory = await fetch(`${base}/api/inventory/items`, { headers: apiHeaders });
+  assert.equal(inventory.status, 200);
+  assert.deepEqual(await inventory.json(), []);
+  const itemResponse = await fetch(`${base}/api/inventory/items`, {
+    method: 'POST',
+    headers: apiHeaders,
+    body: JSON.stringify({
+      sku: 'SMOKE-SYNTHETIC',
+      name: 'Synthetic Smoke Consumable',
+      category: 'protective-equipment',
+      unit: 'box',
+      reorderLevel: 2,
+      requestId: randomUUID(),
+    }),
+  });
+  assert.equal(itemResponse.status, 201);
+  const item = await itemResponse.json();
+  const receiptResponse = await fetch(`${base}/api/inventory/items/${item.item.id}/receipts`, {
+    method: 'POST',
+    headers: apiHeaders,
+    body: JSON.stringify({
+      quantity: 5,
+      lotCode: 'SMOKE',
+      expiryDate: null,
+      reason: 'Synthetic production check',
+      expectedRevision: item.item.revision,
+      requestId: randomUUID(),
+    }),
+  });
+  assert.equal(receiptResponse.status, 201);
+  const receipt = await receiptResponse.json();
+  assert.equal(receipt.detail.item.onHandQuantity, 5);
+  const useResponse = await fetch(`${base}/api/inventory/lots/${receipt.movement.lotId}/use`, {
+    method: 'POST',
+    headers: apiHeaders,
+    body: JSON.stringify({
+      quantity: 2,
+      reason: 'Synthetic production check',
+      expectedRevision: receipt.detail.item.revision,
+      requestId: randomUUID(),
+    }),
+  });
+  assert.equal(useResponse.status, 201);
+  assert.equal((await useResponse.json()).detail.item.onHandQuantity, 3);
   const createdPatient = await fetch(`${base}/api/patients`, {
     method: 'POST',
     headers: apiHeaders,
@@ -219,6 +263,7 @@ try {
   assert.equal(logout.status, 200);
   assert.equal((await fetch(`${base}/api/accounts`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(summaryUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(`${base}/api/inventory/items`, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,

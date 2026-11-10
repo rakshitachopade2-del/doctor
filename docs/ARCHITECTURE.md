@@ -49,6 +49,8 @@ flowchart LR
 | `server/documents.ts`                 | Immutable PDF originals, upload provenance, patient-scoped attachment downloads        |
 | `server/clinical.ts`                  | Investigation review/publication, procedure agreement/completion, encounter amendments |
 | `server/follow-up.ts`                 | Review snapshots, owner assignments, optimistic revisions, plan state and worklist     |
+| `server/inventory.ts`                 | Whole-unit catalogue, immutable stock events, revisions and idempotent operations      |
+| `src/pages/InventoryPage.tsx`         | Stock catalogue, lots, histories and guarded administrator forms                       |
 | `server/insights.ts`                  | Immutable expenses and voids, administrator aggregates and private CSV exports         |
 | `src/pages/InsightsPage.tsx`          | Date-range reporting, daily charts/tables and aggregate export                         |
 | `src/pages/ExpensesPage.tsx`          | Administrator expense creation, filtering and void history                             |
@@ -179,6 +181,14 @@ Original image rows now reject updates and deletion. New uploads store SHA-256, 
 Annotation geometry is typed data rendered as a controlled SVG overlay, not uploaded SVG or modified raster content. Text legends and numeric percentage controls provide the same operations without pointer dragging. Patient history and the published-summary helper use explicit projections and omit private revision state and internal account provenance. Generic patient activity is created only on publication.
 
 `server/care-summary.ts` composes a patient-facing snapshot for both clinical staff and owning patients. It reuses the clinical workflow's patient projection and follow-up's safe review projection, selects shared care-plan fields explicitly, and includes only published annotations. Messages, internal notes/amendments, private assessment/snapshot/assignment fields and file bytes never enter the response. Each read/download runs with patient authorization and audit in one transaction. A hash of visible content excludes generation time and private revisions; JSON downloads require that hash to remain current. Private-only updates and paused modules therefore preserve export access, while changed shared results or payment balances require a refresh. The UI validates the returned patient, audience and revision before saving JSON and cancels stale downloads when its displayed snapshot changes.
+
+## Consumable stock and retained evidence
+
+Inventory separates fixed item identity (SKU and whole-unit counting basis), attributed catalogue snapshots, immutable receipt lots and append-only movements. Current item metadata comes from the latest snapshot; lot balances come from signed movement sums. Derived item totals classify lots against the clinic date. Unknown expiry remains distinguishable from a recorded date, and expired stock is excluded from consumption and low-stock availability calculations.
+
+Every administrator write uses an immediate transaction. A shared request registry binds UUIDs to actor, operation and normalized payload before performing revision checks. A retry after an uncertain response returns the already recorded event with current detail; altered payloads cannot reuse its key. The revision includes the latest catalogue/stock evidence and clinic date. Competing changes and midnight rollover therefore reject stale form context before checking nonnegative lot and bounded item totals. Original events, request receipt and audit commit together.
+
+Staff may read inventory without access to any patient information through these endpoints. Only administrators can change the catalogue or stock. Archive preserves all lots and evidence; physical counts can reconcile inactive/expired stock. The ledger uses item-scoped, stable row cursors. The UI keeps an uncertain submitted payload/UUID locked for exact replay while the inventory page remains mounted, validates successful stock responses before clearing it, and ignores late navigation effects after leaving the route. Local unfinished drafts do not survive a page reload or session end. There are no automatic transfers to invoices, expenses, prescriptions, procurement or activity notifications. This is a single-location consumable register, not a pharmacy dispensing system.
 
 ## Verification strategy
 
