@@ -132,3 +132,18 @@ Booking, clinical documentation, images, care plans, check-ins, private messagin
 Email, SMS, WhatsApp, video meetings, native mobile packaging, AI diagnosis and voice transcription require separate implementation and provider configuration. Online appointments do not create video rooms. No external delivery is represented as successful when a provider is absent. Clinician-entered instructions and warnings are not validated against a drug-interaction database.
 
 Booking uses the configured doctor sessions and closures in Asia/Kolkata, up to 180 days ahead. New bookings use the doctor’s current appointment length; saved appointments retain their recorded duration. Overnight sessions, waitlists, external calendar synchronization, and automatic reschedule notifications are not implemented. Clinic opening-hours text is display content; change **Availability & time off** to alter bookable hours.
+
+## Reproducible runtime verification
+
+After `npm run build`, run `npm run test:production`. This boots a new temporary database with a generated administrator password passed through stdin, verifies production identity and security headers, serves a built SPA route, and removes its temporary data. It does not use your clinic database.
+
+To check the container locally:
+
+```sh
+docker build -t derma-platform:verify .
+npm run test:production -- --image derma-platform:verify
+```
+
+The container check publishes only to a random loopback port and removes its disposable container and anonymous data volume after verification. The production image build and startup were verified locally on 10 November 2026. These checks do not provision public hosting, HTTPS certificates, or external providers.
+
+Clinical workflow and private PDF tables are added automatically on startup. Existing notes, plans, appointments, and images remain intact. Include the SQLite database in backups: it now contains original report bytes and immutable investigation/procedure/amendment events. PDFs have format/size checks and download as authenticated attachments; a malware-scanning or document-sanitization service is not connected.

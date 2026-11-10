@@ -28,6 +28,9 @@ import type {
   Patient,
   PatientRecord,
 } from '../../shared/types';
+import type { PatientClinicalWorkflows } from '../../shared/clinical';
+import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
+import { DocumentsPanel } from '../components/DocumentsPanel';
 import { api, formatDate, today, useResource, useSession, useToast } from '../lib';
 import {
   Avatar,
@@ -756,11 +759,14 @@ function PatientModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
   );
 }
 
-type RecordTab = 'overview' | 'visits' | 'care' | 'images' | 'messages';
+type RecordTab = 'overview' | 'visits' | 'care' | 'workup' | 'images' | 'reports' | 'messages';
 export function PatientDetailPage() {
   const { id } = useParams();
   const { data, loading, error, reload } = useResource<PatientRecord>(
     id ? `/api/patients/${id}` : null,
+  );
+  const clinical = useResource<PatientClinicalWorkflows>(
+    id ? `/api/patients/${id}/clinical-workflows` : null,
   );
   const settings = useResource<ClinicSettings>('/api/settings');
   const [tab, setTab] = useState<RecordTab>('overview');
@@ -781,7 +787,9 @@ export function PatientDetailPage() {
     ['overview', 'Overview'],
     ['visits', `Visits (${data.encounters.length})`],
     ['care', 'Care plans'],
+    ['workup', 'Clinical workup'],
     ['images', 'Images & reports'],
+    ['reports', 'PDF reports'],
     ['messages', 'Messages'],
   ];
   const newestIntake = [...data.intakes].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
@@ -977,6 +985,7 @@ export function PatientDetailPage() {
       )}
       {tab === 'visits' && (
         <div className="stack">
+          {clinical.error && <ErrorState message={clinical.error} retry={clinical.reload} />}
           {data.encounters.length ? (
             [...data.encounters]
               .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -996,6 +1005,15 @@ export function PatientDetailPage() {
                     <FieldValue label="Investigations" value={e.investigations} />
                   </div>
                   <FieldValue label="Plan / next steps" value={e.plan} />
+                  {clinical.data && (
+                    <EncounterAmendments
+                      encounterId={e.id}
+                      amendments={clinical.data.amendments.filter(
+                        (amendment) => amendment.encounterId === e.id,
+                      )}
+                      onChanged={clinical.reload}
+                    />
+                  )}
                 </Card>
               ))
           ) : (
@@ -1012,8 +1030,8 @@ export function PatientDetailPage() {
             </Card>
           )}
           <p className="muted small">
-            Saved visit notes preserve the original clinical record. Add a new note to document
-            corrections or additional findings.
+            Saved visit notes preserve the original clinical record. Add a dated amendment to
+            document a correction or additional information without overwriting the note.
           </p>
         </div>
       )}
@@ -1038,6 +1056,14 @@ export function PatientDetailPage() {
           )}
         </div>
       )}
+      {tab === 'workup' && (
+        <ClinicalWorkflowPanel
+          patientId={patient.id}
+          appointments={data.appointments}
+          resource={clinical}
+        />
+      )}
+      {tab === 'reports' && <DocumentsPanel patientId={patient.id} />}
       {tab === 'images' && (
         <Card>
           <div className="clinic-panel-heading">

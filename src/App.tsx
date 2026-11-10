@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { lazy, Suspense, useState, type ReactNode } from 'react';
 import {
   Link,
   Navigate,
@@ -33,27 +33,67 @@ import {
 } from 'lucide-react';
 import { useSession, api, useToast } from './lib';
 import { Avatar, Badge, ErrorState, Loading } from './components/ui';
-import { AuthPage } from './pages/AuthPages';
-import { AccountsPage, RecoveryPage, SecurityPage } from './pages/IdentityPages';
-import { SchedulingPage } from './pages/SchedulingPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { SettingsPage, AuditPage } from './pages/SettingsPages';
-import { BillingPage, LibraryPage } from './pages/OperationsPages';
 import './operations.css';
-import {
-  DiscoverPage,
-  BookingPage,
-  IntakePage,
-  MyCarePage,
-  MyRecordPage,
-  MessagesPage,
-} from './pages/PatientPages';
-import {
-  AppointmentsPage,
-  PatientsPage,
-  PatientDetailPage,
-  FollowUpsPage,
-} from './pages/ClinicPages';
+const AuthPage = lazy(() =>
+  import('./pages/AuthPages').then((module) => ({ default: module.AuthPage })),
+);
+const AccountsPage = lazy(() =>
+  import('./pages/IdentityPages').then((module) => ({ default: module.AccountsPage })),
+);
+const RecoveryPage = lazy(() =>
+  import('./pages/IdentityPages').then((module) => ({ default: module.RecoveryPage })),
+);
+const SecurityPage = lazy(() =>
+  import('./pages/IdentityPages').then((module) => ({ default: module.SecurityPage })),
+);
+const SchedulingPage = lazy(() =>
+  import('./pages/SchedulingPage').then((module) => ({ default: module.SchedulingPage })),
+);
+const DashboardPage = lazy(() =>
+  import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })),
+);
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPages').then((module) => ({ default: module.SettingsPage })),
+);
+const AuditPage = lazy(() =>
+  import('./pages/SettingsPages').then((module) => ({ default: module.AuditPage })),
+);
+const BillingPage = lazy(() =>
+  import('./pages/OperationsPages').then((module) => ({ default: module.BillingPage })),
+);
+const LibraryPage = lazy(() =>
+  import('./pages/OperationsPages').then((module) => ({ default: module.LibraryPage })),
+);
+const DiscoverPage = lazy(() =>
+  import('./pages/PatientPages').then((module) => ({ default: module.DiscoverPage })),
+);
+const BookingPage = lazy(() =>
+  import('./pages/PatientPages').then((module) => ({ default: module.BookingPage })),
+);
+const IntakePage = lazy(() =>
+  import('./pages/PatientPages').then((module) => ({ default: module.IntakePage })),
+);
+const MyCarePage = lazy(() =>
+  import('./pages/PatientPages').then((module) => ({ default: module.MyCarePage })),
+);
+const MyRecordPage = lazy(() =>
+  import('./pages/PatientPages').then((module) => ({ default: module.MyRecordPage })),
+);
+const MessagesPage = lazy(() =>
+  import('./pages/PatientPages').then((module) => ({ default: module.MessagesPage })),
+);
+const AppointmentsPage = lazy(() =>
+  import('./pages/ClinicPages').then((module) => ({ default: module.AppointmentsPage })),
+);
+const PatientsPage = lazy(() =>
+  import('./pages/ClinicPages').then((module) => ({ default: module.PatientsPage })),
+);
+const PatientDetailPage = lazy(() =>
+  import('./pages/ClinicPages').then((module) => ({ default: module.PatientDetailPage })),
+);
+const FollowUpsPage = lazy(() =>
+  import('./pages/ClinicPages').then((module) => ({ default: module.FollowUpsPage })),
+);
 import type { Role } from '../shared/types';
 
 export function Brand({ small = false }: { small?: boolean }) {
@@ -113,7 +153,9 @@ function PublicLayout() {
         </div>
       )}
       <main id="main">
-        <Outlet />
+        <Suspense fallback={<Loading />}>
+          <Outlet />
+        </Suspense>
       </main>
       <footer className="public-footer">
         <Brand small />
@@ -313,7 +355,9 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
           </div>
         </header>
         <main id="main" className="workspace-main">
-          <Outlet />
+          <Suspense fallback={<Loading />}>
+            <Outlet />
+          </Suspense>
         </main>
         <footer className="workspace-footer">
           <span>
@@ -328,125 +372,127 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
 }
 export function App() {
   return (
-    <Routes>
-      <Route element={<PublicLayout />}>
-        <Route index element={<DiscoverPage />} />
-        <Route path="login" element={<AuthPage />} />
-        <Route path="register" element={<AuthPage register />} />
-        <Route path="recover" element={<RecoveryPage />} />
-        <Route path="library" element={<LibraryPage />} />
+    <Suspense fallback={<Loading />}>
+      <Routes>
+        <Route element={<PublicLayout />}>
+          <Route index element={<DiscoverPage />} />
+          <Route path="login" element={<AuthPage />} />
+          <Route path="register" element={<AuthPage register />} />
+          <Route path="recover" element={<RecoveryPage />} />
+          <Route path="library" element={<LibraryPage />} />
+          <Route
+            path="book"
+            element={
+              <Guard>
+                <BookingPage />
+              </Guard>
+            }
+          />
+          <Route
+            path="intake"
+            element={
+              <Guard roles={['patient']}>
+                <IntakePage />
+              </Guard>
+            }
+          />
+        </Route>
         <Route
-          path="book"
           element={
-            <Guard>
-              <BookingPage />
+            <Guard roles={['admin', 'doctor', 'receptionist']}>
+              <WorkspaceLayout />
             </Guard>
           }
-        />
+        >
+          <Route path="clinic" element={<DashboardPage />} />
+          <Route path="clinic/scheduling" element={<SchedulingPage />} />
+          <Route
+            path="clinic/accounts"
+            element={
+              <Guard roles={['admin']}>
+                <AccountsPage />
+              </Guard>
+            }
+          />
+          <Route path="clinic/billing" element={<BillingPage />} />
+          <Route
+            path="clinic/knowledge"
+            element={
+              <Guard roles={['admin', 'doctor']}>
+                <LibraryPage manage />
+              </Guard>
+            }
+          />
+          <Route path="clinic/appointments" element={<AppointmentsPage />} />
+          <Route path="clinic/patients" element={<PatientsPage />} />
+          <Route
+            path="clinic/patients/:id"
+            element={
+              <Guard roles={['admin', 'doctor']}>
+                <PatientDetailPage />
+              </Guard>
+            }
+          />
+          <Route
+            path="clinic/follow-ups"
+            element={
+              <Guard roles={['admin', 'doctor']}>
+                <FollowUpsPage />
+              </Guard>
+            }
+          />
+          <Route
+            path="clinic/settings"
+            element={
+              <Guard roles={['admin']}>
+                <SettingsPage />
+              </Guard>
+            }
+          />
+          <Route
+            path="clinic/audit"
+            element={
+              <Guard roles={['admin']}>
+                <AuditPage />
+              </Guard>
+            }
+          />
+        </Route>
         <Route
-          path="intake"
           element={
             <Guard roles={['patient']}>
-              <IntakePage />
+              <WorkspaceLayout patient />
             </Guard>
           }
-        />
-      </Route>
-      <Route
-        element={
-          <Guard roles={['admin', 'doctor', 'receptionist']}>
-            <WorkspaceLayout />
-          </Guard>
-        }
-      >
-        <Route path="clinic" element={<DashboardPage />} />
-        <Route path="clinic/scheduling" element={<SchedulingPage />} />
+        >
+          <Route path="my-care" element={<MyCarePage />} />
+          <Route path="my-care/invoices" element={<BillingPage />} />
+          <Route path="my-care/library" element={<LibraryPage />} />
+          <Route path="my-care/record" element={<MyRecordPage />} />
+          <Route path="my-care/messages" element={<MessagesPage />} />
+        </Route>
         <Route
-          path="clinic/accounts"
+          path="account"
           element={
-            <Guard roles={['admin']}>
-              <AccountsPage />
-            </Guard>
-          }
-        />
-        <Route path="clinic/billing" element={<BillingPage />} />
-        <Route
-          path="clinic/knowledge"
-          element={
-            <Guard roles={['admin', 'doctor']}>
-              <LibraryPage manage />
-            </Guard>
-          }
-        />
-        <Route path="clinic/appointments" element={<AppointmentsPage />} />
-        <Route path="clinic/patients" element={<PatientsPage />} />
-        <Route
-          path="clinic/patients/:id"
-          element={
-            <Guard roles={['admin', 'doctor']}>
-              <PatientDetailPage />
+            <Guard>
+              <SecurityPage />
             </Guard>
           }
         />
         <Route
-          path="clinic/follow-ups"
+          path="*"
           element={
-            <Guard roles={['admin', 'doctor']}>
-              <FollowUpsPage />
-            </Guard>
+            <div className="not-found">
+              <Brand />
+              <h1>Let’s get you back on track.</h1>
+              <p>This page doesn’t exist.</p>
+              <Link className="button button-primary" to="/">
+                Back to the clinic
+              </Link>
+            </div>
           }
         />
-        <Route
-          path="clinic/settings"
-          element={
-            <Guard roles={['admin']}>
-              <SettingsPage />
-            </Guard>
-          }
-        />
-        <Route
-          path="clinic/audit"
-          element={
-            <Guard roles={['admin']}>
-              <AuditPage />
-            </Guard>
-          }
-        />
-      </Route>
-      <Route
-        element={
-          <Guard roles={['patient']}>
-            <WorkspaceLayout patient />
-          </Guard>
-        }
-      >
-        <Route path="my-care" element={<MyCarePage />} />
-        <Route path="my-care/invoices" element={<BillingPage />} />
-        <Route path="my-care/library" element={<LibraryPage />} />
-        <Route path="my-care/record" element={<MyRecordPage />} />
-        <Route path="my-care/messages" element={<MessagesPage />} />
-      </Route>
-      <Route
-        path="account"
-        element={
-          <Guard>
-            <SecurityPage />
-          </Guard>
-        }
-      />
-      <Route
-        path="*"
-        element={
-          <div className="not-found">
-            <Brand />
-            <h1>Let’s get you back on track.</h1>
-            <p>This page doesn’t exist.</p>
-            <Link className="button button-primary" to="/">
-              Back to the clinic
-            </Link>
-          </div>
-        }
-      />
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }

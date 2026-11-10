@@ -4,7 +4,7 @@
 
 React + TypeScript + React Router render the public clinic, role-specific workspaces, and patient portal. Vite serves development assets and builds static production assets. Express runs the API and serves the built frontend from the same origin in production. Fonts are bundled locally.
 
-Node.js 24's built-in `node:sqlite` stores application data and private image bytes in a SQLite database with foreign keys and WAL mode. It currently emits an experimental-feature warning on Node 24; the tested runtime is Node 24. The application uses one synchronous database connection per server process and is intended for a modest single-clinic deployment, not a horizontally scaled cluster.
+Node.js 24's built-in `node:sqlite` stores application data, private image bytes and original PDF reports in a SQLite database with foreign keys and WAL mode. It currently emits an experimental-feature warning on Node 24; the tested runtime is Node 24. The application uses one synchronous database connection per server process and is intended for a modest single-clinic deployment, not a horizontally scaled cluster.
 
 ```mermaid
 flowchart LR
@@ -12,43 +12,47 @@ flowchart LR
   Patient[Patient portal] --> API
   Staff[Clinic workspace] --> API
   API --> Access[Session, CSRF, roles, ownership]
-  Access --> Records[(SQLite records and private images)]
+  Access --> Records[(SQLite records, images and PDF reports)]
   Access --> Audit[Append-only activity log]
 ```
 
 ## Code map
 
-| Path                            | Responsibility                                                                       |
-| ------------------------------- | ------------------------------------------------------------------------------------ |
-| `src/App.tsx`                   | Routing, role guards, public/clinic/patient layouts                                  |
-| `src/lib.tsx`                   | API client, session context, load/error states, notifications, date/currency helpers |
-| `src/components/ui.tsx`         | Shared accessible UI, fields, modal focus handling                                   |
-| `src/pages/PatientPages.tsx`    | Discovery, booking, intake, patient plans, history, images, messages                 |
-| `src/pages/ClinicPages.tsx`     | Appointments, patient directory, records, treatment plans, follow-up lists           |
-| `src/pages/OperationsPages.tsx` | Invoices, payments, public/managed knowledge                                         |
-| `src/pages/SettingsPages.tsx`   | Clinic configuration, staff/profiles, patient portal access, audit                   |
-| `src/pages/SchedulingPage.tsx`  | Weekly availability, consultation modes, appointment lengths, doctor/clinic time off |
-| `src/pages/IdentityPages.tsx`   | Account administration, required password rotation, sessions, recovery               |
-| `server/app.ts`                 | Core API, authorization, security headers, request validation                        |
-| `server/db.ts`                  | Schema, database utilities, synthetic demo seed                                      |
-| `server/operations.ts`          | Invoice/payment, knowledge/revision, portal-provisioning endpoints                   |
-| `server/scheduling.ts`          | Schedule/closure storage, duration-aware slot generation, booking validation         |
-| `server/identity.ts`            | Account lifecycle, session metadata migration/revocation, recovery grants            |
-| `shared/`                       | Frontend/backend data contracts                                                      |
-| `tests/`                        | Isolated API tests and real-browser workflows                                        |
+| Path                                  | Responsibility                                                                         |
+| ------------------------------------- | -------------------------------------------------------------------------------------- |
+| `src/App.tsx`                         | Routing, role guards, public/clinic/patient layouts                                    |
+| `src/lib.tsx`                         | API client, session context, load/error states, notifications, date/currency helpers   |
+| `src/components/ui.tsx`               | Shared accessible UI, fields, modal focus handling                                     |
+| `src/components/DocumentsPanel.tsx`   | Private PDF-report list, upload agreement and authenticated downloads                  |
+| `src/pages/PatientPages.tsx`          | Discovery, booking, intake, patient plans, history, images, messages                   |
+| `src/pages/ClinicPages.tsx`           | Appointments, patient directory, records, treatment plans, follow-up lists             |
+| `src/pages/ClinicalWorkflowPanel.tsx` | Investigation orders/results/reviews, procedure records and encounter amendments       |
+| `src/pages/OperationsPages.tsx`       | Invoices, payments, public/managed knowledge                                           |
+| `src/pages/SettingsPages.tsx`         | Clinic configuration, staff/profiles, patient portal access, audit                     |
+| `src/pages/SchedulingPage.tsx`        | Weekly availability, consultation modes, appointment lengths, doctor/clinic time off   |
+| `src/pages/IdentityPages.tsx`         | Account administration, required password rotation, sessions, recovery                 |
+| `server/app.ts`                       | Core API, authorization, security headers, request validation                          |
+| `server/db.ts`                        | Schema, database utilities, synthetic demo seed                                        |
+| `server/operations.ts`                | Invoice/payment, knowledge/revision, portal-provisioning endpoints                     |
+| `server/scheduling.ts`                | Schedule/closure storage, duration-aware slot generation, booking validation           |
+| `server/identity.ts`                  | Account lifecycle, session metadata migration/revocation, recovery grants              |
+| `server/documents.ts`                 | Immutable PDF originals, upload provenance, patient-scoped attachment downloads        |
+| `server/clinical.ts`                  | Investigation review/publication, procedure agreement/completion, encounter amendments |
+| `shared/`                             | Frontend/backend data contracts                                                        |
+| `tests/`                              | Isolated API tests and real-browser workflows                                          |
 
 ## Data and security
 
-- Every API read of private records requires a session. Patients are restricted to their `patientId`. Reception can access scheduling/demographic/billing data but not clinical notes, images, care plans, or messages.
+- Every API read of private records requires a session. Patients are restricted to their `patientId`. Reception can access scheduling/demographic/billing data but not clinical notes, images, reports, care plans, clinical workflows or messages. Internal encounters/amendments and unpublished investigation interpretations are omitted from patient responses.
 - Passwords are salted and hashed with scrypt. Random session tokens are hashed in the database, expire after 12 hours, and are sent only in HTTP-only SameSite cookies. Production cookies require HTTPS. Session inventory exposes an opaque hash identifier and a safe browser-family label; neither is a bearer credential.
 - Authenticated writes require JSON, a matching CSRF token, and an allowed request origin. Login, registration, and token-based recovery are CSRF-exempt but still have origin/content-type checks and rate limits. Password changes and recovery-link issuance are also rate limited. Vite preserves the browser Host header when proxying API traffic.
 - The server checks current account state on every request. Inactive accounts cannot log in or reuse sessions. Role, linked-doctor, or active-state changes revoke the target account’s sessions and outstanding recovery grants. Changing a password revokes other sessions and recovery grants; recovery revokes every session.
 - Newly provisioned staff and patient portal accounts have `mustChangePassword=true`. Middleware blocks private application APIs until rotation; the frontend redirects to Account & security. Public information and session/password controls remain available. Public slot queries from these sessions do not use private patient availability and cannot exclude an existing appointment.
 - The server validates all inputs with Zod. SQL values are parameterized; internal table names are developer-controlled constants.
 - Appointment creation/rescheduling validates full time intervals for both doctor and patient inside an immediate SQLite transaction. Partial unique indexes additionally reject identical active start times. This prevents overlaps when doctors use different appointment lengths. Payment balance changes are checked within a transaction; idempotency keys distinguish retries from new invoice/payment requests.
-- Private image retrieval passes the same authorization as patient records. Files have size and content-signature checks and are served with `nosniff`; SVG/HTML are not accepted.
+- Private image and PDF retrieval pass the same authorization as patient records. Files have size and content-signature checks and are served with `nosniff`; SVG/HTML uploads are not accepted. PDF originals are downloaded as attachments under generated filenames and are not embedded in application pages.
 - Private API responses use `Cache-Control: no-store`. No offline worker or analytics service stores or transmits medical records.
-- Database triggers reject updates/deletes to audit entries, clinical encounters, and payment records. This protects application-level history; it is not proof against a database/server administrator. Article revisions preserve earlier versions.
+- Database triggers reject updates/deletes to audit entries, clinical encounters/amendments, clinical workflow events, PDF originals and payment records. This protects application-level history; it is not proof against a database/server administrator. Article revisions preserve earlier versions.
 - Database and backups contain sensitive plaintext application records. Protect host storage and backups, restrict filesystem access, and configure operational monitoring before real use.
 
 The permission model is clinic-wide for clinicians. A second organization must use a separate deployment/database until true tenancy and clinic-scoped authorization are implemented.
@@ -73,8 +77,40 @@ After an administrator confirms identity, recovery creates a cryptographically r
 
 The UI puts recovery tokens in the URL fragment, removes that fragment after loading, and submits the token in the recovery request body. Audit events identify the action and account without storing the raw token. There is no email/SMS delivery provider: verification and private link delivery remain clinic operations.
 
+## Private reports and clinical workflow records
+
+`documents` stores each PDF's immutable metadata and original bytes. Metadata includes the patient, authenticated uploader ID/name/role, timestamp, size and SHA-256 fingerprint. The uploader confirms private care use. Uploads use base64 JSON with a 5 MB decoded-file limit within the existing 7 MB request-body limit; canonical base64 and PDF header/end markers are checked. File names are validated for display but are never used as storage paths or download headers. Authenticated downloads use a server-generated filename, attachment disposition, sandbox CSP, `nosniff` and `no-store`.
+
+PDFs and raster clinical images have separate types, tables and endpoints. A PDF does not become a public asset or an inline image. The application retains original bytes rather than rewriting or parsing report contents. File checks are not PDF sanitization or malware scanning, and a fingerprint does not authenticate the report's issuing organization. These boundaries also apply when the file is opened outside the browser after download.
+
+`GET /patients/:id/clinical-workflows` assembles investigation records, procedures and consultation amendments without expanding the original `PatientRecord` contract. The patient view excludes unpublished review objects and all internal amendments. Top-level records are newest first; nested events are returned in stable insertion order. Patient-submitted result notes and uploaded reports are raw information, not clinician interpretations.
+
+### Investigations and publication
+
+An immutable `investigations` row records the requested test, clinical reason, patient-facing instructions, optional due date and ordering doctor. `investigationResults` holds separate immutable submissions with stable uploader identity and optional PDF references. Every linked document is validated against the same patient; a report cannot be attached across patient boundaries. Patients can submit their own report information but cannot order, review or publish an interpretation.
+
+`investigationReviews` stores immutable clinician interpretations linked to a specific result. A review must target the latest submission, preventing a stale form from marking a newly arrived report reviewed. `investigationPublications` records the separate explicit action that makes an interpretation patient-visible. Publishing never alters the review text. Additional interpretations retain their predecessors, and audit events identify review and publication separately.
+
+Status is derived from those events: an order with no result is `ordered`; a latest result without review is `result-received`; a latest result with a clinician review is `reviewed`. A supplemental submission therefore requires a fresh review while preserving earlier interpretations. An entry in `investigationCancellations` makes the order terminal without deleting its earlier documentation. The service performs no diagnosis, result classification or automatic laboratory communication.
+
+### Procedure plans and patient decisions
+
+`procedures` holds an immutable explanation of indication, expected benefits, risks, alternatives, aftercare and estimated cost. Optional appointment linkage is restricted to the same patient and reuses the existing booking; the procedure workflow does not reserve another slot or create an invoice.
+
+`procedureAgreements` records each decision as a distinct event. An authenticated owning patient may agree or decline through the portal. A linked clinician can record an in-person/phone decision only with an explicit confirmation and discussion note. The record distinguishes the actual recording user, their role and the method; a clinician cannot submit a patient-portal acknowledgement. Because the plan is immutable, a decision always refers to the exact explanation the patient was shown. If the explanation changes, the clinician creates a new plan.
+
+`procedureCompletions` and `procedureCancellations` are separate terminal events. Completion requires the latest decision to be agreed and records outcome, aftercare and the responsible doctor. A linked visit cannot be cancelled/no-show or have a start time still in the future. Decision, cancellation and completion checks use immediate transactions so a concurrent withdrawal cannot leave a completed record whose latest decision is declined. Completion or cancellation leaves the linked appointment unchanged.
+
+These events record communication and reported decisions; they are not an electronic signature system or an assurance that all consent requirements have been met. Medication safety checks, clinical protocol validation, pathology interpretation and external laboratory connections remain outside this implementation.
+
+### Amendments and clinical authorship
+
+`encounterAmendments` adds a reasoned, timestamped entry linked to the original consultation and patient. It never updates the original encounter and remains clinician-only. Clinical order, interpretation, amendment, procedure-plan and completion authorship requires a valid doctor profile linked to the authenticated account. An unlinked administrator can manage access and inspect authorized records but cannot be silently attributed to another doctor.
+
+All new clinical tables have update/delete rejection triggers. Status, publication and completion are represented by additional rows instead of edits to earlier explanations or decisions. The database-level guards complement endpoint permissions and preserve application history; administrative database access remains a separate trust boundary.
+
 ## Verification strategy
 
-API tests create isolated databases and real temporary HTTP servers. They assert unauthorized access, database-backed invariants, monetary arithmetic, concurrency, and persistence. Scheduling tests include breaks, modes, closures, protected bookings, interval overlap, and temporary-password privacy. Identity tests include access changes, session ownership, recovery replay/expiry, rate limits, and migrations from the previous session schema. Browser tests exercise user workflows through rendered forms and verify their saved outcomes. Each browser-suite run uses its own temporary database and dedicated ports, leaving the local demonstration database alone.
+API tests create isolated databases and real temporary HTTP servers. They assert unauthorized access, database-backed invariants, monetary arithmetic, concurrency, and persistence. Scheduling tests include breaks, modes, closures, protected bookings, interval overlap, and temporary-password privacy. Identity tests include access changes, session ownership, recovery replay/expiry, rate limits, and migrations from the previous session schema. Report tests check exact bytes, digest/provenance, size/format rejection, private downloads and immutability. Clinical workflow tests cover same-patient report linkage, unpublished interpretation privacy, latest-result review, original-note preservation, explicit decision histories, visit timing and concurrent withdrawal/completion. Browser tests exercise user workflows through rendered forms and verify their saved outcomes. Each browser-suite run uses its own temporary database and dedicated ports, leaving the local demonstration database alone.
 
 Implementation references: [Node.js SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html), [Express production security guidance](https://expressjs.com/en/advanced/best-practice-security.html). The code and tests define this release's actual guarantees.

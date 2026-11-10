@@ -33,7 +33,10 @@ These are intentionally public **development-only credentials**. Production star
 - **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute appointments, doctor leave, and clinic-wide closures. Schedule changes protect existing bookings.
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
 - **Patient preparation:** a structured four-step history intake, reviewable summary, explicit sharing agreement, and clinician access to submitted history.
-- **Longitudinal records:** append-only consultation notes, history, investigations documented as text/image reports, dated private images, treatment plans, and side-by-side image comparison.
+- **Longitudinal records:** original consultation notes with dated, attributed amendments, shared history, private images, treatment plans, and side-by-side image comparison. Original notes and amendments remain clinician-only.
+- **Investigations:** structured test requests, due dates and instructions, patient/clinician result submissions, PDF attachments, and clinician reviews that are shared with the patient only after explicit publication. Supplemental results require review of the newest submission.
+- **Procedure records:** documented indication, benefits, risks, alternatives, estimated cost and aftercare; patient agree/decline decisions and their history; clinician completion and outcome records. These record a discussion and decision, not a validated legal e-signature.
+- **PDF reports:** private uploads up to 5 MB, original-file retention, source/author/date metadata, SHA-256 file fingerprints, and authorized downloads. Uploading a report does not interpret its medical contents.
 - **Treatment communication:** clinician-entered medication instructions, schedules, duration, expectations, costs, precautions, and follow-up dates. Patients can review both active and completed plans.
 - **Follow-up:** daily patient-reported adherence and wellbeing check-ins, in-app clinician/patient messages, and overdue-review lists.
 - **Billing:** itemized invoices, exact integer-paise arithmetic, recorded cash/card/UPI/bank payments, partial balances, printable invoices, and private patient invoice access. Invoice and payment retries are idempotent.
@@ -47,12 +50,12 @@ These are intentionally public **development-only credentials**. Production star
 
 1. Open the public clinic and explore the doctor profiles.
 2. Create a patient account, prepare a history, and book an available future slot.
-3. Sign in as Doctor, find the patient, and add a consultation note and care plan.
-4. Return to the patient account to view the plan, report a daily check-in, and send a message.
-5. Use the clinic follow-up list to review the record and reply.
+3. Sign in as Doctor, find the patient, and add a consultation note, care plan, and investigation request.
+4. Return to the patient account to view the plan, report a daily check-in, send a message, and share a PDF result under **My health record → Tests & procedures**.
+5. Review the result as Doctor and explicitly publish the patient-facing summary. Use the clinic follow-up list to review the record and reply.
 6. Create an invoice in Billing, record a payment already received, and view the balance in the patient portal.
 
-Reception can manage appointments, demographics, and billing. Clinicians can access clinic-wide clinical records. Administrators additionally manage accounts, configuration, and the audit log. Patients can access only their own protected records. Internal consultation notes remain clinician-only; structured care plans carry the patient-facing instructions.
+Reception can manage appointments, demographics, and billing. Clinicians can access clinic-wide clinical records. Administrators additionally manage accounts, configuration, and the audit log. Patients can access only their own protected records. Internal consultation notes, their amendments, and unpublished investigation reviews remain clinician-only; structured care plans and published reviews carry the patient-facing instructions.
 
 If reception registers a patient first, an administrator can use **Clinic settings → Your team → Patient portal access** after verifying identity. This links an account to the existing record; the system never links records just because an unverified email matches. Newly provisioned staff and patient accounts must replace their initial password before accessing private workspaces. Existing demo accounts are ready to explore without this step.
 
@@ -64,6 +67,14 @@ In **Accounts & access**, an administrator can suspend access, restore an accoun
 
 Every signed-in person can use **Account & security** to change their password, see their active browser sessions, and end sessions they no longer need. Session labels describe the browser family; they are not verified device identities or locations.
 
+## Continue a documented care journey
+
+An investigation connects the clinician’s request to submitted results and a separate clinical review. Patients can upload a PDF directly while sharing a result, or select reports already in their private record. Results remain submitted information until reviewed; the platform produces no automatic interpretation. A clinician can retain an internal review and publish it later. Patients only receive published summaries, with the reviewing clinician and date shown.
+
+For a planned procedure, the patient can review the clinician’s information and record agreement or decline in the portal. A clinician can instead record an in-person or telephone discussion with a note and explicit confirmation of the patient’s decision. Decisions are retained in chronological order. Completing a procedure requires the latest decision to be agreement, and records the outcome and aftercare. A patient may change their choice while the procedure remains planned; completed or cancelled records cannot be silently rewritten.
+
+Consultation corrections use attributed amendments with a reason, preserving the original note. Patients do not see these internal notes or amendments. PDF files remain separate from interpretation and download as attachments; the platform neither embeds them nor claims malware scanning or extraction of their contents.
+
 ## Verify
 
 ```sh
@@ -71,11 +82,14 @@ npm run typecheck
 npm test
 npm run build
 npm run test:e2e
+npm run test:production
 ```
 
-API tests use isolated databases. Browser tests start separate servers on ports **5183 / 3011**, create a temporary synthetic database, and clean it up on exit. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+API tests use isolated databases. Browser tests run separate operations and care projects on frontend/API port pairs **5183 / 3011** and **5184 / 3012**, each with a temporary synthetic database that is removed on exit. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
 
-The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions.
+The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards.
+
+After building, `npm run test:production` starts an isolated production service with a fresh temporary database and generated administrator credentials. It verifies bootstrap, absence of demo data, secure cookie attributes, migrations, protected APIs, built frontend serving, and logout. It does not validate a real domain or TLS proxy. A built Docker image can be checked with `npm run test:production -- --image <image-name>`.
 
 ```sh
 npm run format        # format source with Prettier
@@ -91,17 +105,18 @@ Follow [deployment and backups](docs/DEPLOYMENT.md) for the exact setup, Docker 
 
 ## Deliberate boundaries
 
-| Area                      | Current behavior                                                                                                                                                                                                                                                                                                |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| AI, voice, diagnosis      | Structured text intake is implemented. LLMs, voice recognition, automated diagnosis, image diagnosis, and automatic drug warnings are not connected. Medical decisions remain clinician-entered.                                                                                                                |
-| Messages and reminders    | In-app messages and follow-up worklists work. Email, SMS, WhatsApp, push alarms, and background reminder delivery need provider integrations. Nothing is silently marked as externally delivered.                                                                                                               |
-| Payments                  | Records payments received elsewhere. No gateway, card collection, automated tax calculation, refunds, or subscription charging.                                                                                                                                                                                 |
-| Online visits             | Booking works; the clinic coordinates connection details. No hosted video calls.                                                                                                                                                                                                                                |
-| Scheduling                | Weekly doctor sessions, consultation modes, appointment durations, and date/time closures are configurable. Booking uses Asia/Kolkata and a 180-day horizon. No overnight sessions, external calendar synchronization, waitlist, or automatic reschedule notifications. Clinic-hours text remains display-only. |
-| Accounts                  | Local password accounts with administrator-assisted recovery and access management. No email/contact verification, automatic recovery delivery, MFA, or external SSO. Recovery identity checks and private delivery are performed by the clinic.                                                                |
-| Files and consent         | Private JPEG/PNG/WebP images and photographed reports; text investigation records. Treatment-use agreement is recorded. No PDF/video uploads, legal e-signatures, public image reuse, research permissions, or model training.                                                                                  |
-| Organization              | One clinic per deployment. Clinicians share clinic records; there is no multi-tenant isolation or assigned-doctor restriction.                                                                                                                                                                                  |
-| Native apps and workbench | Responsive web app; no separate native iOS/Android app. IPD, inventory, hospital navigation, research assistants, education simulations, clinical calculators, and outcome/reputation scoring remain future modules.                                                                                            |
-| Operational assurance     | SQLite persistence, access checks, and audit records are implemented. Hosting, disk encryption, recovery policy, monitoring, and clinical/privacy review belong to the real deployment. This repository makes no certification or regulatory-compliance claim.                                                  |
+| Area                          | Current behavior                                                                                                                                                                                                                                                                                                |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AI, voice, diagnosis          | Structured text intake is implemented. LLMs, voice recognition, automated diagnosis, image diagnosis, and automatic drug warnings are not connected. Medical decisions remain clinician-entered.                                                                                                                |
+| Messages and reminders        | In-app messages and follow-up worklists work. Email, SMS, WhatsApp, push alarms, and background reminder delivery need provider integrations. Nothing is silently marked as externally delivered.                                                                                                               |
+| Payments                      | Records payments received elsewhere. No gateway, card collection, automated tax calculation, refunds, or subscription charging.                                                                                                                                                                                 |
+| Online visits                 | Booking works; the clinic coordinates connection details. No hosted video calls.                                                                                                                                                                                                                                |
+| Scheduling                    | Weekly doctor sessions, consultation modes, appointment durations, and date/time closures are configurable. Booking uses Asia/Kolkata and a 180-day horizon. No overnight sessions, external calendar synchronization, waitlist, or automatic reschedule notifications. Clinic-hours text remains display-only. |
+| Accounts                      | Local password accounts with administrator-assisted recovery and access management. No email/contact verification, automatic recovery delivery, MFA, or external SSO. Recovery identity checks and private delivery are performed by the clinic.                                                                |
+| Investigations and procedures | Requests, results, published clinical reviews, procedure discussions/decisions, completion records, and private consultation amendments work. No laboratory-system integration, automatic result interpretation, coded procedure catalogue, or procedure-linked inventory.                                      |
+| Files and consent             | Private JPEG/PNG/WebP images and PDF reports are supported. Treatment-use permission and procedure decisions are documented. No video uploads, malware scanning, OCR, validated legal e-signature process, public image reuse, research permissions, or model training.                                         |
+| Organization                  | One clinic per deployment. Clinicians share clinic records; there is no multi-tenant isolation or assigned-doctor restriction.                                                                                                                                                                                  |
+| Native apps and workbench     | Responsive web app; no separate native iOS/Android app. IPD, inventory, hospital navigation, research assistants, education simulations, clinical calculators, and outcome/reputation scoring remain future modules.                                                                                            |
+| Operational assurance         | SQLite persistence, access checks, and audit records are implemented. Hosting, disk encryption, recovery policy, monitoring, and clinical/privacy review belong to the real deployment. This repository makes no certification or regulatory-compliance claim.                                                  |
 
 See [concept-to-release mapping](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md), and [API contract](docs/API.md) for implementation details and remaining product scope.

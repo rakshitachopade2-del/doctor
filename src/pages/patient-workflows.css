@@ -1,0 +1,375 @@
+.record-mobile-section {
+  display: none;
+}
+.patient-workflows {
+  display: grid;
+  gap: 25px;
+}
+.patient-workflows > .section-heading {
+  margin-bottom: 0;
+}
+.patient-workflows > .section-heading h2 {
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+.patient-workflows > .section-heading p {
+  line-height: 1.7;
+}
+.patient-workflow-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid #dce6d7;
+  border-radius: 12px;
+  background: #eef4e8;
+  padding: 23px;
+  gap: 20px;
+}
+.patient-workflow-overview > div {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 12px;
+  color: #526a48;
+}
+.patient-workflow-overview strong {
+  display: block;
+  color: #344f2c;
+  font-size: 22px;
+  margin-bottom: 4px;
+}
+.patient-workflow-section {
+  display: grid;
+  gap: 17px;
+}
+.patient-workflow-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+.patient-workflow-section-heading h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.patient-workflow-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.patient-workflow-card-heading h3 {
+  font-size: 20px;
+  margin: 9px 0;
+}
+.patient-workflow-card-heading .badge {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.patient-workflow-card-heading .muted {
+  margin-bottom: 0;
+  line-height: 1.7;
+}
+.patient-workflow-details {
+  display: grid;
+  gap: 18px;
+  padding: 22px 0;
+  margin: 0;
+}
+.patient-workflow-details > div {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 20px;
+}
+.patient-workflow-details dt {
+  color: #5e6e55;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.patient-workflow-details dd {
+  margin: 0;
+  color: #43563a;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.patient-workflow-details dd > svg {
+  display: inline;
+  vertical-align: middle;
+}
+.patient-workflow-card-footer {
+  border-top: 1px solid #e1e9db;
+  padding-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.patient-workflow-card-footer > span {
+  max-width: 350px;
+  line-height: 1.7;
+}
+.patient-workflow-card-footer .button {
+  flex-shrink: 0;
+}
+.patient-investigation-results {
+  border-top: 1px solid #e5ebdf;
+  margin: 2px 0 23px;
+  padding-top: 22px;
+}
+.patient-investigation-results > h4 {
+  font-size: 13px;
+  margin: 0 0 17px;
+  color: #506644;
+}
+.patient-investigation-result {
+  background: #f8faf5;
+  border: 1px solid #e2eadb;
+  border-radius: 9px;
+  padding: 20px;
+}
+.patient-investigation-result + .patient-investigation-result {
+  margin-top: 18px;
+}
+.patient-investigation-result > .row {
+  color: #526648;
+}
+.patient-investigation-result > .pre-line {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #506147;
+  margin: 12px 0;
+}
+.patient-workflow-timestamp {
+  color: #617353;
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 8px 0 14px;
+}
+.patient-linked-reports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 15px;
+}
+.patient-linked-reports .button {
+  white-space: normal;
+  text-align: left;
+}
+.patient-published-review {
+  border-left: 3px solid #85a968;
+  border-radius: 0 9px 9px 0;
+  background: #edf4e5;
+  padding: 20px;
+  margin-top: 20px;
+}
+.patient-published-review > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #456238;
+}
+.patient-published-review h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #38562c;
+}
+.patient-published-review > strong {
+  font-size: 12px;
+  color: #466039;
+}
+.patient-published-review > .pre-line {
+  font-size: 13px;
+  color: #435d36;
+  line-height: 1.8;
+  margin: 10px 0;
+}
+.patient-published-review > :last-child {
+  margin-bottom: 0;
+}
+.patient-result-attachments {
+  border: 1px solid #e0e8d9;
+  border-radius: 10px;
+  padding: 18px;
+}
+.patient-result-attachments h3 {
+  font-size: 13px;
+  margin: 0;
+}
+.patient-result-attachments > p {
+  margin: 13px 0;
+  line-height: 1.7;
+}
+.patient-result-document-list {
+  display: grid;
+  gap: 10px;
+  max-height: 230px;
+  overflow-y: auto;
+}
+.patient-result-document {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 12px;
+  background: #f4f7ef;
+  border: 1px solid #e3ebdb;
+  border-radius: 7px;
+  color: #4a613c;
+}
+.patient-result-document > input {
+  margin-top: 2px;
+}
+.patient-result-document strong {
+  display: block;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.patient-result-document small {
+  display: block;
+  font-size: 10px;
+  color: #627451;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.patient-latest-decision {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid #dce7d2;
+  background: #f1f6eb;
+  padding: 19px;
+  border-radius: 10px;
+  margin: 5px 0 22px;
+  color: #48623c;
+}
+.patient-latest-decision > svg {
+  flex-shrink: 0;
+}
+.patient-latest-decision strong {
+  font-size: 13px;
+}
+.patient-latest-decision p {
+  font-size: 12px;
+  margin: 9px 0 0;
+  line-height: 1.8;
+}
+.patient-decision-history {
+  font-size: 12px;
+  color: #576b49;
+  margin-bottom: 20px;
+}
+.patient-decision-history summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.patient-decision-history ol {
+  padding-left: 20px;
+  margin-bottom: 0;
+}
+.patient-decision-history li {
+  padding: 10px 0;
+  line-height: 1.8;
+}
+.patient-decision-history li > span {
+  display: block;
+  font-size: 11px;
+}
+.patient-decision-history p {
+  margin: 5px 0 0;
+}
+@media (max-width: 760px) {
+  .record-desktop-tabs {
+    display: none;
+  }
+  .record-mobile-section {
+    display: block;
+    margin-bottom: 22px;
+  }
+  .patient-workflows > .section-heading {
+    flex-wrap: wrap;
+  }
+  .patient-workflow-overview {
+    gap: 15px;
+    padding: 18px;
+  }
+  .patient-workflow-overview > div {
+    align-items: flex-start;
+    gap: 7px;
+    font-size: 10px;
+    line-height: 1.7;
+  }
+  .patient-workflow-overview svg {
+    width: 17px;
+    flex-shrink: 0;
+  }
+  .patient-workflow-overview strong {
+    font-size: 20px;
+  }
+  .patient-workflow-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .patient-workflow-card-heading {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .patient-workflow-card-heading h3 {
+    font-size: 19px;
+  }
+  .patient-workflow-details > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .patient-workflow-details {
+    gap: 15px;
+  }
+  .patient-workflow-details dt {
+    font-weight: 600;
+  }
+  .patient-workflow-card-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 13px;
+  }
+  .patient-workflow-card-footer .button {
+    align-self: stretch;
+  }
+  .patient-investigation-result {
+    padding: 16px;
+  }
+  .patient-investigation-result > .row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .patient-published-review {
+    padding: 16px;
+  }
+  .patient-result-attachments > .row {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 400px) {
+  .patient-workflow-overview {
+    padding: 15px;
+    gap: 9px;
+  }
+  .patient-workflow-overview > div {
+    display: block;
+  }
+  .patient-workflow-overview svg {
+    margin-bottom: 5px;
+  }
+}
+@media print {
+  .patient-workflow-overview,
+  .patient-workflow-card-footer,
+  .record-mobile-section {
+    display: none;
+  }
+  .patient-investigation-card,
+  .patient-procedure-card {
+    break-inside: avoid;
+  }
+}

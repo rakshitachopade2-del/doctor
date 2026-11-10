@@ -1,4 +1,6 @@
 import { registerOperations } from './operations.ts';
+import { registerClinical } from './clinical.ts';
+import { registerDocuments } from './documents.ts';
 import {
   initializeIdentity,
   managedAccount,
@@ -1003,7 +1005,9 @@ export function createApp(options: AppOptions = {}) {
     });
   });
   scheduling.register(app);
+  registerDocuments(app, { db, actor, patientAccess, audit, fail });
   registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });
+  registerClinical(app, { db, actor, patientAccess, clinicianId, audit, fail });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   const dist = resolve('dist');
   if (existsSync(resolve(dist, 'index.html'))) {
@@ -1020,7 +1024,7 @@ export function createApp(options: AppOptions = {}) {
     if (err.type === 'entity.too.large')
       return res
         .status(413)
-        .json({ error: 'Request is too large. Images must be 5 MB or smaller.' });
+        .json({ error: 'Request is too large. Images and reports must be 5 MB or smaller.' });
     if (err instanceof SyntaxError && err.status === 400)
       return res.status(400).json({ error: 'Invalid JSON request.' });
     if (err.message?.includes('UNIQUE constraint failed'))

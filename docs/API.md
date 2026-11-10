@@ -4,7 +4,7 @@ All paths below start with `/api`. JSON errors use `{error: string}` and an appr
 
 Requests that change state use JSON. Except for login, registration and recovery-token redemption, they require an authenticated session and the session’s `X-CSRF-Token` header. Browser-origin checks also apply. The session cookie is HTTP-only, uses `SameSite=Lax`, and is secure in production. Roles, account status and patient ownership are enforced by the server, not only the interface.
 
-Core models are in `shared/types.ts`; scheduling, identity and operations models are in `shared/scheduling.ts`, `shared/identity.ts` and `shared/operations.ts`.
+Core models are in `shared/types.ts`; scheduling, identity, operations, clinical workflows and PDF-report models are in `shared/scheduling.ts`, `shared/identity.ts`, `shared/operations.ts`, `shared/clinical.ts` and `shared/documents.ts`.
 
 Demo accounts use `DemoClinic2026!` with `doctor@derma.demo`, `reception@derma.demo`, `patient@derma.demo` and `admin@derma.demo`. Demo records are synthetic and cannot be used as a production database.
 
@@ -57,6 +57,8 @@ Defaults are Monday–Saturday, 09:00–18:00, thirty-minute appointments and bo
 
 A schedule change or closure that invalidates existing future bookings returns `409`, leaving both availability and appointments unchanged. Existing bookings must be rescheduled or cancelled first. Changing a schedule alone preserves their duration; an explicit reschedule uses the selected doctor’s current duration. Legacy appointments without `durationMinutes` are treated as thirty minutes. Removing a closure restores the hours allowed by the weekly schedule.
 
+Temporary-password sessions receive anonymous slot availability: their patient-specific busy periods are not applied, and `excludeAppointmentId` is rejected until password rotation.
+
 ## Patient records and care
 
 - `GET /dashboard` → `Dashboard` (staff; receptionist responses exclude clinical follow-up details).
@@ -74,6 +76,47 @@ A schedule change or closure that invalidates existing future bookings returns `
 - `GET /images/:id/file` → private image bytes with ownership checks.
 - `GET /messages?patientId=` → `Message[]` (clinician or owning patient).
 - `POST /messages {patientId?,body}` → `Message` (clinician or owning patient; follow-up module enabled). Messages have a 4,000-character limit and remain inside the platform.
+
+## Private PDF reports
+
+- `GET /documents?patientId=` → `PatientDocument[]` (doctor/administrator or owning patient; reception denied). Patient accounts default to their own record; clinical staff supply `patientId`.
+- `POST /documents {patientId?,title,originalName,dataUrl,consent:true}` → `PatientDocument` with `201`. Accepts canonical base64 `application/pdf` data URLs, up to 5 MB decoded, inside the existing 7 MB JSON request limit. Title and original filename have a 200-character limit. Filenames must end in `.pdf` and contain no path separators or control characters. The server validates PDF header/end markers and records the authenticated uploader, byte count and SHA-256 fingerprint.
+- `GET /documents/:id/file` → authorized PDF attachment. The server uses a generated download filename, `Content-Disposition: attachment`, `Content-Security-Policy: sandbox; default-src 'none'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`.
+
+`PatientDocument` contains `id`, `patientId`, `title`, `originalName`, `mimeType:'application/pdf'`, `sizeBytes`, `sha256`, `createdById`, `createdByName`, `createdByRole`, `createdAt`, `url` and `consent:true`. List responses contain metadata, not file bytes. Document metadata and original bytes are immutable; there is no edit/delete endpoint. PDFs use separate storage and routes from the raster image library.
+
+These checks recognize a candidate PDF; they do not sanitize or malware-scan it. Original files are downloaded rather than embedded. The fingerprint identifies the uploaded bytes, not their issuing laboratory or medical accuracy. Upload agreement records private care use and does not authorize public publication.
+
+## Investigations, procedure records and amendments
+
+`GET /patients/:id/clinical-workflows` → `PatientClinicalWorkflows` with `investigations`, `procedures` and `amendments` arrays. Doctors and administrators may inspect the clinic's records; patients receive only their own. Reception is denied. Patient responses contain no internal encounter amendments and omit every unpublished investigation-review object. Top-level arrays are newest first; nested results, reviews and procedure agreements are chronological, so the last entry is the latest.
+
+All clinical authorship below requires an account linked to a doctor profile, including administrators. An unlinked administrator can inspect authorized records but cannot create orders, clinical interpretations, amendments or procedure records. Names, identifiers, roles and timestamps are derived by the server.
+
+### Investigation orders and review
+
+- `POST /investigations {patientId,title,kind,reason,instructions,dueDate?}` → `Investigation` with `201` (linked clinician). Kind is `laboratory | pathology | imaging | other`. Reason and patient-facing instructions are required; optional due date may be `null` or today/a future date. The original order is immutable.
+- `POST /investigations/:id/results {note?,documentIds?}` → updated `Investigation` with `201` (owning patient or linked clinician). Requires a note or at least one PDF-report ID. The 0–10 document IDs must be unique and belong to the same patient. Each submission is an immutable `InvestigationResult` with authenticated `submittedById`, name, role and timestamp. Notes and raw reports are patient-visible and remain distinct from clinician interpretation.
+- `POST /investigations/:id/reviews {resultId,summary,followUp?,publishToPatient?}` → updated `Investigation` with `201` (linked clinician). The selected result must be the latest submission; a stale selection returns `409`. Summary is required. Publication defaults to `false`; explicit `publishToPatient:true` shares the interpretation. Review text is immutable; subsequent reviews are additional entries.
+- `POST /investigations/:id/reviews/:reviewId/publish {}` → updated `Investigation` (linked clinician). Explicitly shares an existing interpretation without changing its content. Repeating the publication preserves its original publication timestamp.
+- `POST /investigations/:id/cancel {reason}` → updated `Investigation` (linked clinician). Cancellation preserves history and prevents new results/reviews. A cancelled order or an investigation whose latest result is already reviewed returns `409`.
+
+Investigation status is derived: `ordered` before a result, `result-received` when the latest submission has no review, `reviewed` after a clinician reviews that latest submission, or `cancelled`. A supplemental submission returns the order to `result-received` and retains earlier results and interpretations. A reviewed result may still have no patient-visible interpretation until explicit publication. The application does not classify a result as normal/abnormal or generate a diagnosis.
+
+### Consultation amendments
+
+- `POST /encounters/:id/amendments {reason,text}` → `EncounterAmendment` with `201` (linked clinician). Both fields are required. The server derives the patient from the original encounter and records the amending doctor and timestamp. The original consultation note remains unchanged. Amendments are returned only in the clinician's workflow view and cannot be edited or deleted.
+
+### Procedure discussion and completion
+
+- `POST /procedures {patientId,appointmentId?,title,indication,benefits,risks,alternatives,aftercare,estimatedCost?}` → `ProcedureRecord` with `201` (linked clinician). Discussion fields are required, and estimated cost is descriptive text. An optional linked appointment must belong to the same patient and must not be cancelled or marked as a no-show. A procedure plan is immutable; create a new plan if its explanation changes.
+- `POST /procedures/:id/agreements {decision,method,note?,patientDecisionConfirmed?}` → updated `ProcedureRecord` with `201`. Decision is `agreed | declined`. An owning patient uses `method:'portal'`. A linked clinician may record an `in-person` or `phone` decision only with a nonempty discussion note and `patientDecisionConfirmed:true`; clinicians cannot impersonate a portal acknowledgement. Each event retains the actual recording account, role, method and timestamp.
+- `POST /procedures/:id/complete {outcome,aftercare}` → updated `ProcedureRecord` (linked clinician). The latest recorded decision must be `agreed`. Completion records the performing doctor and server timestamp and requires outcome and aftercare. If linked to an appointment, that appointment cannot be cancelled/no-show or have a scheduled start time in the future.
+- `POST /procedures/:id/cancel {reason}` → updated `ProcedureRecord` (linked clinician).
+
+A procedure starts as `planned`; `completed` and `cancelled` are terminal. Patient decisions can change while planned, and all earlier decisions remain visible. Agreement checks and completion/cancellation run transactionally. Completing or cancelling a procedure neither changes its appointment nor creates a billing charge. No separate procedure time slot is reserved.
+
+These records capture a clinician's explanation and a reported patient decision. They are not an electronic-signature workflow or a certification of legally sufficient informed consent. There is no automatic treatment recommendation, drug-warning validation, laboratory connection or interpretation of report contents. Long clinical text fields have an 8,000-character limit.
 
 ## Billing and approved knowledge
 

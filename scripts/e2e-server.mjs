@@ -3,14 +3,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const directory = mkdtempSync(join(tmpdir(), 'derma-browser-'));
+const apiPort = process.env.E2E_API_PORT || '3011';
+const vitePort = process.env.E2E_VITE_PORT || '5183';
 const env = {
   ...process.env,
   NODE_ENV: 'test',
   DEMO_MODE: 'true',
   DATABASE_PATH: join(directory, 'clinic.sqlite'),
-  PORT: '3011',
-  API_PORT: '3011',
-  VITE_PORT: '5183',
+  PORT: apiPort,
+  API_PORT: apiPort,
+  VITE_PORT: vitePort,
 };
 const commands = [
   ['--import', 'tsx', 'server/index.ts'],

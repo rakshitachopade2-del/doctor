@@ -46,6 +46,8 @@ import {
   PageHeader,
 } from '../components/ui';
 import './patient.css';
+import { DocumentsPanel } from '../components/DocumentsPanel';
+import { PatientWorkflowPanel } from './PatientWorkflowPanel';
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -1471,6 +1473,14 @@ function PatientRecordView({ patientId }: { patientId: string }) {
     clinicalImages.find((value) => value.id === firstImage) ?? clinicalImages[0];
   const selectedSecond =
     clinicalImages.find((value) => value.id === secondImage) ?? clinicalImages[1];
+  const sections = [
+    ['timeline', 'Care timeline'],
+    ['plans', 'Treatment plans'],
+    ['workflows', 'Tests & procedures'],
+    ['history', 'Shared history'],
+    ['images', 'Images & reports'],
+    ['visits', 'All appointments'],
+  ];
   const timeline = [
     ...data.intakes.map((entry) => ({
       id: entry.id,
@@ -1525,14 +1535,19 @@ function PatientRecordView({ patientId }: { patientId: string }) {
           <strong>{data.patient.allergies || 'Not recorded'}</strong>
         </div>
       </Card>
-      <div className="tabs" role="tablist" aria-label="Health record sections">
-        {[
-          ['timeline', 'Care timeline'],
-          ['plans', 'Treatment plans'],
-          ['history', 'Shared history'],
-          ['images', 'Images & reports'],
-          ['visits', 'All appointments'],
-        ].map(([id, label]) => (
+      <div className="record-mobile-section">
+        <Field label="Record section">
+          <select value={tab} onChange={(event) => setTab(event.target.value)}>
+            {sections.map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div className="tabs record-desktop-tabs" role="tablist" aria-label="Health record sections">
+        {sections.map(([id, label]) => (
           <button
             key={id}
             role="tab"
@@ -1544,7 +1559,8 @@ function PatientRecordView({ patientId }: { patientId: string }) {
           </button>
         ))}
       </div>
-      <div role="tabpanel">
+      <div role="tabpanel" aria-label={sections.find(([id]) => id === tab)?.[1]}>
+        {tab === 'workflows' && <PatientWorkflowPanel patientId={patientId} />}
         {tab === 'timeline' && (
           <Card>
             {timeline.length ? (
@@ -1635,64 +1651,67 @@ function PatientRecordView({ patientId }: { patientId: string }) {
           </div>
         )}
         {tab === 'images' && (
-          <Card>
-            <div className="row between">
-              <div>
-                <h2 className="section-title">Your images & reports</h2>
-                <p className="muted">
-                  Visible to you and your clinic for care. Never published to a public profile.
-                </p>
+          <div className="stack">
+            <DocumentsPanel patientId={patientId} />
+            <Card>
+              <div className="row between">
+                <div>
+                  <h2 className="section-title">Your images & reports</h2>
+                  <p className="muted">
+                    Visible to you and your clinic for care. Never published to a public profile.
+                  </p>
+                </div>
+                <div className="row">
+                  {clinicalImages.length >= 2 && (
+                    <button className="button button-secondary" onClick={() => setCompare(true)}>
+                      Compare images
+                    </button>
+                  )}
+                  {settings.data?.modules.images && (
+                    <button className="button button-primary" onClick={() => setUpload(true)}>
+                      <ImagePlus size={17} /> Add image
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="row">
-                {clinicalImages.length >= 2 && (
-                  <button className="button button-secondary" onClick={() => setCompare(true)}>
-                    Compare images
-                  </button>
-                )}
-                {settings.data?.modules.images && (
-                  <button className="button button-primary" onClick={() => setUpload(true)}>
-                    <ImagePlus size={17} /> Add image
-                  </button>
-                )}
-              </div>
-            </div>
-            {settings.data && !settings.data.modules.images && (
-              <div className="notice">
-                Image uploads are paused. Your existing images and reports remain available.
-              </div>
-            )}
-            {data.images.length ? (
-              <div className="clinical-image-grid">
-                {data.images.map((item) => (
-                  <figure key={item.id}>
-                    <a href={item.url} target="_blank" rel="noreferrer">
-                      <img
-                        src={item.url}
-                        alt={item.caption || 'Patient clinical image'}
-                        loading="lazy"
-                      />
-                    </a>
-                    <figcaption>
-                      <strong>{item.caption}</strong>
-                      <span>
-                        {item.category === 'report' ? 'Report' : 'Clinical image'} ·{' '}
-                        {formatDate(item.createdAt.slice(0, 10))}
-                      </span>
-                    </figcaption>
-                  </figure>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                title="A home for your records"
-                description={
-                  settings.data?.modules.images
-                    ? 'Add a clinical photograph or a photographed report to share securely with your clinic.'
-                    : 'There are no images or reports in your record yet.'
-                }
-              />
-            )}
-          </Card>
+              {settings.data && !settings.data.modules.images && (
+                <div className="notice">
+                  Image uploads are paused. Your existing images and reports remain available.
+                </div>
+              )}
+              {data.images.length ? (
+                <div className="clinical-image-grid">
+                  {data.images.map((item) => (
+                    <figure key={item.id}>
+                      <a href={item.url} target="_blank" rel="noreferrer">
+                        <img
+                          src={item.url}
+                          alt={item.caption || 'Patient clinical image'}
+                          loading="lazy"
+                        />
+                      </a>
+                      <figcaption>
+                        <strong>{item.caption}</strong>
+                        <span>
+                          {item.category === 'report' ? 'Report' : 'Clinical image'} ·{' '}
+                          {formatDate(item.createdAt.slice(0, 10))}
+                        </span>
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="A home for your records"
+                  description={
+                    settings.data?.modules.images
+                      ? 'Add a clinical photograph or a photographed report to share securely with your clinic.'
+                      : 'There are no images or reports in your record yet.'
+                  }
+                />
+              )}
+            </Card>
+          </div>
         )}
         {tab === 'visits' && (
           <Card>
