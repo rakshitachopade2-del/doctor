@@ -2,6 +2,7 @@ import { registerOperations } from './operations.ts';
 import { registerClinical } from './clinical.ts';
 import { createFollowUp } from './follow-up.ts';
 import { createWaitlist } from './waitlist.ts';
+import { registerInsights } from './insights.ts';
 import { registerDocuments } from './documents.ts';
 import {
   initializeActivity,
@@ -1116,6 +1117,7 @@ export function createApp(options: AppOptions = {}) {
   registerDocuments(app, { db, actor, patientAccess, audit, fail });
   registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });
   registerClinical(app, { db, actor, patientAccess, clinicianId, audit, fail });
+  registerInsights(app, { db, actor, audit, fail });
   followUp.register(app);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   const dist = resolve('dist');

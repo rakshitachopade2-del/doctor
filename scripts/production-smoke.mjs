@@ -162,6 +162,21 @@ try {
   const followUps = await fetch(`${base}/api/follow-up-worklist`, { headers: apiHeaders });
   assert.equal(followUps.status, 200);
   assert.deepEqual(await followUps.json(), []);
+  const range = 'from=2026-01-01&to=2026-01-01';
+  const expenses = await fetch(`${base}/api/expenses?${range}`, { headers: apiHeaders });
+  assert.equal(expenses.status, 200);
+  assert.deepEqual(await expenses.json(), []);
+  const insights = await fetch(`${base}/api/insights?${range}`, { headers: apiHeaders });
+  assert.equal(insights.status, 200);
+  assert.match(insights.headers.get('cache-control'), /no-store/);
+  const report = await insights.json();
+  assert.equal(report.totals.expensesPaise, 0);
+  assert.equal(report.totals.collectionsPaise, 0);
+  assert.equal(report.daily.length, 1);
+  const exported = await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders });
+  assert.equal(exported.status, 200);
+  assert.match(exported.headers.get('content-disposition'), /attachment/);
+  assert.match(exported.headers.get('content-type'), /text\/csv/);
   assert.equal(
     (await fetch(`${base}/api/documents?patientId=missing`, { headers: apiHeaders })).status,
     404,
@@ -181,6 +196,10 @@ try {
   });
   assert.equal(logout.status, 200);
   assert.equal((await fetch(`${base}/api/accounts`, { headers: apiHeaders })).status, 401);
+  assert.equal(
+    (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
+    401,
+  );
   console.log(
     `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, security headers, logout.`,
   );

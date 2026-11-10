@@ -212,7 +212,9 @@ export function Modal({
             <X size={20} />
           </button>
         </div>
-        <div className="modal-body">{children}</div>
+        <div className="modal-body" tabIndex={0} role="region" aria-labelledby={titleId}>
+          {children}
+        </div>
       </div>
     </div>
   );

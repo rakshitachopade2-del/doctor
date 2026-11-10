@@ -26,6 +26,11 @@ export default defineConfig({
         /(?:^|\/)(?:clinic|patient|clinical-workflows|patient-workflows|follow-up|patient-follow-up|activity|patient-waitlist)\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5184' },
     },
+    {
+      name: 'reporting',
+      testMatch: /(?:^|\/)(?:insights|expenses)\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5185' },
+    },
   ],
   webServer: [
     {
@@ -37,6 +42,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3012 E2E_VITE_PORT=5184 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5184',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3013 E2E_VITE_PORT=5185 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5185',
       reuseExistingServer: false,
       timeout: 60000,
     },

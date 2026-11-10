@@ -42,6 +42,8 @@ These are intentionally public **development-only credentials**. Production star
 - **Follow-up:** daily patient-reported check-ins, worklists for due reviews and new reports, assignable clinical ownership, clinician assessments, shared next steps, requested visits, and documented completion. Reviews preserve the exact report versions considered; corrected reports return to the review queue.
 - **Activity inbox:** private in-app updates for messages, appointments, waitlist changes, invoices and received payments, patient reports, shared investigation findings, procedures, and follow-up reviews; unread counts, explicit read controls, pagination, and links to the underlying record. Reading an update does not complete a clinical review.
 - **Billing:** itemized invoices, exact integer-paise arithmetic, recorded cash/card/UPI/bank payments, partial balances, printable invoices, and private patient invoice access. Procedures can link to one invoice with staff-entered agreed charges; estimates are never charged automatically. Invoice and payment retries are idempotent.
+- **Clinic reports:** administrator date-range reports for appointment activity, invoices issued, payments recorded and incurred expenses, with daily series and aggregate CSV export. Current outstanding relates to invoices issued in the selected range.
+- **Expenses:** administrator-only expense records with exact paise amounts, categories, references, safe retries, and attributed void history that preserves the original entry.
 - **Knowledge library:** clinician-authored drafts, explicit review before public publication, search, and retained article revisions. No AI-generated clinical claims are presented as approved information.
 - **Administration:** clinic details, doctor profiles, staff accounts, optional module switches, activity logs, and verified portal access for an existing clinic patient. Pausing a module stops new activity while preserving access to existing records.
 - **Accounts and access:** searchable account management, staff-role/profile changes, suspension/restoration without deleting records, required initial-password changes, and protection against removing the last active administrator. Patients and staff cannot be converted into each other or linked to different patient records.
@@ -58,9 +60,17 @@ These are intentionally public **development-only credentials**. Production star
 6. Return to the patient account to read the new instructions and next review date. Open **Activity** for related updates; marking one read does not mark the care as reviewed.
 7. Create an invoice in Billing, record a payment already received, and view the balance in the patient portal.
 
-Reception can manage appointments, demographics, and billing. Clinicians can access clinic-wide clinical records. Administrators additionally manage accounts, configuration, and the audit log. Patients can access only their own protected records. Internal consultation notes, their amendments, follow-up assessments and report snapshots, and unpublished investigation reviews remain clinician-only; structured care plans and published reviews carry the patient-facing instructions.
+Reception can manage appointments, demographics, and billing. Clinicians can access clinic-wide clinical records. Administrators additionally manage accounts, configuration, expense records, clinic reports and the audit log. Patients can access only their own protected records. Internal consultation notes, their amendments, follow-up assessments and report snapshots, and unpublished investigation reviews remain clinician-only; structured care plans and published reviews carry the patient-facing instructions.
 
 If reception registers a patient first, an administrator can use **Clinic settings → Your team → Patient portal access** after verifying identity. This links an account to the existing record; the system never links records just because an unverified email matches. Newly provisioned staff and patient accounts must replace their initial password before accessing private workspaces. Existing demo accounts are ready to explore without this step.
+
+## Review clinic activity and expenses
+
+Administrators can open **Clinic reports** to choose a date range, compare daily activity and download an aggregate CSV. Appointment counts use scheduled dates and current statuses. Issued invoices use their creation date; recorded collections use the date staff entered each received payment. Expenses use the incurred date entered in the ledger. Reporting dates use Asia/Kolkata.
+
+The outstanding figure is the current balance of invoices issued within the selected range, not a reconstructed balance on that period’s last day. Collections can relate to older invoices. Reports keep these measures separate and do not present them as profit or clinical outcomes. Exports contain aggregate amounts and counts, without patient identities or individual expense descriptions.
+
+Use **Expenses** to record a clinic expense with its date, category, amount and optional reference. If an entry is mistaken, void it with a reason and record a replacement if needed. The original amount, author and void history remain available. A voided expense is excluded from current aggregates; it does not reverse a bank transaction or prove that money was returned.
 
 ## Set availability and manage access
 

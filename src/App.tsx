@@ -11,6 +11,7 @@ import {
 } from 'react-router-dom';
 import {
   Activity,
+  BarChart3,
   Bell,
   ArrowUpRight,
   CalendarDays,
@@ -30,6 +31,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  Wallet,
   X,
 } from 'lucide-react';
 import { useSession, api, useToast, useResource } from './lib';
@@ -102,6 +104,12 @@ const ActivityPage = lazy(() =>
 );
 const WaitlistPage = lazy(() =>
   import('./pages/WaitlistPage').then((module) => ({ default: module.WaitlistPage })),
+);
+const InsightsPage = lazy(() =>
+  import('./pages/InsightsPage').then((module) => ({ default: module.InsightsPage })),
+);
+const ExpensesPage = lazy(() =>
+  import('./pages/ExpensesPage').then((module) => ({ default: module.ExpensesPage })),
 );
 import type { Role } from '../shared/types';
 
@@ -185,6 +193,13 @@ const staffNav = [
   { to: '/clinic/billing', label: 'Billing', icon: Receipt },
   { to: '/clinic/knowledge', label: 'Knowledge library', icon: BookOpen, clinical: true },
 ];
+const adminPageLabels: Record<string, string> = {
+  '/clinic/insights': 'Clinic reports',
+  '/clinic/expenses': 'Expenses',
+  '/clinic/accounts': 'Accounts & access',
+  '/clinic/settings': 'Clinic settings',
+  '/clinic/audit': 'Activity log',
+};
 function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
   const { session, refresh } = useSession();
   const toast = useToast();
@@ -288,6 +303,22 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
             <p className="nav-caption">MANAGE</p>
             <nav className="sidebar-nav" aria-label="Administration">
               <NavLink
+                to="/clinic/insights"
+                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => setMenu(false)}
+              >
+                <BarChart3 size={19} />
+                Clinic reports
+              </NavLink>
+              <NavLink
+                to="/clinic/expenses"
+                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => setMenu(false)}
+              >
+                <Wallet size={19} />
+                Expenses
+              </NavLink>
+              <NavLink
                 to="/clinic/settings"
                 className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
                 onClick={() => setMenu(false)}
@@ -354,11 +385,8 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
                 {nav.find((n) =>
                   n.end ? location.pathname === n.to : location.pathname.startsWith(n.to),
                 )?.label ||
-                  (location.pathname.includes('settings')
-                    ? 'Clinic settings'
-                    : location.pathname.includes('audit')
-                      ? 'Activity log'
-                      : 'Account')}
+                  adminPageLabels[location.pathname] ||
+                  'Account'}
               </strong>
             </span>
           </div>
@@ -464,6 +492,22 @@ export function App() {
           />
           <Route path="clinic/billing" element={<BillingPage />} />
           <Route path="clinic/waitlist" element={<WaitlistPage />} />
+          <Route
+            path="clinic/insights"
+            element={
+              <Guard roles={['admin']}>
+                <InsightsPage />
+              </Guard>
+            }
+          />
+          <Route
+            path="clinic/expenses"
+            element={
+              <Guard roles={['admin']}>
+                <ExpensesPage />
+              </Guard>
+            }
+          />
           <Route
             path="clinic/activity"
             element={

@@ -45,6 +45,9 @@ flowchart LR
 | `server/documents.ts`                 | Immutable PDF originals, upload provenance, patient-scoped attachment downloads        |
 | `server/clinical.ts`                  | Investigation review/publication, procedure agreement/completion, encounter amendments |
 | `server/follow-up.ts`                 | Review snapshots, owner assignments, optimistic revisions, plan state and worklist     |
+| `server/insights.ts`                  | Immutable expenses and voids, administrator aggregates and private CSV exports         |
+| `src/pages/InsightsPage.tsx`          | Date-range reporting, daily charts/tables and aggregate export                         |
+| `src/pages/ExpensesPage.tsx`          | Administrator expense creation, filtering and void history                             |
 | `server/activity.ts`                  | Transactional recipient notifications, event deduplication and scoped read receipts    |
 | `shared/`                             | Frontend/backend data contracts                                                        |
 | `tests/`                              | Isolated API tests and real-browser workflows                                          |
@@ -156,6 +159,14 @@ Only active accounts receive newly created events. Patient notifications resolve
 Feed reads are scoped by current account ID and audience, with an additional patient-ID condition for patients. Reception's scope is empty, and current authorization still applies to old entries after a role change. Feed content uses safe server-generated summaries and internal links; message bodies, internal assessments and unpublished interpretations are not copied into notifications.
 
 Pagination resolves an opaque item ID to a recipient-scoped SQLite row position and returns older rows. New arrivals do not shift an existing cursor. `unreadCount` covers the entire permitted feed. Listing has no read side effect. Individual reads preserve the first receipt timestamp; bulk reads mark all eligible older rows through the supplied snapshot ID, including unloaded pages, while preserving newer arrivals. Receipt updates and their audit entries commit together; audit failures leave items unread. Read state is separate from clinical review state and does not clear a follow-up worklist entry. The inbox provides in-app updates only, with no scheduled reminders, email/SMS/push integration or emergency-monitoring service.
+
+## Expense evidence and reporting periods
+
+`expenses` stores immutable original entries and a unique request UUID. `expenseVoids` adds one immutable, attributed correction per expense with a required reason. Database triggers reject updates and deletion of both originals and corrections. Immediate transactions couple each create/void with its audit entry; an identical create retry returns the original record, and changed request details conflict. A void never initiates a bank operation or edits an invoice/payment. Administrators alone can access the ledger and report endpoints.
+
+The aggregation function converts invoice and payment timestamps to Asia/Kolkata dates, uses appointment scheduled dates and expense incurred dates, and fills every selected day with a result. Ranges are real, ordered dates with at most 366 inclusive days. Counts use current appointment states and expense void state. Current outstanding is limited to the cohort of invoices issued in the range; payment totals use their recording date independently of invoice issue date. Safe integer aggregation preserves paise without floating-point currency arithmetic and rejects totals outside representable bounds.
+
+JSON and CSV reuse the same aggregate builder. CSV contains fixed report sections and aggregate amounts/counts, without patient identifiers or expense free text. Values use CSV quoting and formula-prefix protection. Read/export audit events record the requested period. There is no asynchronous warehouse, historical as-of ledger reconstruction, revenue-recognition, tax or profit calculation. The UI explains the selected dates and separates invoices, recorded collections and incurred expenses.
 
 ## Verification strategy
 
