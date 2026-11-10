@@ -36,7 +36,10 @@ export async function api<T>(
     .json()
     .catch(() => ({ error: 'The server returned an unexpected response. Please try again.' }));
   if (!response.ok) {
-    if (response.status === 401 && !path.startsWith('/api/auth/')) {
+    if (
+      response.status === 401 &&
+      !['/api/auth/login', '/api/auth/register', '/api/auth/recover'].includes(path)
+    ) {
       csrfToken = '';
       window.dispatchEvent(new Event('derma:session-expired'));
     }

@@ -689,6 +689,16 @@ test('unlinked administrators cannot attribute clinical documents to an arbitrar
     ).res.status,
     200,
   );
+  assert.equal(
+    (
+      await call('/auth/password', {
+        method: 'POST',
+        client: unlinked,
+        body: { currentPassword: 'UnlinkedAdmin2026!', newPassword: 'RotatedAdmin2026!' },
+      })
+    ).res.status,
+    200,
+  );
   for (const path of ['/encounters', '/care-plans']) {
     const result = await call(path, {
       method: 'POST',
@@ -710,7 +720,7 @@ test('expired server sessions cannot read records or use an old CSRF token for w
   const session = await call('/auth/login', {
     method: 'POST',
     client: expired,
-    body: { email: 'unlinked-admin@example.test', password: 'UnlinkedAdmin2026!' },
+    body: { email: 'unlinked-admin@example.test', password: 'RotatedAdmin2026!' },
   });
   assert.equal(session.res.status, 200);
   app.locals.db

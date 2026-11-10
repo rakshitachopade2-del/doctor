@@ -1,3 +1,4 @@
+import { useSearchParams, Link } from 'react-router-dom';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   Check,
@@ -31,7 +32,8 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<'doctor' | 'user' | null>(null);
   const [editing, setEditing] = useState<Doctor | null>(null);
-  const [tab, setTab] = useState('clinic');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(params.get('tab') === 'team' ? 'team' : 'clinic');
   useEffect(() => {
     if (settings.data) setDraft(settings.data);
   }, [settings.data]);
@@ -168,7 +170,7 @@ export function SettingsPage() {
               </Field>
               <Field
                 label="Opening hours"
-                hint="Display information. Booking slots currently run Monday–Saturday, 09:00–17:30, every 30 minutes."
+                hint="Public information only. Appointment availability is managed in Schedules & closures."
               >
                 <input
                   value={draft.hours}
@@ -308,7 +310,10 @@ export function SettingsPage() {
             <div className="section-heading">
               <div>
                 <h2>Workspace access</h2>
-                <p className="muted">Each team member gets their own account and role.</p>
+                <p className="muted">
+                  Each team member gets their own account and role. Manage suspensions and recovery
+                  in Accounts & access.
+                </p>
               </div>
               <button className="button button-secondary" onClick={() => setModal('user')}>
                 <Plus size={16} />
@@ -500,7 +505,7 @@ export function SettingsPage() {
                 </Field>
                 <Field
                   label="Initial password"
-                  hint="Share securely. The team member can change it from Account & security."
+                  hint="Share securely. The team member must replace this password at first sign-in."
                 >
                   <input
                     name="password"
@@ -678,7 +683,7 @@ function PortalAccessCard() {
         </label>
         <div className="notice">
           Share the initial credentials securely with the patient. No email is sent automatically.
-          They can change the password in Account & security.
+          They must replace it with a private password at first sign-in.
         </div>
         <div>
           <button className="button button-primary" disabled={busy}>

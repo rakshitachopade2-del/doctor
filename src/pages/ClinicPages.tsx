@@ -236,7 +236,7 @@ export function AppointmentsPage() {
                   <tr key={a.id}>
                     <td>
                       <strong className="time-text">{timeLabel(a.time)}</strong>
-                      <span className="table-sub">30 min</span>
+                      <span className="table-sub">{a.durationMinutes ?? 30} min</span>
                     </td>
                     <td>
                       <div className="row">
@@ -404,12 +404,15 @@ function BookingModal({
   const [error, setError] = useState('');
   const patients = useResource<Patient[]>('/api/patients');
   const slots = useResource<string[]>(
-    doctorId && date ? `/api/slots?doctorId=${doctorId}&date=${date}` : null,
+    doctorId && date
+      ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${date}&mode=${mode}${appointment ? `&excludeAppointmentId=${encodeURIComponent(appointment.id)}` : ''}`
+      : null,
   );
+  const duration = doctors.find((d) => d.id === doctorId)?.appointmentDurationMinutes ?? 30;
   const toast = useToast();
   useEffect(() => {
     setTime('');
-  }, [date, doctorId]);
+  }, [date, doctorId, mode]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!time) return setError('Choose an available appointment time.');
@@ -476,6 +479,18 @@ function BookingModal({
             />
           </Field>
         </div>
+        {!appointment && (
+          <Field label="Consultation mode">
+            <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+              <option value="in-person">In clinic</option>
+              <option value="online">Online consultation</option>
+            </select>
+          </Field>
+        )}
+        <p className="muted small">
+          {duration}-minute {mode === 'online' ? 'online' : 'in-clinic'} appointment
+          {appointment ? ' · Rescheduling uses the doctor’s current appointment length.' : ''}
+        </p>
         <Field label="Available times · IST">
           {slots.loading ? (
             <p className="muted">Checking availability…</p>
@@ -503,12 +518,6 @@ function BookingModal({
         </Field>
         {!appointment && (
           <>
-            <Field label="Consultation mode">
-              <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-                <option value="in-person">In clinic</option>
-                <option value="online">Online consultation</option>
-              </select>
-            </Field>
             <Field label="Reason for visit">
               <textarea
                 required

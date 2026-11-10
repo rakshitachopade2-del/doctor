@@ -1,56 +1,95 @@
 # Application contract
 
-All JSON API paths start `/api`. Errors: `{error: string}` with proper status. Successful list endpoints return arrays. Dates are YYYY-MM-DD in Asia/Kolkata; times HH:mm (24 hour). Types are in shared/types.ts. All writes except login/register require session `X-CSRF-Token` header. Session cookie is HTTP-only. Role and ownership are enforced on server. Demo accounts all use password `DemoClinic2026!` and emails doctor@derma.demo, reception@derma.demo, patient@derma.demo, admin@derma.demo. Synthetic data only.
+All paths below start with `/api`. JSON errors use `{error: string}` and an appropriate HTTP status. List endpoints return arrays unless an object shape is stated. Calendar dates use `YYYY-MM-DD`; schedule times use `HH:mm` in `Asia/Kolkata`. Event timestamps and session expiry values are ISO timestamps.
 
-- GET /session => Session
-- POST /auth/login {email,password} => Session
-- POST /auth/register {name,email,password,phone,dob,gender} => Session (patient only)
-- POST /auth/logout => {ok:true}
-- GET /doctors => Doctor[] (public)
-- GET /settings => ClinicSettings (public safe fields)
-- PATCH /settings => ClinicSettings (admin; editable fields matching type)
-- GET /slots?doctorId=&date= => string[] available start times (public)
-- GET /dashboard => Dashboard (staff)
-- GET /patients?search= => Patient[] (staff; reception demographics only)
-- POST /patients {name,email,phone,dob,gender,allergies} => Patient (staff)
-- GET /patients/:id => PatientRecord (doctor/admin or own patient; reception denied)
-- GET /appointments?date=&doctorId= => Appointment[] (staff or own patient)
-- POST /appointments {patientId?,doctorId,date,time,mode,reason} => Appointment (own patient or staff)
-- PATCH /appointments/:id {status?,date?,time?,doctorId?} => Appointment (staff valid transitions; patient cancel/reschedule own)
-- GET /appointments/:id/calendar => text/calendar (authorized)
-- POST /intakes {patientId?, concern,location,duration,symptoms,triggers,previousTreatment,medications,allergies,goals,consent:true} => Intake (patient own or clinician)
-- POST /encounters {patientId,appointmentId?,history,examination,assessment,investigations,plan} => Encounter (doctor/admin)
-- GET /care-plans => CarePlan[] (doctor/admin or own patient)
-- POST /care-plans {patientId,title,instructions,expectations,warnings,cost,startDate,endDate,followUpDate,medications} => CarePlan (doctor/admin)
-- PATCH /care-plans/:id {status} => CarePlan (doctor/admin)
-- POST /check-ins {carePlanId,date,adherence,feeling,note} => CheckIn (own patient; one per plan/day upsert)
-- POST /images {patientId?,caption,category,consent:true,dataUrl} => ClinicalImage (own patient or clinician; bounded real JPEG/PNG/WebP)
-- GET /images/:id/file => private file with ownership checks
-- GET /messages?patientId= => Message[] (clinician or own patient)
-- POST /messages {patientId?,body} => Message (clinician or own patient)
-- GET /audit => AuditEntry[] (admin)
-- GET /health => {status:'ok'}
+Requests that change state use JSON. Except for login, registration and recovery-token redemption, they require an authenticated session and the session’s `X-CSRF-Token` header. Browser-origin checks also apply. The session cookie is HTTP-only, uses `SameSite=Lax`, and is secure in production. Roles, account status and patient ownership are enforced by the server, not only the interface.
 
-Frontend shared tools in src/lib.tsx: `api<T>(path, {method?,body?})`, `useSession()` => `{session,refresh}`, `useResource<T>(path)` => `{data,loading,error,reload}`, `useToast()` => `(message, type?:'success'|'error')=>void`, `today()`, `formatDate(date)`, `money(number)`. api path includes `/api`. Components src/components/ui.tsx: `PageHeader({eyebrow?,title,description?,actions?})`, `Card({children,className?})`, `Badge({children,tone?})`, `Avatar({name,color?,size?})`, `EmptyState({title,description?,action?})`, `Modal({title,onClose,children})`, `Field({label,children,hint?})`, `Loading`, `ErrorState({message,retry?})`. Use native HTML forms/buttons + global classes button, button-primary, button-secondary, button-ghost, button-small, input, select, textarea, form-grid, stack, grid-2, grid-3, card, muted, row, between, section-title, table-wrap, data-table, notice, metric-grid, metric-card, pill, segmented, tabs. Shared styling lives in `src/styles.css`; each page family has its own stylesheet.
+Core models are in `shared/types.ts`; scheduling, identity and operations models are in `shared/scheduling.ts`, `shared/identity.ts` and `shared/operations.ts`.
 
-Frontend routes: `/` public discovery; `/login`; `/register`; `/book` booking; `/intake` structured intake; `/my-care` patient home; `/my-care/record` patient record; `/my-care/messages` messages; `/clinic` staff dashboard; `/clinic/appointments`; `/clinic/patients`; `/clinic/patients/:id`; `/clinic/follow-ups`; `/clinic/settings`; `/clinic/audit`. The frontend is divided into shell, authentication, clinic operations, patient care, and administration pages.
+Demo accounts use `DemoClinic2026!` with `doctor@derma.demo`, `reception@derma.demo`, `patient@derma.demo` and `admin@derma.demo`. Demo records are synthetic and cannot be used as a production database.
 
-## Administration and operations
+## Authentication and account lifecycle
 
-Password creation/change requires 12–128 characters. Staff-created patient records may omit email and date of birth; patient registration requires both. Appointment slots run Monday–Saturday, 09:00–17:30 IST, for the next 180 days. Internal encounters are omitted from patient-facing record responses.
+- `GET /session` → `Session` (`user`, optional `csrfToken`, `demoMode`). Account data includes normalized `active` and `mustChangePassword` flags.
+- `POST /auth/login {email,password}` → `Session`. Inactive accounts cannot sign in. A temporary-password account receives a restricted session until its password is changed.
+- `POST /auth/register {name,email,password,phone,dob,gender}` → `Session`; creates a new patient and patient account. Email and date of birth are required.
+- `POST /auth/logout` → `{ok:true}`; ends the current session.
+- `POST /auth/password {currentPassword,newPassword}` → `{ok:true}`. Passwords require 12–128 characters, and the new password must differ from the current one. Clears the initial-password requirement, ends other sessions and invalidates outstanding recovery grants.
+- `GET /auth/sessions` → `AccountSession[]` for the current account: opaque `id`, `createdAt`, `expiresAt`, `current`, and coarse browser `label`. Sessions expire twelve hours after creation.
+- `POST /auth/sessions/revoke-others {}` → `{ok:true,revoked:number}`.
+- `DELETE /auth/sessions/:id {}` → `{ok:true}`; only the account’s own sessions can be revoked. Revoking the current session also clears its cookie.
+- `GET /accounts?search=&role=` → `ManagedAccount[]` (administrator). Search matches name/email; role is one of `admin`, `doctor`, `receptionist`, `patient`.
+- `PATCH /accounts/:id {name?,role?,doctorId?:string|null,active?}` → `ManagedAccount` (administrator). Role, linked-profile or active-status changes revoke all target sessions and recovery grants. A doctor role requires a valid doctor profile; a receptionist cannot have one. Patient/staff conversion and patient relinking are rejected. Self-suspension is rejected, and removing the final active administrator returns `409`.
+- `POST /accounts/:id/recovery {identityVerified:true}` → `RecoveryGrant` (`token`, `expiresAt`) (administrator, active target account only). The 64-character token is returned once, stored only as a digest, expires after thirty minutes and replaces any earlier grant for that account. Issuing a grant does not itself end existing sessions.
+- `POST /auth/recover {token,password}` → `{ok:true}` (no session or CSRF token required). Redeems a valid grant once, changes the password, clears the initial-password requirement and ends all target-account sessions and recovery grants. It does not sign the account in. Invalid, expired and inactive-account grants use a generic error.
 
-- GET /users => User[] (admin)
-- POST /users {name,email,password,role,doctorId?} => User (admin; doctor role requires a profile)
-- POST /doctors, PATCH /doctors/:id => Doctor (admin; full profile)
-- POST /auth/password {currentPassword,newPassword} => {ok:true}; invalidates other sessions
-- POST /patients/:id/portal-account {email,password,identityVerified:true} => User (admin; requires unlinked record and unused email)
-- GET /invoices => Invoice[] (staff or own patient)
-- POST /invoices {patientId,items:[{description,quantity,unitAmountPaise}],requestId?} => Invoice (staff). Integer money; optional UUID requestId supports safe replay.
-- GET /invoices/:id => {invoice,payments} (staff or owning patient)
-- POST /invoices/:id/payments {amountPaise,method,reference?,requestId} => {invoice,payments} (staff). UUID requestId required. Methods: cash/card/upi/bank. Identical retries return the original payment state; changed request content is rejected.
-- GET /knowledge => published KnowledgeArticle[] (public)
-- GET /knowledge/manage => KnowledgeArticle[] (clinician)
-- POST /knowledge {title,category,body} => draft KnowledgeArticle (clinician)
-- PATCH /knowledge/:id {title?,category?,body?,status?} => KnowledgeArticle (clinician). Edited content becomes draft unless explicitly reapproved with status:published.
+Recovery links are shared manually after the clinic verifies identity. The frontend reads the token from `/recover#token=...` and removes it from the address bar. The server does not send recovery email or SMS. Authentication, password changes and recovery actions are rate-limited.
 
-Operation models are in `shared/operations.ts`. Additional frontend routes: `/clinic/billing`, `/my-care/invoices`, `/clinic/knowledge`, `/library`, `/my-care/library`, `/account`.
+Restricted temporary-password sessions can change their password, sign out or manage their own sessions. They cannot read private clinic/patient data or perform workspace operations. Public discovery/settings/availability/knowledge reads remain available.
+
+## Administration and public configuration
+
+- `GET /users` → normalized account data (administrator; retained for staff and portal setup).
+- `POST /users {name,email,password,role,doctorId?}` → `User` (administrator). Roles are `doctor`, `receptionist` or `admin`; doctors require a profile. New accounts have `active:true` and `mustChangePassword:true`.
+- `GET /doctors` → `Doctor[]` (public). Each profile includes its current `appointmentDurationMinutes`.
+- `POST /doctors`, `PATCH /doctors/:id` → `Doctor` (administrator; full profile: name, title, qualifications, specialties, experience, fee, bio, languages, optional color).
+- `GET /settings` → `ClinicSettings` (public fields only).
+- `PATCH /settings` → `ClinicSettings` (administrator; partial clinic fields). Timezone remains `Asia/Kolkata`; module settings cover `intake`, `images` and `followUp`.
+- `GET /audit` → `AuditEntry[]` (administrator).
+- `GET /health` → `{status:'ok'}`.
+
+Disabling a module pauses its new activity. Existing records remain readable within the usual permissions. The clinic’s public `hours` string is descriptive; bookable hours are configured by scheduling endpoints.
+
+## Availability and appointments
+
+- `GET /scheduling` → `SchedulingData` (`schedules`, `closures`, `timezone`, `bookingWindowDays`) (staff). Includes an effective schedule for every doctor, including defaults.
+- `GET /schedules/:doctorId` → `DoctorSchedule` (staff).
+- `PUT /schedules/:doctorId {durationMinutes,windows}` → `DoctorSchedule` (administrator, or doctor managing their own profile). `durationMinutes` is `15 | 20 | 30 | 45 | 60`. Each window is `{day,start,end,mode}`: day `0` is Sunday through `6` Saturday, and mode is `in-person | online | both`. Empty windows close all weekly availability. Sessions must not overlap on a day, even across different modes, and each must fit at least one appointment. Saved windows are sorted by day/start.
+- `POST /schedule-closures {doctorId,startDate,endDate,startTime,endTime,reason}` → `ScheduleClosure` (administrator, or doctor for their own profile). `doctorId:null` applies to the entire clinic and requires an administrator. Both times `null` mean all day; otherwise the same start/end interval applies on each included date. End date must not precede start date or today. The end time must be later on the same day; overnight intervals are not supported.
+- `DELETE /schedule-closures/:id {}` → `{ok:true}` (administrator or the closure’s owning doctor).
+- `GET /slots?doctorId=&date=&mode=&excludeAppointmentId=` → available start-time strings. Public reads omit `excludeAppointmentId`; supplying it requires access to that appointment and excludes its current reservation when rescheduling. Optional mode is `in-person` or `online`. Signed-in patients’ own overlapping appointments are also filtered.
+- `GET /appointments?date=&doctorId=` → `Appointment[]` (staff or owning patient).
+- `POST /appointments {patientId?,doctorId,date,time,mode,reason}` → `Appointment` (staff or owning patient). The server assigns the selected doctor’s current appointment duration.
+- `PATCH /appointments/:id {status?,date?,time?,doctorId?,mode?}` → `Appointment`. Rescheduling is allowed only while scheduled and cannot be combined with a non-scheduled status change. Patients may reschedule or cancel their own scheduled appointments. Clinic states follow the allowed transition graph; only clinicians can start or complete a consultation.
+- `GET /appointments/:id/calendar` → authorized `.ics` download, using the appointment’s recorded duration and IST start time.
+
+Defaults are Monday–Saturday, 09:00–18:00, thirty-minute appointments and both consultation modes. Configured schedules may use other weekdays and multiple daily sessions. The booking horizon is currently 180 days; past times are never offered. The server checks full interval overlap for doctor and patient inside a transaction, including older appointments of a different length.
+
+A schedule change or closure that invalidates existing future bookings returns `409`, leaving both availability and appointments unchanged. Existing bookings must be rescheduled or cancelled first. Changing a schedule alone preserves their duration; an explicit reschedule uses the selected doctor’s current duration. Legacy appointments without `durationMinutes` are treated as thirty minutes. Removing a closure restores the hours allowed by the weekly schedule.
+
+## Patient records and care
+
+- `GET /dashboard` → `Dashboard` (staff; receptionist responses exclude clinical follow-up details).
+- `GET /patients?search=` → `Patient[]` (staff; receptionist responses contain demographics only).
+- `POST /patients {name,email,phone,dob,gender,allergies}` → `Patient` (staff). Walk-in records may use empty email/date of birth; reception cannot enter clinical allergies.
+- `GET /patients/:id` → `PatientRecord` (clinician or owning patient; reception denied). Internal encounters are omitted from patient responses.
+- `POST /patients/:id/portal-account {email,password,identityVerified:true}` → `User` (administrator). Requires an unlinked patient record and unused email; creates an active account requiring an initial-password change. Existing accounts cannot be relinked through this endpoint.
+- `POST /intakes {patientId?,concern,location,duration,symptoms,triggers,previousTreatment,medications,allergies,goals,consent:true}` → `Intake` (owning patient or clinician; intake module must be enabled).
+- `POST /encounters {patientId,appointmentId?,history,examination,assessment,investigations,plan}` → `Encounter` (clinician with a linked doctor profile). Notes are immutable; a linked appointment must belong to the same patient.
+- `GET /care-plans` → `CarePlan[]` (clinician or owning patient).
+- `POST /care-plans {patientId,title,instructions,expectations,warnings,cost,startDate,endDate,followUpDate,medications}` → `CarePlan` (clinician with a linked doctor profile). Each medication has name, instructions, schedule, duration and warnings.
+- `PATCH /care-plans/:id {status}` → `CarePlan` (clinician); status is `active` or `completed`.
+- `POST /check-ins {carePlanId,date,adherence,feeling,note}` → `CheckIn` (owning patient, active plan, follow-up module enabled). One per plan/day, updated on repeat; dates must be within the plan and not in the future. Adherence is `taken | partial | missed`; feeling is `better | same | worse`.
+- `POST /images {patientId?,caption,category,consent:true,dataUrl}` → `ClinicalImage` (owning patient or clinician; image module enabled). Category is `clinical` or `report`. Private JPEG/PNG/WebP images are limited to 5 MB and checked for a matching file signature.
+- `GET /images/:id/file` → private image bytes with ownership checks.
+- `GET /messages?patientId=` → `Message[]` (clinician or owning patient).
+- `POST /messages {patientId?,body}` → `Message` (clinician or owning patient; follow-up module enabled). Messages have a 4,000-character limit and remain inside the platform.
+
+## Billing and approved knowledge
+
+- `GET /invoices` → `Invoice[]` (staff or owning patient).
+- `POST /invoices {patientId,items:[{description,quantity,unitAmountPaise}],requestId?}` → `Invoice` (staff). Money uses integer paise; optional UUID request ID supports safe replay.
+- `GET /invoices/:id` → `{invoice,payments}` (staff or owning patient).
+- `POST /invoices/:id/payments {amountPaise,method,reference?,requestId}` → `{invoice,payments}` (staff). UUID request ID is required. Methods are `cash | card | upi | bank`. Identical retries reuse the existing payment without recording another receipt; changed request content and overpayment are rejected. This records a payment received elsewhere; it does not charge a payment provider.
+- `GET /knowledge` → published `KnowledgeArticle[]` (public).
+- `GET /knowledge/manage` → all `KnowledgeArticle[]` (clinician).
+- `POST /knowledge {title,category,body}` → draft `KnowledgeArticle` (clinician).
+- `PATCH /knowledge/:id {title?,category?,body?,status?}` → `KnowledgeArticle` (clinician). Edited content becomes draft unless explicitly reapproved with `status:'published'`.
+
+## Frontend structure
+
+Public routes: `/`, `/login`, `/register`, `/recover`, `/library`; authenticated booking: `/book`; patient intake: `/intake`.
+
+Patient routes: `/my-care`, `/my-care/record`, `/my-care/messages`, `/my-care/invoices`, `/my-care/library`. Staff routes: `/clinic`, `/clinic/appointments`, `/clinic/scheduling`, `/clinic/patients`, `/clinic/billing`. Clinical-only routes: `/clinic/patients/:id`, `/clinic/follow-ups`, `/clinic/knowledge`. Administrator routes: `/clinic/settings`, `/clinic/accounts`, `/clinic/audit`. Every signed-in role can use `/account`; temporary-password sessions are directed there before entering their workspace.
+
+Shared client helpers in `src/lib.tsx` include `api<T>()`, `useSession()`, `useResource<T>()`, `useToast()`, `today()`, `formatDate()` and `money()`. Shared accessible controls live in `src/components/ui.tsx`; page-specific styles supplement `src/styles.css`.

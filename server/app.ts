@@ -1,4 +1,13 @@
 import { registerOperations } from './operations.ts';
+import {
+  initializeIdentity,
+  managedAccount,
+  registerIdentity,
+  restrictedSessionAllows,
+  sessionLabel,
+  validateAccountLinkage,
+} from './identity.ts';
+import { createScheduling } from './scheduling.ts';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -84,10 +93,6 @@ const statusSchema = z.enum([
   'cancelled',
   'no-show',
 ]);
-const slotTimes = Array.from(
-  { length: 18 },
-  (_, i) => `${String(9 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`,
-);
 const CLOSED = ['cancelled', 'no-show', 'completed'];
 const transitions: Record<AppointmentStatus, AppointmentStatus[]> = {
   scheduled: ['checked-in', 'cancelled', 'no-show'],
@@ -133,6 +138,7 @@ export function createApp(options: AppOptions = {}) {
     );
   }
   if (demoMode) seedDemo(db);
+  initializeIdentity(db);
   const app = express();
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 1);
@@ -168,9 +174,14 @@ export function createApp(options: AppOptions = {}) {
         .prepare('SELECT * FROM sessions WHERE tokenHash=? AND expiresAt>?')
         .get(tokenHash, Date.now()) as { userId: string; csrfToken: string } | undefined;
       if (session) {
-        req.user = get<User>(db, 'users', session.userId);
-        req.sessionToken = tokenHash;
-        req.csrfToken = session.csrfToken;
+        const user = get<User>(db, 'users', session.userId);
+        if (user && user.active !== false) {
+          req.user = managedAccount(user);
+          req.sessionToken = tokenHash;
+          req.csrfToken = session.csrfToken;
+        } else {
+          db.prepare('DELETE FROM sessions WHERE userId=?').run(session.userId);
+        }
       }
     }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -187,7 +198,7 @@ export function createApp(options: AppOptions = {}) {
       }
       if (origin === 'null') return next(new HttpError(403, 'This request origin is not allowed.'));
       if (!req.is('application/json')) return next(new HttpError(415, 'Use application/json.'));
-      if (!['/auth/login', '/auth/register'].includes(req.path)) {
+      if (!['/auth/login', '/auth/register', '/auth/recover'].includes(req.path)) {
         if (!req.user) return next(new HttpError(401, 'Please sign in to continue.'));
         if (!req.csrfToken || req.headers['x-csrf-token'] !== req.csrfToken)
           return next(
@@ -198,6 +209,10 @@ export function createApp(options: AppOptions = {}) {
           );
       }
     }
+    if (req.user?.mustChangePassword && !restrictedSessionAllows(req.method, req.path))
+      return next(
+        new HttpError(403, 'Change your temporary password before accessing your workspace.'),
+      );
     next();
   });
   const audit = (req: AuthRequest, action: string, entityType: string, entityId: string) =>
@@ -244,15 +259,20 @@ export function createApp(options: AppOptions = {}) {
       return fail(400, 'Sign in with a linked doctor account to document clinical care.');
     return doctorId;
   };
-  const makeSession = (user: User, res: Response) => {
+  const makeSession = (user: User, res: Response, req: Request) => {
     const token = randomBytes(32).toString('hex');
     const csrfToken = randomBytes(32).toString('hex');
     db.prepare('DELETE FROM sessions WHERE expiresAt<=?').run(Date.now());
-    db.prepare('INSERT INTO sessions(tokenHash,userId,csrfToken,expiresAt) VALUES (?,?,?,?)').run(
+    const createdAt = Date.now();
+    db.prepare(
+      'INSERT INTO sessions(tokenHash,userId,csrfToken,expiresAt,createdAt,label) VALUES (?,?,?,?,?,?)',
+    ).run(
       digest(token),
       user.id,
       csrfToken,
-      Date.now() + 12 * 3600000,
+      createdAt + 12 * 3600000,
+      createdAt,
+      sessionLabel(req.headers['user-agent']),
     );
     res.cookie('derma_session', token, {
       httpOnly: true,
@@ -261,7 +281,7 @@ export function createApp(options: AppOptions = {}) {
       maxAge: 12 * 3600000,
       path: '/',
     });
-    return { user, csrfToken, demoMode };
+    return { user: managedAccount(user), csrfToken, demoMode };
   };
   const dummyPasswordHash = hashPassword('dummy-password-for-unregistered-account');
   const limiters = new Map<string, { count: number; reset: number }>();
@@ -277,36 +297,14 @@ export function createApp(options: AppOptions = {}) {
     if (item.count > max) fail(429, 'Too many attempts. Please try again in 15 minutes.');
     if (limiters.size > 10000) for (const [k, v] of limiters) if (v.reset < now) limiters.delete(k);
   };
+  registerIdentity(app, { db, production, actor, audit, fail, rateLimit });
   const appointmentGet = (req: AuthRequest, key: string) => {
     const a = get<Appointment>(db, 'appointments', key);
     if (!a) return fail(404, 'Appointment not found.');
     patientAccess(req, a.patientId, true);
     return a;
   };
-  function validateSlot(
-    doctorId: string,
-    day: string,
-    time: string,
-    exclude?: string,
-    patientId?: string,
-  ) {
-    if (!get<Doctor>(db, 'doctors', doctorId)) fail(404, 'Doctor not found.');
-    const today = clinicToday();
-    if (day < today || day > addDays(today, 180))
-      fail(400, 'Choose a date within the next 180 days.');
-    if (new Date(`${day}T12:00:00Z`).getUTCDay() === 0)
-      fail(400, 'The clinic is closed on Sundays.');
-    if (!slotTimes.includes(time))
-      fail(400, 'Choose an available 30-minute appointment slot between 09:00 and 17:30.');
-    if (Date.parse(`${day}T${time}:00+05:30`) <= Date.now())
-      fail(400, 'This appointment time has already passed.');
-    const conflict = db
-      .prepare(
-        "SELECT id FROM appointments WHERE date=? AND time=? AND (doctorId=? OR patientId=?) AND status NOT IN ('cancelled','no-show') AND id!=?",
-      )
-      .get(day, time, doctorId, patientId ?? '', exclude ?? '');
-    if (conflict) fail(409, 'This time is already booked. Choose another available slot.');
-  }
+  const scheduling = createScheduling({ db, actor, audit, fail });
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
   app.get('/api/session', (req: AuthRequest, res) =>
     res.json({ user: req.user ?? null, csrfToken: req.csrfToken, demoMode }),
@@ -320,8 +318,9 @@ export function createApp(options: AppOptions = {}) {
     if (!verifyPassword(input.password, row?.password ?? dummyPasswordHash) || !row)
       return fail(401, 'Email or password is incorrect.');
     const user = JSON.parse(row.data) as User;
+    if (user.active === false) return fail(401, 'Email or password is incorrect.');
     audit({ ...req, user } as AuthRequest, 'signed in', 'user', user.id);
-    res.json(makeSession(user, res));
+    res.json(makeSession(user, res, req));
   });
   app.post('/api/auth/register', (req: AuthRequest, res) => {
     rateLimit(req, 'register', 10);
@@ -338,7 +337,15 @@ export function createApp(options: AppOptions = {}) {
       allergies: '',
       createdAt: nowISO(),
     };
-    const user: User = { id: id(), name: p.name, email: p.email, role: 'patient', patientId: p.id };
+    const user: User = {
+      id: id(),
+      name: p.name,
+      email: p.email,
+      role: 'patient',
+      patientId: p.id,
+      active: true,
+      mustChangePassword: false,
+    };
     db.exec('BEGIN');
     try {
       insert(db, 'patients', p);
@@ -349,7 +356,7 @@ export function createApp(options: AppOptions = {}) {
       throw e;
     }
     audit({ ...req, user } as AuthRequest, 'registered', 'user', user.id);
-    res.status(201).json(makeSession(user, res));
+    res.status(201).json(makeSession(user, res, req));
   });
   app.post('/api/auth/logout', (req: AuthRequest, res) => {
     if (req.sessionToken)
@@ -364,6 +371,7 @@ export function createApp(options: AppOptions = {}) {
   });
   app.post('/api/auth/password', (req: AuthRequest, res) => {
     const user = actor(req);
+    rateLimit(req, 'change-password', 10);
     const input = z
       .object({ currentPassword: z.string().max(128), newPassword: password })
       .parse(req.body);
@@ -372,20 +380,31 @@ export function createApp(options: AppOptions = {}) {
     };
     if (!verifyPassword(input.currentPassword, row.password))
       fail(400, 'Current password is incorrect.');
-    db.prepare('UPDATE users SET password=? WHERE id=?').run(
-      hashPassword(input.newPassword),
-      user.id,
-    );
-    db.prepare('DELETE FROM sessions WHERE userId=? AND tokenHash!=?').run(
-      user.id,
-      req.sessionToken!,
-    );
-    audit(req, 'changed password', 'user', user.id);
+    if (verifyPassword(input.newPassword, row.password))
+      fail(400, 'Choose a new password different from your current password.');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('UPDATE users SET password=?,data=? WHERE id=?').run(
+        hashPassword(input.newPassword),
+        JSON.stringify({ ...managedAccount(user), mustChangePassword: false }),
+        user.id,
+      );
+      db.prepare('DELETE FROM sessions WHERE userId=? AND tokenHash!=?').run(
+        user.id,
+        req.sessionToken!,
+      );
+      db.prepare('DELETE FROM recoveryGrants WHERE userId=?').run(user.id);
+      audit(req, 'changed password', 'user', user.id);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
     res.json({ ok: true });
   });
   app.get('/api/users', (req: AuthRequest, res) => {
     actor(req, ['admin']);
-    res.json(list<User>(db, 'users'));
+    res.json(list<User>(db, 'users').map(managedAccount));
   });
   app.post('/api/users', (req: AuthRequest, res) => {
     actor(req, ['admin']);
@@ -398,10 +417,7 @@ export function createApp(options: AppOptions = {}) {
         doctorId: required.optional(),
       })
       .parse(req.body);
-    if (input.role === 'doctor' && !input.doctorId)
-      fail(400, 'Link a doctor account to a doctor profile.');
-    if (input.doctorId && !get<Doctor>(db, 'doctors', input.doctorId))
-      fail(404, 'Doctor profile not found.');
+    validateAccountLinkage(db, input, fail);
     if (db.prepare('SELECT 1 FROM users WHERE email=? COLLATE NOCASE').get(input.email))
       fail(409, 'An account already exists with this email.');
     const user: User = {
@@ -409,13 +425,24 @@ export function createApp(options: AppOptions = {}) {
       name: input.name,
       email: input.email,
       role: input.role,
+      active: true,
+      mustChangePassword: true,
       ...(input.doctorId ? { doctorId: input.doctorId } : {}),
     };
     createUser(db, user, input.password);
     audit(req, 'created staff account', 'user', user.id);
     res.status(201).json(user);
   });
-  app.get('/api/doctors', (_req, res) => res.json(list<Doctor>(db, 'doctors').reverse()));
+  app.get('/api/doctors', (_req, res) =>
+    res.json(
+      list<Doctor>(db, 'doctors')
+        .reverse()
+        .map((doctor) => ({
+          ...doctor,
+          appointmentDurationMinutes: scheduling.schedule(doctor.id).durationMinutes,
+        })),
+    ),
+  );
   app.post('/api/doctors', (req: AuthRequest, res) => {
     actor(req, ['admin']);
     const doctor = { ...doctorSchema.parse(req.body), id: id() };
@@ -453,26 +480,24 @@ export function createApp(options: AppOptions = {}) {
     audit(req, 'updated clinic settings', 'settings', 'clinic');
     res.json(updated);
   });
-  app.get('/api/slots', (req, res) => {
-    const input = z.object({ doctorId: required, date }).parse(req.query);
-    if (!get(db, 'doctors', input.doctorId)) fail(404, 'Doctor not found.');
-    if (
-      input.date < clinicToday() ||
-      input.date > addDays(clinicToday(), 180) ||
-      new Date(`${input.date}T12:00:00Z`).getUTCDay() === 0
-    )
-      return res.json([]);
-    const busy = db
-      .prepare(
-        "SELECT time FROM appointments WHERE doctorId=? AND date=? AND status NOT IN ('cancelled','no-show')",
-      )
-      .all(input.doctorId, input.date)
-      .map((r) => r.time);
-    res.json(
-      slotTimes.filter(
-        (t) => !busy.includes(t) && Date.parse(`${input.date}T${t}:00+05:30`) > Date.now(),
-      ),
-    );
+  app.get('/api/slots', (req: AuthRequest, res) => {
+    const input = z
+      .object({
+        doctorId: required,
+        date,
+        mode: z.enum(['in-person', 'online']).optional(),
+        excludeAppointmentId: required.optional(),
+      })
+      .parse(req.query);
+    let patientId =
+      req.user?.role === 'patient' && !req.user.mustChangePassword ? req.user.patientId : undefined;
+    if (input.excludeAppointmentId) {
+      if (req.user?.mustChangePassword)
+        fail(403, 'Change your temporary password before accessing appointment details.');
+      actor(req);
+      patientId = appointmentGet(req, input.excludeAppointmentId).patientId;
+    }
+    res.json(scheduling.availableSlots({ ...input, patientId }));
   });
   app.get('/api/patients', (req: AuthRequest, res) => {
     const user = actor(req, ['admin', 'doctor', 'receptionist']);
@@ -552,35 +577,35 @@ export function createApp(options: AppOptions = {}) {
       .parse(req.body);
     const patientId = ownPatient(req, input.patientId);
     const p = patientAccess(req, patientId, true);
-    validateSlot(input.doctorId, input.date, input.time, undefined, patientId);
-    const d = get<Doctor>(db, 'doctors', input.doctorId)!;
-    const appointment: Appointment = {
-      ...input,
-      id: id(),
-      patientId,
-      patientName: p.name,
-      doctorName: d.name,
-      fee: d.fee,
-      status: 'scheduled',
-      createdAt: nowISO(),
-    };
-    db.prepare(
-      'INSERT INTO appointments(id,patientId,doctorId,date,time,status,data) VALUES (?,?,?,?,?,?,?)',
-    ).run(
-      appointment.id,
-      patientId,
-      d.id,
-      appointment.date,
-      appointment.time,
-      appointment.status,
-      JSON.stringify(appointment),
-    );
-    audit(req, 'booked appointment', 'appointment', appointment.id);
+    const appointment = scheduling.transaction(() => {
+      const durationMinutes = scheduling.validateBooking({
+        doctorId: input.doctorId,
+        date: input.date,
+        time: input.time,
+        mode: input.mode,
+        patientId,
+      });
+      const d = get<Doctor>(db, 'doctors', input.doctorId)!;
+      const value: Appointment = {
+        ...input,
+        id: id(),
+        patientId,
+        patientName: p.name,
+        doctorName: d.name,
+        fee: d.fee,
+        durationMinutes,
+        status: 'scheduled',
+        createdAt: nowISO(),
+      };
+      db.prepare(
+        'INSERT INTO appointments(id,patientId,doctorId,date,time,status,data) VALUES (?,?,?,?,?,?,?)',
+      ).run(value.id, patientId, d.id, value.date, value.time, value.status, JSON.stringify(value));
+      audit(req, 'booked appointment', 'appointment', value.id);
+      return value;
+    });
     res.status(201).json(appointment);
   });
   app.patch('/api/appointments/:id', (req: AuthRequest, res) => {
-    const a = appointmentGet(req, String(req.params.id)),
-      user = actor(req);
     const input = z
       .object({
         status: statusSchema.optional(),
@@ -590,66 +615,84 @@ export function createApp(options: AppOptions = {}) {
           .regex(/^\d{2}:\d{2}$/)
           .optional(),
         doctorId: required.optional(),
+        mode: z.enum(['in-person', 'online']).optional(),
       })
       .strict()
-      .refine((v) => Object.keys(v).length > 0, 'No changes supplied')
+      .refine((value) => Object.keys(value).length > 0, 'No changes supplied')
       .parse(req.body);
-    if (CLOSED.includes(a.status)) fail(409, 'This appointment is closed and cannot be changed.');
-    if (
-      user.role === 'receptionist' &&
-      input.status &&
-      ['in-consultation', 'completed'].includes(input.status)
-    )
-      fail(403, 'Only a clinician can start or complete a consultation.');
-    if (user.role === 'patient' && input.status && input.status !== 'cancelled')
-      fail(403, 'Patients may only cancel or reschedule appointments.');
-    if (user.role === 'patient' && a.status !== 'scheduled')
-      fail(409, 'Contact reception to change an appointment already in progress.');
-    if (input.status && input.status !== a.status && !transitions[a.status].includes(input.status))
-      fail(409, 'This appointment status change is not allowed.');
-    if (
-      input.status &&
-      ['checked-in', 'in-consultation', 'completed', 'no-show'].includes(input.status) &&
-      a.date > clinicToday()
-    )
-      fail(400, 'Future appointments cannot be checked in, completed or marked as no-show.');
-    if (input.status === 'no-show' && Date.parse(`${a.date}T${a.time}:00+05:30`) > Date.now())
-      fail(400, 'An appointment cannot be marked as a no-show before its scheduled time.');
-    const rescheduling = Boolean(input.date || input.time || input.doctorId);
-    if (rescheduling) {
-      if (a.status !== 'scheduled') fail(409, 'Only scheduled appointments can be rescheduled.');
-      if (input.status && input.status !== 'scheduled')
-        fail(400, 'Reschedule and status changes must be separate actions.');
-      validateSlot(
-        input.doctorId ?? a.doctorId,
-        input.date ?? a.date,
-        input.time ?? a.time,
+    const updated = scheduling.transaction(() => {
+      const a = appointmentGet(req, String(req.params.id)),
+        user = actor(req);
+      if (CLOSED.includes(a.status)) fail(409, 'This appointment is closed and cannot be changed.');
+      if (
+        user.role === 'receptionist' &&
+        input.status &&
+        ['in-consultation', 'completed'].includes(input.status)
+      )
+        fail(403, 'Only a clinician can start or complete a consultation.');
+      if (user.role === 'patient' && input.status && input.status !== 'cancelled')
+        fail(403, 'Patients may only cancel or reschedule appointments.');
+      if (user.role === 'patient' && a.status !== 'scheduled')
+        fail(409, 'Contact reception to change an appointment already in progress.');
+      if (
+        input.status &&
+        input.status !== a.status &&
+        !transitions[a.status].includes(input.status)
+      )
+        fail(409, 'This appointment status change is not allowed.');
+      if (
+        input.status &&
+        ['checked-in', 'in-consultation', 'completed', 'no-show'].includes(input.status) &&
+        a.date > clinicToday()
+      )
+        fail(400, 'Future appointments cannot be checked in, completed or marked as no-show.');
+      if (input.status === 'no-show' && Date.parse(`${a.date}T${a.time}:00+05:30`) > Date.now())
+        fail(400, 'An appointment cannot be marked as a no-show before its scheduled time.');
+      const rescheduling = Boolean(input.date || input.time || input.doctorId || input.mode);
+      let durationMinutes = a.durationMinutes ?? 30;
+      if (rescheduling) {
+        if (a.status !== 'scheduled') fail(409, 'Only scheduled appointments can be rescheduled.');
+        if (input.status && input.status !== 'scheduled')
+          fail(400, 'Reschedule and status changes must be separate actions.');
+        durationMinutes = scheduling.validateBooking({
+          doctorId: input.doctorId ?? a.doctorId,
+          date: input.date ?? a.date,
+          time: input.time ?? a.time,
+          mode: input.mode ?? a.mode,
+          excludeAppointmentId: a.id,
+          patientId: a.patientId,
+        });
+      }
+      const d = get<Doctor>(db, 'doctors', input.doctorId ?? a.doctorId)!;
+      const value: Appointment = {
+        ...a,
+        ...input,
+        durationMinutes,
+        doctorName: d.name,
+        fee: d.fee,
+      };
+      db.prepare('UPDATE appointments SET doctorId=?,date=?,time=?,status=?,data=? WHERE id=?').run(
+        value.doctorId,
+        value.date,
+        value.time,
+        value.status,
+        JSON.stringify(value),
         a.id,
-        a.patientId,
       );
-    }
-    const d = get<Doctor>(db, 'doctors', input.doctorId ?? a.doctorId)!;
-    const updated = { ...a, ...input, doctorName: d.name, fee: d.fee };
-    db.prepare('UPDATE appointments SET doctorId=?,date=?,time=?,status=?,data=? WHERE id=?').run(
-      updated.doctorId,
-      updated.date,
-      updated.time,
-      updated.status,
-      JSON.stringify(updated),
-      a.id,
-    );
-    audit(
-      req,
-      rescheduling ? 'rescheduled appointment' : `appointment ${updated.status}`,
-      'appointment',
-      a.id,
-    );
+      audit(
+        req,
+        rescheduling ? 'rescheduled appointment' : `appointment ${value.status}`,
+        'appointment',
+        a.id,
+      );
+      return value;
+    });
     res.json(updated);
   });
   app.get('/api/appointments/:id/calendar', (req: AuthRequest, res) => {
     const a = appointmentGet(req, String(req.params.id));
     const start = new Date(`${a.date}T${a.time}:00+05:30`),
-      end = new Date(start.getTime() + 30 * 60000);
+      end = new Date(start.getTime() + (a.durationMinutes ?? 30) * 60000);
     const stamp = (d: Date) =>
       d
         .toISOString()
@@ -959,6 +1002,7 @@ export function createApp(options: AppOptions = {}) {
         .map((p) => (user.role === 'receptionist' ? { ...p, allergies: '' } : p)),
     });
   });
+  scheduling.register(app);
   registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   const dist = resolve('dist');

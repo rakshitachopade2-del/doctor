@@ -340,7 +340,15 @@ export function registerOperations(app: Express, context: OperationsContext) {
         );
       if (db.prepare('SELECT 1 FROM users WHERE email=? COLLATE NOCASE').get(input.email))
         fail(409, 'This email already has an account. Existing accounts cannot be relinked.');
-      user = { id: id(), name: patient.name, email: input.email, role: 'patient', patientId };
+      user = {
+        id: id(),
+        name: patient.name,
+        email: input.email,
+        role: 'patient',
+        patientId,
+        active: true,
+        mustChangePassword: true,
+      };
       createUser(db, user, input.password);
       db.prepare('UPDATE patients SET data=? WHERE id=?').run(
         JSON.stringify({ ...patient, email: input.email }),

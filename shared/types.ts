@@ -6,6 +6,8 @@ export interface User {
   role: Role;
   patientId?: string;
   doctorId?: string;
+  active?: boolean;
+  mustChangePassword?: boolean;
 }
 export interface Session {
   user: User | null;
@@ -23,6 +25,7 @@ export interface Doctor {
   bio: string;
   languages: string[];
   color: string;
+  appointmentDurationMinutes?: number;
 }
 export interface Patient {
   id: string;
@@ -48,6 +51,7 @@ export interface Appointment {
   patientName: string;
   doctorName: string;
   fee: number;
+  durationMinutes?: number;
   createdAt: string;
 }
 export interface Intake {

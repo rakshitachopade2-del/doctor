@@ -363,17 +363,10 @@ function BookingForm() {
   const doctor = doctors.data?.find((value) => value.id === doctorId);
   const slots = useResource<string[]>(
     doctorId && date
-      ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}`
+      ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}&mode=${mode}${appointmentId ? `&excludeAppointmentId=${encodeURIComponent(appointmentId)}` : ''}`
       : null,
   );
   const availableSlots = [...(slots.data ?? [])];
-  if (
-    existing &&
-    existing.doctorId === doctorId &&
-    existing.date === date &&
-    !availableSlots.includes(existing.time)
-  )
-    availableSlots.push(existing.time);
   availableSlots.sort();
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -577,7 +570,10 @@ function BookingForm() {
                   className="select"
                   value={mode}
                   disabled={!!appointmentId}
-                  onChange={(event) => setMode(event.target.value as typeof mode)}
+                  onChange={(event) => {
+                    setMode(event.target.value as typeof mode);
+                    setTime('');
+                  }}
                 >
                   <option value="in-person">In person at the clinic</option>
                   <option value="online">Online consultation</option>
@@ -625,6 +621,10 @@ function BookingForm() {
               <div>
                 <span>Visit</span>
                 <strong>{mode === 'online' ? 'Online' : 'In person'}</strong>
+              </div>
+              <div>
+                <span>Duration</span>
+                <strong>{doctor?.appointmentDurationMinutes || 30} minutes</strong>
               </div>
               <div className="summary-total">
                 <span>Consultation fee</span>

@@ -425,9 +425,21 @@ test('portal account provisioning requires admin identity verification and never
     200,
   );
   const record = await call('/patients/patient-2', { client: portal });
-  assert.equal(record.status, 200);
-  assert.equal(record.data.patient.email, input.email);
-  assert.ok(record.data.appointments.length > 0);
+  assert.equal(record.status, 403);
+  assert.equal(
+    (
+      await call('/auth/password', {
+        method: 'POST',
+        client: portal,
+        body: { currentPassword: input.password, newPassword: 'PersonalWalkIn2026!' },
+      })
+    ).status,
+    200,
+  );
+  const accessibleRecord = await call('/patients/patient-2', { client: portal });
+  assert.equal(accessibleRecord.status, 200);
+  assert.equal(accessibleRecord.data.patient.email, input.email);
+  assert.ok(accessibleRecord.data.appointments.length > 0);
   assert.equal((await call('/patients/patient-ananya', { client: portal })).status, 403);
 });
 test('invoice creation, payment recording, publication and portal provisioning leave audit evidence', async () => {

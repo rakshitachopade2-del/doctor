@@ -26,7 +26,15 @@ export function AuthPage({ register = false }: { register?: boolean }) {
         /^\/(?!\/)/.test(next) &&
         !/[\\\x00-\x20]/.test(next) &&
         new URL(next, window.location.origin).origin === window.location.origin;
-      navigate(safeNext ? next : result.user?.role === 'patient' ? '/my-care' : '/clinic');
+      navigate(
+        result.user?.mustChangePassword
+          ? '/account?required=1'
+          : safeNext
+            ? next
+            : result.user?.role === 'patient'
+              ? '/my-care'
+              : '/clinic',
+      );
       toast(register ? 'Your care account is ready.' : 'Welcome back.');
     } catch (e) {
       setError((e as Error).message);
@@ -137,6 +145,11 @@ export function AuthPage({ register = false }: { register?: boolean }) {
             <ArrowRight size={17} />
           </button>
         </form>
+        {!register && (
+          <p className="auth-switch">
+            <Link to="/recover">Need help signing in?</Link>
+          </p>
+        )}
         <p className="auth-switch">
           {register ? 'Already have an account?' : 'New to the clinic?'}{' '}
           <Link
@@ -173,88 +186,6 @@ export function AuthPage({ register = false }: { register?: boolean }) {
           </div>
         )}
       </Card>
-    </div>
-  );
-}
-export function AccountPage() {
-  const { session } = useSession();
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const data = Object.fromEntries(new FormData(form));
-    if (data.newPassword !== data.confirm) {
-      toast('The new passwords do not match.', 'error');
-      return;
-    }
-    setBusy(true);
-    try {
-      await api('/api/auth/password', {
-        method: 'POST',
-        body: { currentPassword: data.currentPassword, newPassword: data.newPassword },
-      });
-      form.reset();
-      toast('Password updated. Other sessions have been signed out.');
-    } catch (e) {
-      toast((e as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="account-page">
-      <Link className="text-link" to={session.user?.role === 'patient' ? '/my-care' : '/clinic'}>
-        ← Back to workspace
-      </Link>
-      <PageHeader title="Your account" description="Keep your access to the clinic secure." />
-      <div className="grid-2">
-        <Card>
-          <h2>{session.user?.name}</h2>
-          <p>{session.user?.email}</p>
-          <p className="muted">Role: {session.user?.role}</p>
-          <div className="notice">
-            <ShieldCheck size={20} />
-            <p>Your access is limited to the records and actions available to your role.</p>
-          </div>
-        </Card>
-        <Card>
-          <h2>Change password</h2>
-          <form className="stack" onSubmit={submit}>
-            <Field label="Current password">
-              <input
-                name="currentPassword"
-                type="password"
-                autoComplete="current-password"
-                required
-              />
-            </Field>
-            <Field label="New password" hint="At least 12 characters.">
-              <input
-                name="newPassword"
-                type="password"
-                minLength={12}
-                maxLength={128}
-                autoComplete="new-password"
-                required
-              />
-            </Field>
-            <Field label="Confirm new password">
-              <input
-                name="confirm"
-                type="password"
-                minLength={12}
-                maxLength={128}
-                autoComplete="new-password"
-                required
-              />
-            </Field>
-            <button className="button button-primary" disabled={busy}>
-              {busy ? 'Updating…' : 'Update password'}
-            </button>
-          </form>
-        </Card>
-      </div>
     </div>
   );
 }

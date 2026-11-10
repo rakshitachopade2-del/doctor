@@ -35,9 +35,34 @@ unset derma_admin_password
 npm start
 ```
 
-Sign in over HTTPS. Configure clinic details, create doctor profiles, and add individual staff accounts in **Clinic settings → Your team**. Clinical notes and care plans must be authored from an account linked to a doctor profile. The bootstrap administrator has no doctor identity; create a doctor profile and a separate linked doctor account before documenting care. Existing walk-in records can receive portal accounts only after an administrator confirms the patient’s identity and email. Accounts are never automatically linked by matching email. Users can change their initial passwords in **Account & security**.
+Sign in over HTTPS. Configure clinic details, create doctor profiles, and add individual staff accounts in **Clinic settings → Your team**. Clinical notes and care plans must be authored from an account linked to a doctor profile. The bootstrap administrator has no doctor identity; create a doctor profile and a separate linked doctor account before documenting care, or explicitly link an appropriate profile through **Accounts & access**.
+
+Existing walk-in records can receive portal accounts only after an administrator confirms the patient’s identity and email. Accounts are never automatically linked by matching email. Staff and portal accounts created through the clinic interface must change their initial password in **Account & security** before accessing private records. The administrator created with the bootstrap CLI uses the private password supplied through stdin and is not forced through this initial-password step.
+
+Configure each doctor in **Availability & time off** before opening bookings. New and existing profiles without a saved schedule default to Monday–Saturday, 09:00–18:00 with 30-minute appointments. Choose weekly sessions, consultation mode per session, and a 15/20/30/45/60-minute duration; add breaks by splitting a day into sessions. Administrators can add whole-clinic holidays, and linked doctors can manage their own availability and time off. Reception has read-only access. Schedule changes that conflict with existing future appointments are rejected; arrange the affected visits first.
 
 A database seeded in demo mode is deliberately rejected by production. Keep demo and production databases separate; importing fictional records is not a production migration.
+
+## Upgrade an existing installation
+
+Create and verify a backup before replacing the running application. Stop the service, install the new dependencies, build, and restart against the same production database. Startup creates the scheduling and recovery tables and adds session metadata where needed. Existing users retain their current access; the new mandatory-password rule applies to newly provisioned accounts. Existing doctor profiles retain the original default hours until an authorized user saves another schedule. Previously booked appointments without a stored duration continue to count as 30 minutes.
+
+After restart, confirm account access and review each doctor’s actual hours and planned closures. An upgrade does not automatically reschedule, cancel, or notify patients. Keep the pre-upgrade backup so application code and database state can be restored together if rollback is required.
+
+## Account access and password recovery
+
+Use **Accounts & access** to suspend a departing staff member, restore access, change a staff role, or set the linked doctor profile. Suspension and role/profile changes immediately end the affected account’s sessions while retaining patient records and past authorship. An administrator cannot suspend their own account or demote the last active administrator. Keep individual administrator accounts rather than sharing one credential.
+
+For a forgotten password:
+
+1. Confirm the person’s identity using your clinic’s process. There is no automatic email/contact verification.
+2. As an administrator, open **Accounts & access → Recovery** for the correct active account and confirm the verification.
+3. Copy the one-use recovery link and share it privately with that person. The platform does not send it. It expires after 30 minutes; generating another link invalidates the previous link.
+4. The account holder opens the link, chooses a new password, and signs in again. Recovery ends every previous session. An expired or already-used link must be replaced by an administrator after verification.
+
+For a suspended account, restore access only if appropriate before issuing recovery. A normal password change invalidates outstanding recovery links and ends other sessions. Users can review and end their own browser sessions in **Account & security**; sessions also expire after twelve hours. The browser-family labels are informational, not device or location verification.
+
+If no administrator can sign in, a trusted deployment operator can run the same administrator-bootstrap command with a **new, unique email** against the existing production database. It creates a separate administrator and refuses to overwrite an existing account. That administrator can then manage access through the audited interface. The operator must already have authorized host/database access; there is no public bootstrap endpoint.
 
 ## TLS and reverse proxy
 
@@ -88,16 +113,17 @@ mkdir -p backups
 docker compose cp app:/app/data/backups/clinic-2026-11-10.sqlite ./backups/
 ```
 
-Move a copy to separately protected storage. A backup includes private patient records, image bytes, messages, password hashes and session data. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
+Move a copy to separately protected storage. A backup includes private patient records, image bytes, messages, password hashes, account access flags, sessions, hashed recovery grants, schedules, and closures. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
 
 To restore:
 
 1. Stop the application, including every process using the database (`docker compose stop app` for Docker).
 2. Preserve the existing database **and** any `-wal` / `-shm` sidecars together in a recovery directory.
 3. Copy the selected completed backup to the configured `DATABASE_PATH`. Do not leave old sidecars next to the restored file. In Docker, perform this inside the mounted `clinic-data` volume while the app is stopped.
-4. Ensure the runtime user owns the restored file, restrict its access, then start the application. Check `/api/health`, sign in and verify expected records.
+4. Before reopening access, remove restored sessions and outstanding recovery grants through trusted database maintenance tooling. For a current-release snapshot, use a transaction containing `DELETE FROM sessions;` and `DELETE FROM recoveryGrants;`. A snapshot from before recovery support has no `recoveryGrants` table; omit that statement for such a snapshot.
+5. Ensure the runtime user owns the restored file, restrict its access, then start the application. Check `/api/health`, sign in and verify expected records, administrator access, staff suspensions, and doctor availability.
 
-Restoring also restores session state at the snapshot time. Expired sessions are still rejected; if a snapshot may have been exposed, rotate credentials and invalidate existing sessions before reopening access. Regularly rehearse restoration into a separate isolated database.
+Restoring also restores account access, passwords, scheduling changes, and recovery state to the snapshot time. Removing restored sessions and grants prevents old sign-ins or previously consumed links from becoming usable again. Reapply later staff-access changes and rotate credentials if a snapshot may have been exposed. Regularly rehearse restoration into a separate isolated database.
 
 ## Integration boundaries
 
@@ -105,4 +131,4 @@ Booking, clinical documentation, images, care plans, check-ins, private messagin
 
 Email, SMS, WhatsApp, video meetings, native mobile packaging, AI diagnosis and voice transcription require separate implementation and provider configuration. Online appointments do not create video rooms. No external delivery is represented as successful when a provider is absent. Clinician-entered instructions and warnings are not validated against a drug-interaction database.
 
-Booking uses 30-minute slots Monday–Saturday, 09:00–17:30 in Asia/Kolkata, up to 180 days ahead. Clinic opening-hours text is display content; changing it does not alter the scheduling engine.
+Booking uses the configured doctor sessions and closures in Asia/Kolkata, up to 180 days ahead. New bookings use the doctor’s current appointment length; saved appointments retain their recorded duration. Overnight sessions, waitlists, external calendar synchronization, and automatic reschedule notifications are not implemented. Clinic opening-hours text is display content; change **Availability & time off** to alter bookable hours.

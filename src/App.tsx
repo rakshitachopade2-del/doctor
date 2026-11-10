@@ -13,6 +13,7 @@ import {
   Activity,
   ArrowUpRight,
   CalendarDays,
+  Clock3,
   ChevronDown,
   CircleHelp,
   ClipboardList,
@@ -32,7 +33,9 @@ import {
 } from 'lucide-react';
 import { useSession, api, useToast } from './lib';
 import { Avatar, Badge, ErrorState, Loading } from './components/ui';
-import { AuthPage, AccountPage } from './pages/AuthPages';
+import { AuthPage } from './pages/AuthPages';
+import { AccountsPage, RecoveryPage, SecurityPage } from './pages/IdentityPages';
+import { SchedulingPage } from './pages/SchedulingPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { SettingsPage, AuditPage } from './pages/SettingsPages';
 import { BillingPage, LibraryPage } from './pages/OperationsPages';
@@ -77,6 +80,8 @@ function Guard({ roles, children }: { roles?: Role[]; children: ReactNode }) {
         replace
       />
     );
+  if (session.user.mustChangePassword && location.pathname !== '/account')
+    return <Navigate to="/account?required=1" replace />;
   if (roles && !roles.includes(session.user.role))
     return <Navigate to={session.user.role === 'patient' ? '/my-care' : '/clinic'} replace />;
   return children;
@@ -121,6 +126,7 @@ function PublicLayout() {
 const staffNav = [
   { to: '/clinic', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/clinic/appointments', label: 'Appointments', icon: CalendarDays },
+  { to: '/clinic/scheduling', label: 'Schedules & closures', icon: Clock3 },
   { to: '/clinic/patients', label: 'Patients', icon: Users },
   { to: '/clinic/follow-ups', label: 'Follow-up care', icon: HeartHandshake, clinical: true },
   { to: '/clinic/billing', label: 'Billing', icon: Receipt },
@@ -212,6 +218,14 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
               >
                 <Settings size={19} />
                 Clinic settings
+              </NavLink>
+              <NavLink
+                to="/clinic/accounts"
+                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => setMenu(false)}
+              >
+                <Users size={19} />
+                Accounts & access
               </NavLink>
               <NavLink
                 to="/clinic/audit"
@@ -319,6 +333,7 @@ export function App() {
         <Route index element={<DiscoverPage />} />
         <Route path="login" element={<AuthPage />} />
         <Route path="register" element={<AuthPage register />} />
+        <Route path="recover" element={<RecoveryPage />} />
         <Route path="library" element={<LibraryPage />} />
         <Route
           path="book"
@@ -345,6 +360,15 @@ export function App() {
         }
       >
         <Route path="clinic" element={<DashboardPage />} />
+        <Route path="clinic/scheduling" element={<SchedulingPage />} />
+        <Route
+          path="clinic/accounts"
+          element={
+            <Guard roles={['admin']}>
+              <AccountsPage />
+            </Guard>
+          }
+        />
         <Route path="clinic/billing" element={<BillingPage />} />
         <Route
           path="clinic/knowledge"
@@ -406,7 +430,7 @@ export function App() {
         path="account"
         element={
           <Guard>
-            <AccountPage />
+            <SecurityPage />
           </Guard>
         }
       />

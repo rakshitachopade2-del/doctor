@@ -1,0 +1,87 @@
+.identity-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  flex: 1;
+  color: #596f58;
+}
+.identity-role-filter {
+  max-width: 190px;
+}
+.identity-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.identity-actions .button {
+  white-space: nowrap;
+}
+.session-card {
+  margin-top: 24px;
+}
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0;
+  border-top: 1px solid #e4eadd;
+  color: #49613f;
+}
+.session-row > svg {
+  flex-shrink: 0;
+  color: #66835a;
+}
+.session-row p {
+  margin: 5px 0 0;
+  color: #607456;
+  font-size: 11px;
+}
+.session-row strong {
+  font-size: 13px;
+}
+.recovery-page {
+  max-width: 520px;
+  margin: 60px auto;
+  padding: 0 20px;
+}
+.recovery-page .card {
+  padding: 32px;
+}
+.recovery-page h1 {
+  font-size: 27px;
+  line-height: 1.4;
+}
+.recovery-page .muted {
+  line-height: 1.8;
+}
+.account-page > .row {
+  margin-bottom: 20px;
+}
+.account-page .page-header {
+  margin-top: 20px;
+}
+@media (max-width: 700px) {
+  .identity-actions {
+    flex-wrap: wrap;
+  }
+  .identity-role-filter {
+    max-width: 140px;
+  }
+  .session-row {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .session-row .grow {
+    min-width: 160px;
+  }
+  .session-card .section-heading {
+    flex-wrap: wrap;
+  }
+  .recovery-page {
+    margin: 35px auto;
+  }
+  .recovery-page .card {
+    padding: 25px;
+  }
+}

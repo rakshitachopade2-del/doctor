@@ -112,6 +112,11 @@ test('admin configures a doctor, provisions staff, and links a verified patient 
   await page.getByLabel('Email address').fill('browser.portal@example.test');
   await page.getByLabel('Password', { exact: true }).fill('BrowserPatient2026!');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/account/);
+  await page.getByLabel('Initial password').fill('BrowserPatient2026!');
+  await page.getByLabel('New password', { exact: true }).fill('PrivatePatient2026!');
+  await page.getByLabel('Confirm new password').fill('PrivatePatient2026!');
+  await page.getByRole('button', { name: 'Set my password' }).click();
   await page.waitForURL('/my-care');
   await page.goto('/my-care/record');
   await expect(page.getByRole('heading', { name: 'Rohan Patel', exact: true })).toBeVisible();
