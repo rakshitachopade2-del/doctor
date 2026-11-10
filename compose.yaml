@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+    ports:
+      - '127.0.0.1:3001:3001'
+    environment:
+      NODE_ENV: production
+      DEMO_MODE: 'false'
+      HOST: 0.0.0.0
+      PORT: '3001'
+      DATABASE_PATH: /app/data/clinic.sqlite
+      APP_ORIGIN: ${APP_ORIGIN:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+    volumes:
+      - clinic-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  clinic-data:

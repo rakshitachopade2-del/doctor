@@ -1,0 +1,9 @@
+{
+  "name": "Derma — Care, connected",
+  "short_name": "Derma",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f7f5",
+  "theme_color": "#286455",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

@@ -1,0 +1,170 @@
+.billing-metrics {
+  margin-bottom: 24px;
+}
+.billing-metrics .card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.billing-metrics strong {
+  font-family: 'Manrope Variable', sans-serif;
+  font-size: 28px;
+  font-weight: 600;
+  color: #4e7047;
+  letter-spacing: -1px;
+}
+.compact-select {
+  width: 170px;
+}
+.invoice-item-editor {
+  border: 1px solid #e7eddf;
+  border-radius: 9px;
+  padding: 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: #fafcf7;
+}
+.invoice-item-editor > .row {
+  font-size: 12px;
+  color: #5e6e4a;
+}
+.invoice-totals {
+  border-top: 1px solid #e6ecdf;
+  padding: 18px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.invoice-totals > span {
+  display: flex;
+  justify-content: space-between;
+  width: 230px;
+  color: #606e52;
+  font-size: 12px;
+}
+.invoice-totals > span:last-child {
+  font-size: 16px;
+  color: #537140;
+  font-weight: 600;
+  border-top: 1px solid #e5ecdc;
+  padding-top: 12px;
+}
+.payment-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e7eddf;
+  color: #5c6f49;
+  font-size: 12px;
+}
+.payment-row > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.payment-row small {
+  font-size: 10px;
+  color: #616e4e;
+}
+.payment-form {
+  padding: 22px;
+  background: #f5f8ee;
+  border: 1px solid #e8efdc;
+  border-radius: 10px;
+}
+.payment-form h3 {
+  margin-bottom: 0;
+}
+.library-page {
+  max-width: 1160px;
+  margin: 50px auto;
+  padding: 0 25px;
+}
+.workspace-main .library-page {
+  padding: 0;
+  margin: 0;
+}
+.library-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 450px;
+  margin: 0 0 28px;
+  color: #5e6e4c;
+}
+.library-search input {
+  background: #fff;
+}
+.knowledge-grid .card {
+  display: flex;
+  flex-direction: column;
+}
+.knowledge-grid .module-icon {
+  margin: 0 0 20px;
+}
+.knowledge-grid .badge {
+  align-self: flex-start;
+}
+.knowledge-grid h2 {
+  font-size: 19px;
+  line-height: 1.5;
+}
+.article-preview {
+  line-height: 1.8;
+  flex: 1;
+}
+.knowledge-grid small {
+  font-size: 10px;
+  color: #667653;
+  margin-bottom: 18px;
+}
+.article-body > p {
+  white-space: pre-wrap;
+  line-height: 1.9;
+  margin-top: 22px;
+  font-size: 14px;
+  color: #5d6d51;
+}
+.article-body small {
+  color: #5f6d4d;
+}
+.portal-provision {
+  margin-top: 15px;
+}
+.portal-provision .notice {
+  font-size: 11px;
+}
+@media print {
+  body:has(.invoice-document) .workspace-main > * {
+    display: none !important;
+  }
+  body:has(.invoice-document) .workspace-main > .modal-overlay {
+    display: block !important;
+    position: static;
+    background: none;
+    backdrop-filter: none;
+    padding: 0;
+  }
+  .modal:has(.invoice-document) {
+    display: block;
+    max-width: none;
+    width: 100%;
+    box-shadow: none;
+    max-height: none;
+    overflow: visible;
+  }
+  .modal:has(.invoice-document) .modal-header {
+    display: flex;
+  }
+  .modal:has(.invoice-document) .modal-header button,
+  .payment-form {
+    display: none !important;
+  }
+  .modal:has(.invoice-document) .modal-body {
+    overflow: visible;
+  }
+}
