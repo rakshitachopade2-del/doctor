@@ -13,6 +13,18 @@ export interface Invoice {
   paidPaise: number;
   status: 'unpaid' | 'partial' | 'paid';
   createdAt: string;
+  procedureId?: string;
+  procedureTitle?: string;
+}
+export interface ProcedureBillingItem {
+  id: string;
+  patientId: string;
+  patientName: string;
+  title: string;
+  estimatedCost: string;
+  status: 'planned' | 'completed' | 'cancelled';
+  invoiceId: string | null;
+  invoiceNumber: string | null;
 }
 export interface Payment {
   id: string;

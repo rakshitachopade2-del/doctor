@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ClipboardCheck,
   FileCheck2,
@@ -401,6 +402,15 @@ export function ClinicalWorkflowPanel({
                   <div className="cw-procedure-cost">
                     <span>Estimated cost</span>
                     <strong>{procedure.estimatedCost || 'Not recorded'}</strong>
+                  </div>
+                  <div className="cw-record-actions">
+                    <Link
+                      className="button button-secondary button-small"
+                      to={`/clinic/billing?procedure=${procedure.id}`}
+                    >
+                      <FileText size={14} />
+                      Procedure billing
+                    </Link>
                   </div>
                   <div className="cw-decisions">
                     <h4>Patient decision record</h4>

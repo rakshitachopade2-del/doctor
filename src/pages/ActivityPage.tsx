@@ -23,6 +23,8 @@ const icons = {
   investigation: FileText,
   procedure: ClipboardList,
   'follow-up': HeartHandshake,
+  waitlist: CalendarDays,
+  billing: FileText,
 };
 const labels: Record<ActivityKind, string> = {
   appointment: 'Appointment',
@@ -32,6 +34,8 @@ const labels: Record<ActivityKind, string> = {
   investigation: 'Investigation',
   procedure: 'Procedure',
   'follow-up': 'Follow-up',
+  waitlist: 'Waitlist',
+  billing: 'Billing',
 };
 const changed = () => window.dispatchEvent(new Event('derma:activity-changed'));
 

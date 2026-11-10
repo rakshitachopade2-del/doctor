@@ -5,7 +5,9 @@ export type ActivityKind =
   | 'check-in'
   | 'investigation'
   | 'procedure'
-  | 'follow-up';
+  | 'follow-up'
+  | 'waitlist'
+  | 'billing';
 export interface ActivityContent {
   kind: ActivityKind;
   title: string;

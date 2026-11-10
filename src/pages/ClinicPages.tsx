@@ -29,6 +29,7 @@ import type {
   PatientRecord,
 } from '../../shared/types';
 import type { PatientClinicalWorkflows } from '../../shared/clinical';
+import type { WaitlistEntry } from '../../shared/waitlist';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import { FollowUpPlanSection } from './FollowUpPages';
@@ -369,7 +370,7 @@ export function AppointmentsPage() {
         </Modal>
       )}
       {booking && (
-        <BookingModal
+        <ClinicBookingModal
           initialDate={date}
           appointment={booking === 'new' ? undefined : booking}
           doctors={doctors.data || []}
@@ -385,30 +386,38 @@ export function AppointmentsPage() {
   );
 }
 
-function BookingModal({
+export function ClinicBookingModal({
   initialDate,
   appointment,
+  waitlist,
   doctors,
   onClose,
   onSaved,
 }: {
   initialDate: string;
   appointment?: Appointment;
+  waitlist?: WaitlistEntry;
   doctors: Doctor[];
   onClose: () => void;
   onSaved: (savedDate: string) => void;
 }) {
-  const [patientId, setPatientId] = useState(appointment?.patientId || '');
-  const [doctorId, setDoctorId] = useState(appointment?.doctorId || doctors[0]?.id || '');
-  const [date, setDate] = useState(initialDate < today() ? today() : initialDate);
+  const [patientId, setPatientId] = useState(waitlist?.patientId || appointment?.patientId || '');
+  const [doctorId, setDoctorId] = useState(
+    waitlist?.doctorId || appointment?.doctorId || doctors[0]?.id || '',
+  );
+  const minimumDate = waitlist && waitlist.startDate > today() ? waitlist.startDate : today();
+  const [date, setDate] = useState(initialDate < minimumDate ? minimumDate : initialDate);
   const [time, setTime] = useState('');
-  const [mode, setMode] = useState<'in-person' | 'online'>(appointment?.mode || 'in-person');
-  const [reason, setReason] = useState(appointment?.reason || '');
+  const [mode, setMode] = useState<'in-person' | 'online'>(
+    waitlist?.mode || appointment?.mode || 'in-person',
+  );
+  const [reason, setReason] = useState(waitlist?.reason || appointment?.reason || '');
+  const [patientConfirmed, setPatientConfirmed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const patients = useResource<Patient[]>('/api/patients');
   const slots = useResource<string[]>(
-    doctorId && date
+    doctorId && date && (!waitlist || (date >= minimumDate && date <= waitlist.endDate))
       ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${date}&mode=${mode}${appointment ? `&excludeAppointmentId=${encodeURIComponent(appointment.id)}` : ''}`
       : null,
   );
@@ -417,9 +426,14 @@ function BookingModal({
   useEffect(() => {
     setTime('');
   }, [date, doctorId, mode]);
+  useEffect(() => {
+    setPatientConfirmed(false);
+  }, [date, doctorId, mode, time]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!time) return setError('Choose an available appointment time.');
+    if (waitlist && !patientConfirmed)
+      return setError('Confirm this specific appointment with the patient before booking.');
     setSaving(true);
     setError('');
     try {
@@ -427,30 +441,66 @@ function BookingModal({
         method: appointment ? 'PATCH' : 'POST',
         body: appointment
           ? { doctorId, date, time }
-          : { patientId, doctorId, date, time, mode, reason },
+          : {
+              patientId,
+              doctorId,
+              date,
+              time,
+              mode,
+              reason,
+              ...(waitlist ? { waitlistId: waitlist.id, patientConfirmed } : {}),
+            },
       });
       toast(appointment ? 'Appointment rescheduled.' : 'Appointment booked.');
       onSaved(date);
     } catch (e) {
       setError(errorText(e));
+      setTime('');
+      setPatientConfirmed(false);
       slots.reload();
     } finally {
       setSaving(false);
     }
   }
   return (
-    <Modal title={appointment ? 'Reschedule appointment' : 'New appointment'} onClose={onClose}>
+    <Modal
+      title={
+        waitlist
+          ? 'Book a confirmed waitlist visit'
+          : appointment
+            ? 'Reschedule appointment'
+            : 'New appointment'
+      }
+      onClose={() => {
+        if (!saving) onClose();
+      }}
+    >
       <form className="stack" onSubmit={submit}>
         {error && (
           <div className="notice notice-error" role="alert">
             {error}
           </div>
         )}
+        {waitlist && (
+          <div className="notice">
+            <span>
+              <strong>
+                Requested window: {formatDate(waitlist.startDate)} – {formatDate(waitlist.endDate)}
+              </strong>
+              <br />
+              {waitlist.doctorName} ·{' '}
+              {waitlist.mode === 'online' ? 'Online consultation' : 'In clinic'}. Contact{' '}
+              {waitlist.patientName}
+              {waitlist.patientPhone ? ` at ${waitlist.patientPhone}` : ''} and confirm the selected
+              slot before booking. This request does not hold a slot.
+            </span>
+          </div>
+        )}
         {patients.error && <ErrorState message={patients.error} retry={patients.reload} />}
         <Field label="Patient">
           <select
             required
-            disabled={!!appointment}
+            disabled={!!appointment || !!waitlist || saving}
             value={patientId}
             onChange={(e) => setPatientId(e.target.value)}
           >
@@ -464,7 +514,12 @@ function BookingModal({
         </Field>
         <div className="form-grid">
           <Field label="Doctor">
-            <select required value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
+            <select
+              required
+              disabled={!!waitlist || saving}
+              value={doctorId}
+              onChange={(e) => setDoctorId(e.target.value)}
+            >
               <option value="">Select a doctor</option>
               {doctors.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -477,7 +532,9 @@ function BookingModal({
             <input
               required
               type="date"
-              min={today()}
+              min={minimumDate}
+              max={waitlist?.endDate}
+              disabled={saving}
               value={date}
               onChange={(e) => setDate(e.target.value)}
             />
@@ -485,7 +542,11 @@ function BookingModal({
         </div>
         {!appointment && (
           <Field label="Consultation mode">
-            <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+            <select
+              disabled={!!waitlist || saving}
+              value={mode}
+              onChange={(e) => setMode(e.target.value as typeof mode)}
+            >
               <option value="in-person">In clinic</option>
               <option value="online">Online consultation</option>
             </select>
@@ -509,13 +570,18 @@ function BookingModal({
                     type="button"
                     className={`clinic-time-slot ${time === slot ? 'selected' : ''}`}
                     aria-pressed={time === slot}
+                    disabled={saving}
                     onClick={() => setTime(slot)}
                   >
                     {timeLabel(slot)}
                   </button>
                 ))
               ) : (
-                <p className="muted">No available slots. Choose another date or doctor.</p>
+                <p className="muted">
+                  {waitlist
+                    ? 'No available slots for this day in the requested window. Choose another date within the request.'
+                    : 'No available slots. Choose another date or doctor.'}
+                </p>
               )}
             </div>
           )}
@@ -528,18 +594,55 @@ function BookingModal({
                 maxLength={300}
                 rows={3}
                 value={reason}
+                disabled={saving}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Briefly describe the reason for the appointment"
               />
             </Field>
           </>
         )}
+        {waitlist && (
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              required
+              checked={patientConfirmed}
+              disabled={!time || saving}
+              onChange={(event) => setPatientConfirmed(event.target.checked)}
+            />
+            <span>
+              I have confirmed this specific date, time, doctor, and consultation mode with the
+              patient.
+            </span>
+          </label>
+        )}
         <div className="modal-actions">
-          <button className="button button-secondary" type="button" onClick={onClose}>
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={saving}
+            onClick={onClose}
+          >
             Cancel
           </button>
-          <button className="button button-primary" disabled={saving || !time || !patientId}>
-            {saving ? 'Saving…' : appointment ? 'Save new time' : 'Book appointment'}
+          <button
+            className="button button-primary"
+            disabled={
+              saving ||
+              slots.loading ||
+              !!slots.error ||
+              !time ||
+              !patientId ||
+              (!!waitlist && !patientConfirmed)
+            }
+          >
+            {saving
+              ? 'Saving…'
+              : appointment
+                ? 'Save new time'
+                : waitlist
+                  ? 'Book confirmed visit'
+                  : 'Book appointment'}
           </button>
         </div>
       </form>

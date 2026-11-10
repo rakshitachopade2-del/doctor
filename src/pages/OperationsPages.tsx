@@ -1,6 +1,12 @@
-import { useState, useRef, type FormEvent } from 'react';
+import { useState, useRef, useEffect, type FormEvent } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { BookOpen, Check, CreditCard, FileText, Plus, Printer, Search, Trash2 } from 'lucide-react';
-import type { Invoice, InvoiceDetail, KnowledgeArticle } from '../../shared/operations';
+import type {
+  Invoice,
+  InvoiceDetail,
+  KnowledgeArticle,
+  ProcedureBillingItem,
+} from '../../shared/operations';
 import type { Patient } from '../../shared/types';
 import { api, formatDate, money, useResource, useSession, useToast } from '../lib';
 import {
@@ -27,6 +33,27 @@ export function BillingPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
+  const [params, setParams] = useSearchParams();
+  const procedureId = params.get('procedure');
+  const invoiceId = params.get('invoice');
+  useEffect(() => {
+    if (invoiceId) setSelected(invoiceId);
+  }, [invoiceId]);
+  const procedures = useResource<ProcedureBillingItem[]>(staff ? '/api/procedure-billing' : null);
+  const [source, setSource] = useState<ProcedureBillingItem | null>(null);
+  useEffect(() => {
+    if (!staff || invoiceId || !procedureId || !procedures.data) return;
+    const procedure = procedures.data.find((item) => item.id === procedureId);
+    if (procedure?.invoiceId) setSelected(procedure.invoiceId);
+    else if (procedure && procedure.status !== 'cancelled') {
+      setSource(procedure);
+      setCreating(true);
+    }
+  }, [staff, invoiceId, procedureId, procedures.data]);
+  function closeSource() {
+    setParams({}, { replace: true });
+    setSource(null);
+  }
   const rows = (invoices.data || []).filter(
     (i) =>
       (filter === 'all' || i.status === filter) &&
@@ -46,13 +73,37 @@ export function BillingPage() {
         }
         actions={
           staff ? (
-            <button className="button button-primary" onClick={() => setCreating(true)}>
+            <button
+              className="button button-primary"
+              onClick={() => {
+                closeSource();
+                setCreating(true);
+              }}
+            >
               <Plus size={17} />
               Create invoice
             </button>
           ) : undefined
         }
       />
+      {staff && procedureId && procedures.error && (
+        <ErrorState message={procedures.error} retry={procedures.reload} />
+      )}
+      {staff &&
+        procedureId &&
+        procedures.data &&
+        !procedures.data.some((item) => item.id === procedureId) && (
+          <div className="notice notice-error">The linked procedure is not available.</div>
+        )}
+      {staff &&
+        procedureId &&
+        procedures.data?.some(
+          (item) => item.id === procedureId && item.status === 'cancelled' && !item.invoiceId,
+        ) && (
+          <div className="notice">
+            This procedure is cancelled. A new linked invoice cannot be created.
+          </div>
+        )}
       <div className="grid-3 billing-metrics">
         <Card>
           <span className="muted">Total invoiced</span>
@@ -122,6 +173,9 @@ export function BillingPage() {
                     <td>
                       <strong>{i.number}</strong>
                       <small className="table-subtitle">{formatDate(i.createdAt)}</small>
+                      {i.procedureTitle && (
+                        <small className="table-subtitle">Procedure · {i.procedureTitle}</small>
+                      )}
                     </td>
                     {staff && <td>{i.patientName}</td>}
                     <td>{money(i.totalPaise / 100)}</td>
@@ -163,11 +217,17 @@ export function BillingPage() {
       </div>
       {creating && (
         <InvoiceForm
-          onClose={() => setCreating(false)}
+          source={source}
+          onClose={() => {
+            setCreating(false);
+            closeSource();
+          }}
           onCreated={(id) => {
             setCreating(false);
+            closeSource();
             setSelected(id);
             invoices.reload();
+            procedures.reload();
           }}
         />
       )}
@@ -175,7 +235,10 @@ export function BillingPage() {
         <InvoiceView
           id={selected}
           staff={staff}
-          onClose={() => setSelected(null)}
+          onClose={() => {
+            setSelected(null);
+            closeSource();
+          }}
           onUpdated={invoices.reload}
         />
       )}
@@ -185,14 +248,24 @@ export function BillingPage() {
 function InvoiceForm({
   onClose,
   onCreated,
+  source,
 }: {
   onClose: () => void;
   onCreated: (id: string) => void;
+  source: ProcedureBillingItem | null;
 }) {
   const patients = useResource<Patient[]>('/api/patients');
   const toast = useToast();
   const requestId = useRef(crypto.randomUUID());
-  const [items, setItems] = useState([{ description: '', quantity: '1', amount: '' }]);
+  const [patientId, setPatientId] = useState(source?.patientId || '');
+  const [procedureId, setProcedureId] = useState(source?.id || '');
+  const procedures = useResource<ProcedureBillingItem[]>(
+    patientId ? `/api/procedure-billing?patientId=${encodeURIComponent(patientId)}` : null,
+  );
+  const linked = procedures.data?.find((item) => item.id === procedureId) || source;
+  const [items, setItems] = useState([
+    { description: source?.title || '', quantity: '1', amount: '' },
+  ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -200,10 +273,10 @@ function InvoiceForm({
     setError('');
     setBusy(true);
     try {
-      const form = new FormData(e.currentTarget);
       const body = {
         requestId: requestId.current,
-        patientId: form.get('patientId'),
+        patientId,
+        ...(procedureId ? { procedureId } : {}),
         items: items.map((i) => ({
           description: i.description,
           quantity: Number(i.quantity),
@@ -232,7 +305,17 @@ function InvoiceForm({
         )}
         {patients.error && <ErrorState message={patients.error} retry={patients.reload} />}
         <Field label="Patient">
-          <select name="patientId" required>
+          <select
+            name="patientId"
+            required
+            value={patientId}
+            disabled={!!source}
+            onChange={(event) => {
+              setPatientId(event.target.value);
+              setProcedureId('');
+              setItems([{ description: '', quantity: '1', amount: '' }]);
+            }}
+          >
             <option value="">Select a patient</option>
             {patients.data?.map((p) => (
               <option key={p.id} value={p.id}>
@@ -241,6 +324,50 @@ function InvoiceForm({
             ))}
           </select>
         </Field>
+        {procedures.error && <ErrorState message={procedures.error} retry={procedures.reload} />}
+        {patientId && (
+          <Field
+            label="Link a procedure (optional)"
+            hint="Each procedure can have one linked invoice. Set the agreed charges below; estimates are not charged automatically."
+          >
+            <select
+              value={procedureId}
+              disabled={!!source || procedures.loading}
+              onChange={(event) => {
+                const selected = procedures.data?.find((item) => item.id === event.target.value);
+                setProcedureId(event.target.value);
+                if (selected)
+                  setItems([{ description: selected.title, quantity: '1', amount: '' }]);
+              }}
+            >
+              <option value="">No procedure link</option>
+              {procedures.data?.map((item) => (
+                <option
+                  key={item.id}
+                  value={item.id}
+                  disabled={!!item.invoiceId || item.status === 'cancelled'}
+                >
+                  {item.title}
+                  {item.invoiceNumber
+                    ? ` · ${item.invoiceNumber}`
+                    : item.status === 'cancelled'
+                      ? ' · cancelled'
+                      : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {procedureId && linked && (
+          <div className="notice">
+            <span>
+              Linked procedure: <strong>{linked.title}</strong>
+              <br />
+              Recorded estimate: {linked.estimatedCost || 'Not recorded'}. Creating an invoice
+              records a charge; it does not record a received payment.
+            </span>
+          </div>
+        )}
         {items.map((item, index) => (
           <div className="invoice-item-editor" key={index}>
             <div className="row between">
@@ -324,6 +451,7 @@ function InvoiceView({
   onUpdated: () => void;
 }) {
   const detail = useResource<InvoiceDetail>(`/api/invoices/${id}`);
+  const { session } = useSession();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
@@ -365,6 +493,28 @@ function InvoiceView({
       ) : (
         d && (
           <div className="stack invoice-document">
+            {d.invoice.procedureId && (
+              <div className="notice">
+                <span>
+                  Linked procedure: <strong>{d.invoice.procedureTitle}</strong>
+                  {session.user?.role !== 'receptionist' && (
+                    <>
+                      <br />
+                      <Link
+                        className="text-link"
+                        to={
+                          staff
+                            ? `/clinic/patients/${d.invoice.patientId}?tab=workup`
+                            : '/my-care/record?tab=workflows'
+                        }
+                      >
+                        Open procedure record →
+                      </Link>
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
             <div className="row between">
               <div>
                 <h2>{d.invoice.patientName}</h2>
@@ -374,7 +524,7 @@ function InvoiceView({
                 {d.invoice.status}
               </Badge>
             </div>
-            <div className="table-wrap">
+            <div className="table-wrap" role="region" aria-label="Invoice line items" tabIndex={0}>
               <table className="data-table">
                 <thead>
                   <tr>

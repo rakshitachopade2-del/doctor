@@ -1,6 +1,7 @@
 import { registerOperations } from './operations.ts';
 import { registerClinical } from './clinical.ts';
 import { createFollowUp } from './follow-up.ts';
+import { createWaitlist } from './waitlist.ts';
 import { registerDocuments } from './documents.ts';
 import {
   initializeActivity,
@@ -315,6 +316,7 @@ export function createApp(options: AppOptions = {}) {
     return a;
   };
   const scheduling = createScheduling({ db, actor, audit, fail });
+  const waitlist = createWaitlist({ db, actor, ownPatient, patientAccess, audit, fail });
   const followUp = createFollowUp({
     db,
     actor,
@@ -595,8 +597,11 @@ export function createApp(options: AppOptions = {}) {
         time: z.string().regex(/^\d{2}:\d{2}$/),
         mode: z.enum(['in-person', 'online']),
         reason: short.min(1),
+        waitlistId: required.optional(),
+        patientConfirmed: z.literal(true).optional(),
       })
       .parse(req.body);
+    const { waitlistId, patientConfirmed, ...appointmentInput } = input;
     const patientId = ownPatient(req, input.patientId);
     const p = patientAccess(req, patientId, true);
     const appointment = scheduling.transaction(() => {
@@ -609,7 +614,7 @@ export function createApp(options: AppOptions = {}) {
       });
       const d = get<Doctor>(db, 'doctors', input.doctorId)!;
       const value: Appointment = {
-        ...input,
+        ...appointmentInput,
         id: id(),
         patientId,
         patientName: p.name,
@@ -622,13 +627,15 @@ export function createApp(options: AppOptions = {}) {
       db.prepare(
         'INSERT INTO appointments(id,patientId,doctorId,date,time,status,data) VALUES (?,?,?,?,?,?,?)',
       ).run(value.id, patientId, d.id, value.date, value.time, value.status, JSON.stringify(value));
+      if (waitlistId) waitlist.book(req, waitlistId, value, patientConfirmed);
       audit(req, 'booked appointment', 'appointment', value.id);
-      notifyPatient(db, patientId, `appointment-created:${value.id}`, {
-        kind: 'appointment',
-        title: 'Your appointment is booked',
-        detail: `${value.date} at ${value.time} IST · ${value.doctorName}`,
-        href: '/my-care',
-      });
+      if (!waitlistId)
+        notifyPatient(db, patientId, `appointment-created:${value.id}`, {
+          kind: 'appointment',
+          title: 'Your appointment is booked',
+          detail: `${value.date} at ${value.time} IST · ${value.doctorName}`,
+          href: '/my-care',
+        });
       return value;
     });
     res.status(201).json(appointment);
@@ -938,7 +945,7 @@ export function createApp(options: AppOptions = {}) {
           detail: `${get<Patient>(db, 'patients', check.patientId)!.name} · ${plan.title}`,
           href: `/clinic/patients/${check.patientId}?tab=care&plan=${plan.id}`,
         },
-        { doctorId: plan.doctorId, excludeActorId: user.id },
+        { doctorId: followUp.owner(plan).doctorId, excludeActorId: user.id },
       );
     });
     res.status(existing ? 200 : 201).json(check);
@@ -1104,6 +1111,7 @@ export function createApp(options: AppOptions = {}) {
     });
   });
   scheduling.register(app);
+  waitlist.register(app);
   registerActivity(app, { db, actor, audit, fail });
   registerDocuments(app, { db, actor, patientAccess, audit, fail });
   registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });

@@ -1,0 +1,122 @@
+.patient-waitlist-panel {
+  scroll-margin-top: 25px;
+  border-radius: 13px;
+}
+.patient-waitlist-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.patient-waitlist-heading h2 {
+  font-size: 19px;
+  margin: 8px 0 13px;
+}
+.patient-waitlist-heading > svg {
+  flex-shrink: 0;
+  color: #4d6c43;
+}
+.patient-waitlist-help {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #596b50;
+}
+.patient-waitlist-toolbar,
+.patient-waitlist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.patient-waitlist-toolbar {
+  margin: 18px 0;
+}
+.patient-waitlist-entry {
+  border-top: 1px solid #e1e9dc;
+  padding: 20px 0;
+}
+.patient-waitlist-entry-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.patient-waitlist-entry-heading h3 {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.patient-waitlist-entry-heading p {
+  font-size: 11px;
+  margin: 0;
+  color: #5a6c51;
+}
+.patient-waitlist-entry-heading .badge {
+  flex-shrink: 0;
+}
+.patient-waitlist-dates {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #4b6441;
+  font-size: 12px;
+  margin: 15px 0 10px;
+}
+.patient-waitlist-dates svg {
+  flex-shrink: 0;
+}
+.patient-waitlist-reason {
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #405539;
+}
+.patient-waitlist-created {
+  font-size: 10px;
+  color: #607052;
+  margin-bottom: 16px;
+}
+.patient-waitlist-history {
+  margin-top: 10px;
+}
+.patient-waitlist-selected {
+  outline: 2px solid #9eb48b;
+  outline-offset: 7px;
+  border-radius: 6px;
+}
+.patient-waitlist-form {
+  gap: 17px;
+}
+.booking-waitlist-alternative {
+  margin-top: 24px;
+  padding-top: 19px;
+  border-top: 1px solid #e4eadf;
+}
+.booking-waitlist-alternative h3 {
+  font-size: 13px;
+  margin: 0 0 7px;
+}
+.booking-waitlist-alternative p {
+  font-size: 11px;
+  color: #5a6d51;
+  line-height: 1.8;
+}
+.booking-waitlist-notice {
+  margin-bottom: 22px;
+}
+@media (max-width: 760px) {
+  .patient-waitlist-entry-heading {
+    flex-wrap: wrap;
+  }
+  .patient-waitlist-actions .button {
+    font-size: 11px;
+  }
+}
+@media print {
+  .patient-waitlist-toolbar,
+  .patient-waitlist-actions {
+    display: none;
+  }
+}

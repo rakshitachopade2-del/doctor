@@ -456,3 +456,291 @@ test('invoice creation, payment recording, publication and portal provisioning l
     );
   }
 });
+
+async function billingProcedure(patientId = 'patient-ananya') {
+  const result = await call('/procedures', {
+    method: 'POST',
+    client: doctor,
+    body: {
+      patientId,
+      title: 'Synthetic procedure for billing',
+      indication: 'Private clinical indication',
+      benefits: 'Private discussion benefit',
+      risks: 'Private clinical risks',
+      alternatives: 'Private alternatives',
+      aftercare: 'Private aftercare',
+      estimatedCost: '₹1,200 estimated; confirm agreed charges',
+    },
+  });
+  assert.equal(result.status, 201);
+  return result.data;
+}
+
+test('procedure billing exposes operational fields to reception without clinical discussion or outcomes', async () => {
+  const procedure = await billingProcedure();
+  const response = await call('/procedure-billing?patientId=patient-ananya', { client: reception });
+  assert.equal(response.status, 200);
+  const projection = response.data.find((item: any) => item.id === procedure.id);
+  assert.equal(projection.title, procedure.title);
+  assert.equal(projection.status, 'planned');
+  assert.equal(projection.invoiceId, null);
+  for (const key of [
+    'indication',
+    'benefits',
+    'risks',
+    'alternatives',
+    'aftercare',
+    'agreements',
+    'completion',
+  ])
+    assert.ok(!(key in projection));
+  assert.ok(!JSON.stringify(response.data).includes('Private clinical risks'));
+  assert.equal((await call('/procedure-billing', { client: patient })).status, 403);
+  assert.equal((await call('/procedure-billing')).status, 401);
+});
+
+test('procedure-linked invoices validate patient scope and retain retry-safe immutable linkage', async () => {
+  const procedure = await billingProcedure();
+  const requestId = randomUUID();
+  const body = {
+    requestId,
+    patientId: 'patient-ananya',
+    procedureId: procedure.id,
+    items: [
+      { description: 'Agreed synthetic procedure fee', quantity: 1, unitAmountPaise: 125050 },
+    ],
+  };
+  assert.equal(
+    (
+      await call('/invoices', {
+        method: 'POST',
+        client: reception,
+        body: { ...body, patientId: 'patient-2' },
+      })
+    ).status,
+    400,
+  );
+  const created = await call('/invoices', { method: 'POST', client: reception, body });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.procedureId, procedure.id);
+  assert.equal(created.data.procedureTitle, procedure.title);
+  assert.equal(created.data.totalPaise, 125050);
+  assert.equal((await call('/invoices', { method: 'POST', client: reception, body })).status, 200);
+  assert.equal(
+    (
+      await call('/invoices', {
+        method: 'POST',
+        client: reception,
+        body: { ...body, procedureId: undefined },
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await call('/invoices', {
+        method: 'POST',
+        client: reception,
+        body: { ...body, requestId: randomUUID() },
+      })
+    ).status,
+    409,
+  );
+  const projection = (await call('/procedure-billing', { client: reception })).data.find(
+    (item: any) => item.id === procedure.id,
+  );
+  assert.equal(projection.invoiceId, created.data.id);
+  assert.equal(projection.invoiceNumber, created.data.number);
+  assert.equal((await call(`/invoices/${created.data.id}`, { client: patient })).status, 200);
+  assert.equal((await call(`/invoices/${created.data.id}`, { client: other })).status, 403);
+  assert.throws(
+    () =>
+      app.locals.db
+        .prepare('DELETE FROM procedureInvoiceLinks WHERE procedureId=?')
+        .run(procedure.id),
+    /immutable/,
+  );
+  assert.throws(
+    () =>
+      app.locals.db
+        .prepare('UPDATE procedureInvoiceLinks SET invoiceId=? WHERE procedureId=?')
+        .run(created.data.id, procedure.id),
+    /immutable/,
+  );
+});
+
+test('concurrent procedure invoice creation charges once and consumes only one sequence value', async () => {
+  const procedure = await billingProcedure();
+  const serial = app.locals.db.prepare('SELECT nextValue FROM invoiceSequence').get().nextValue;
+  const body = {
+    patientId: 'patient-ananya',
+    procedureId: procedure.id,
+    items: [{ description: 'Synthetic procedure', quantity: 1, unitAmountPaise: 10000 }],
+  };
+  const responses = await Promise.all(
+    [1, 2].map(() =>
+      call('/invoices', {
+        method: 'POST',
+        client: reception,
+        body: { ...body, requestId: randomUUID() },
+      }),
+    ),
+  );
+  assert.deepEqual(responses.map((value) => value.status).sort(), [201, 409]);
+  assert.equal(
+    app.locals.db.prepare('SELECT nextValue FROM invoiceSequence').get().nextValue,
+    Number(serial) + 1,
+  );
+  assert.equal(
+    app.locals.db
+      .prepare('SELECT count(*) AS n FROM procedureInvoiceLinks WHERE procedureId=?')
+      .get(procedure.id).n,
+    1,
+  );
+});
+
+test('cancelled procedures reject new linkage while previously issued invoices and retries remain intact', async () => {
+  const cancelled = await billingProcedure();
+  assert.equal(
+    (
+      await call(`/procedures/${cancelled.id}/cancel`, {
+        method: 'POST',
+        client: doctor,
+        body: { reason: 'Synthetic cancellation' },
+      })
+    ).status,
+    200,
+  );
+  const body = {
+    patientId: 'patient-ananya',
+    procedureId: cancelled.id,
+    items: [{ description: 'Synthetic fee', quantity: 1, unitAmountPaise: 10000 }],
+  };
+  assert.equal((await call('/invoices', { method: 'POST', client: reception, body })).status, 409);
+  const existing = await billingProcedure();
+  const retry = { ...body, procedureId: existing.id, requestId: randomUUID() };
+  const invoice = (await call('/invoices', { method: 'POST', client: reception, body: retry }))
+    .data;
+  await call(`/procedures/${existing.id}/cancel`, {
+    method: 'POST',
+    client: doctor,
+    body: { reason: 'Cancellation after invoice; charges reconciled separately' },
+  });
+  const repeated = await call('/invoices', { method: 'POST', client: reception, body: retry });
+  assert.equal(repeated.status, 200);
+  assert.equal(repeated.data.id, invoice.id);
+  assert.equal(repeated.data.totalPaise, invoice.totalPaise);
+  const item = (await call('/procedure-billing', { client: reception })).data.find(
+    (row: any) => row.id === existing.id,
+  );
+  assert.equal(item.status, 'cancelled');
+  assert.equal(item.invoiceId, invoice.id);
+});
+
+test('invoice and payment activity is patient-scoped and safe to retry', async () => {
+  const body = {
+    requestId: randomUUID(),
+    patientId: 'patient-ananya',
+    items: [{ description: 'Synthetic notification test', quantity: 1, unitAmountPaise: 20050 }],
+  };
+  const invoice = (await call('/invoices', { method: 'POST', client: reception, body })).data;
+  await call('/invoices', { method: 'POST', client: reception, body });
+  const payment = { requestId: randomUUID(), amountPaise: 10025, method: 'cash' };
+  assert.equal(
+    (
+      await call(`/invoices/${invoice.id}/payments`, {
+        method: 'POST',
+        client: reception,
+        body: payment,
+      })
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await call(`/invoices/${invoice.id}/payments`, {
+        method: 'POST',
+        client: reception,
+        body: payment,
+      })
+    ).status,
+    200,
+  );
+  const href = `/my-care/invoices?invoice=${invoice.id}`;
+  const items = (await call('/activity?limit=100', { client: patient })).data.items.filter(
+    (item: any) => item.href === href,
+  );
+  assert.equal(items.length, 2);
+  assert.ok(items.every((item: any) => item.kind === 'billing'));
+  assert.ok(
+    !(await call('/activity?limit=100', { client: other })).data.items.some(
+      (item: any) => item.href === href,
+    ),
+  );
+});
+
+test('billing notification failures roll back invoices, procedure links and payments atomically', async () => {
+  const procedure = await billingProcedure();
+  const body = {
+    requestId: randomUUID(),
+    patientId: 'patient-ananya',
+    procedureId: procedure.id,
+    items: [{ description: 'Synthetic rollback fee', quantity: 1, unitAmountPaise: 30000 }],
+  };
+  const db = app.locals.db;
+  const serial = db.prepare('SELECT nextValue FROM invoiceSequence').get().nextValue;
+  const failActivity = () =>
+    db.exec(
+      "CREATE TRIGGER synthetic_billing_activity_failure BEFORE INSERT ON activity WHEN json_extract(NEW.data,'$.kind')='billing' BEGIN SELECT RAISE(ABORT,'Synthetic billing notification failure'); END;",
+    );
+  failActivity();
+  try {
+    assert.equal(
+      (await call('/invoices', { method: 'POST', client: reception, body })).status,
+      500,
+    );
+  } finally {
+    db.exec('DROP TRIGGER synthetic_billing_activity_failure');
+  }
+  assert.equal(db.prepare('SELECT nextValue FROM invoiceSequence').get().nextValue, serial);
+  assert.equal(
+    db
+      .prepare('SELECT count(*) AS n FROM procedureInvoiceLinks WHERE procedureId=?')
+      .get(procedure.id).n,
+    0,
+  );
+  assert.equal(
+    db.prepare('SELECT count(*) AS n FROM invoices WHERE requestId=?').get(body.requestId).n,
+    0,
+  );
+  const invoice = (await call('/invoices', { method: 'POST', client: reception, body })).data;
+  const payment = { requestId: randomUUID(), amountPaise: 15000, method: 'cash' };
+  failActivity();
+  try {
+    assert.equal(
+      (
+        await call(`/invoices/${invoice.id}/payments`, {
+          method: 'POST',
+          client: reception,
+          body: payment,
+        })
+      ).status,
+      500,
+    );
+  } finally {
+    db.exec('DROP TRIGGER synthetic_billing_activity_failure');
+  }
+  const detail = (await call(`/invoices/${invoice.id}`, { client: patient })).data;
+  assert.equal(detail.invoice.paidPaise, 0);
+  assert.equal(detail.payments.length, 0);
+  assert.equal(
+    (
+      await call(`/invoices/${invoice.id}/payments`, {
+        method: 'POST',
+        client: reception,
+        body: payment,
+      })
+    ).status,
+    201,
+  );
+});

@@ -15,11 +15,15 @@ export default defineConfig({
   // Each workflow group uses a fresh database and independent server. This
   // keeps fixtures isolated as coverage grows without bypassing auth limits.
   projects: [
-    { name: 'operations', testMatch: /(?:accessibility|identity|operations|scheduling)\.spec\.ts/ },
+    {
+      name: 'operations',
+      testMatch:
+        /(?:^|\/)(?:accessibility|identity|operations|scheduling|waitlist|procedure-billing)\.spec\.ts/,
+    },
     {
       name: 'care',
       testMatch:
-        /(?:clinic|patient|clinical-workflows|patient-workflows|follow-up|patient-follow-up|activity)\.spec\.ts/,
+        /(?:^|\/)(?:clinic|patient|clinical-workflows|patient-workflows|follow-up|patient-follow-up|activity|patient-waitlist)\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5184' },
     },
   ],

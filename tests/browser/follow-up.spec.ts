@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import type { CarePlan, ClinicSettings } from '../../shared/types';
-import type { FollowUpReview, FollowUpWorkItem } from '../../shared/follow-up';
+import type { CarePlan, ClinicSettings, Doctor } from '../../shared/types';
+import type { FollowUpAssignment, FollowUpReview, FollowUpWorkItem } from '../../shared/follow-up';
 
 const clinicToday = () =>
   new Intl.DateTimeFormat('en-CA', {
@@ -65,6 +65,34 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
     });
     expect(created.status()).toBe(201);
     const plan: CarePlan = await created.json();
+    const ownerSuffix = Date.now();
+    const newDoctorResponse = await page.request.post('/api/doctors', {
+      headers,
+      data: {
+        name: `Dr. Handover ${ownerSuffix}`,
+        title: 'Dermatologist',
+        qualifications: 'Synthetic profile',
+        specialties: ['General dermatology'],
+        experience: 4,
+        fee: 600,
+        bio: 'Synthetic profile for ownership verification.',
+        languages: ['English'],
+      },
+    });
+    expect(newDoctorResponse.status()).toBe(201);
+    const receivingDoctor: Doctor = await newDoctorResponse.json();
+    const newAccount = await page.request.post('/api/users', {
+      headers,
+      data: {
+        name: receivingDoctor.name,
+        email: `handover-${ownerSuffix}@example.test`,
+        password: 'HandoverFixture2026!',
+        role: 'doctor',
+        doctorId: receivingDoctor.id,
+      },
+    });
+    expect(newAccount.status()).toBe(201);
+    expect((await newAccount.json()).mustChangePassword).toBe(true);
     const checkIn = async (note: string, feeling: 'same' | 'worse' | 'better') => {
       const response = await patient.post('/api/check-ins', {
         headers: patientHeaders,
@@ -148,6 +176,55 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
     await page.getByRole('button', { name: 'Refresh worklist', exact: true }).click();
     await page.getByRole('button', { name: 'New reports', exact: true }).click();
     await expect(row.getByText('1 unreviewed report', { exact: true })).toBeVisible();
+    await row.getByRole('button', { name: 'Assign follow-up', exact: true }).click();
+    dialog = page.getByRole('dialog', { name: 'Assign follow-up owner', exact: true });
+    await dialog
+      .getByLabel('New follow-up owner', { exact: true })
+      .selectOption(receivingDoctor.id);
+    const handoverReason =
+      'Synthetic handover for continuity while the original clinician is away.';
+    await dialog.getByLabel('Reason for handover', { exact: true }).fill(handoverReason);
+    await audit(page);
+    await checkIn('Report amended during handover; still awaits clinical review.', 'better');
+    const staleAssignment = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/care-plans/${plan.id}/assignment`) &&
+        response.request().method() === 'POST',
+    );
+    await dialog.getByRole('button', { name: 'Save assignment', exact: true }).click();
+    expect((await staleAssignment).status()).toBe(409);
+    await expect(
+      dialog.getByRole('button', { name: 'Save assignment', exact: true }),
+    ).toBeDisabled();
+    await dialog.getByRole('button', { name: 'Refresh assignment context', exact: true }).click();
+    await expect(dialog.getByLabel('Reason for handover', { exact: true })).toHaveValue(
+      handoverReason,
+    );
+    await dialog.getByRole('button', { name: 'Save assignment', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(row.getByText(`Owner: ${receivingDoctor.name}`, { exact: true })).toBeVisible();
+    await expect(row.getByText('1 unreviewed report', { exact: true })).toBeVisible();
+    await page.getByLabel('Plan owner', { exact: true }).selectOption('mine');
+    await expect(row).toHaveCount(0);
+    await page.getByLabel('Plan owner', { exact: true }).selectOption('all');
+    await expect(row).toBeVisible();
+    const assignedWorklist: FollowUpWorkItem[] = await (
+      await page.request.get('/api/follow-up-worklist?scope=all')
+    ).json();
+    const assignedItem = assignedWorklist.find((item) => item.carePlan.id === plan.id)!;
+    expect(assignedItem.ownerDoctorId).toBe(receivingDoctor.id);
+    expect(assignedItem.carePlan.doctorId).toBe(plan.doctorId);
+    expect(assignedItem.unreviewedCount).toBe(1);
+    const assignments: FollowUpAssignment[] = await (
+      await page.request.get(`/api/care-plans/${plan.id}/assignments`)
+    ).json();
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0]).toMatchObject({
+      doctorId: receivingDoctor.id,
+      previousDoctorId: plan.doctorId,
+      reason: handoverReason,
+    });
+    expect((await patient.get(`/api/care-plans/${plan.id}/assignments`)).status()).toBe(403);
     const paused = await page.request.patch('/api/settings', {
       headers,
       data: { modules: { ...originalSettings.modules, followUp: false } },
@@ -158,6 +235,7 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
     await page.getByRole('button', { name: 'New reports', exact: true }).click();
     await expect(row.getByRole('button', { name: 'Review progress', exact: true })).toBeDisabled();
     await expect(page.getByText(/Follow-up activity is paused/)).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Assign follow-up', exact: true })).toBeEnabled();
     await row.getByRole('link', { name: 'View plan', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`tab=care&plan=${plan.id}`));
     const card = page.locator(`[id="care-plan-${plan.id}"]`);
@@ -166,6 +244,14 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
       'true',
     );
     await expect(card.getByText(patientInstructions, { exact: true })).toBeVisible();
+    await expect(
+      card.locator('.fu-owner-current').getByText(receivingDoctor.name, { exact: true }),
+    ).toBeVisible();
+    await card
+      .locator('.fu-owner-panel')
+      .getByText('Responsibility history (1)', { exact: true })
+      .click();
+    await expect(card.getByText(handoverReason, { exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Review progress', exact: true })).toBeDisabled();
     const blocked = await page.request.post(`/api/care-plans/${plan.id}/reviews`, {
       headers,
@@ -187,7 +273,9 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
     await card.getByRole('button', { name: 'Review progress', exact: true }).click();
     dialog = page.getByRole('dialog');
     await expect(
-      dialog.getByText('A later same-day update must re-enter the review queue.', { exact: true }),
+      dialog.getByText('Report amended during handover; still awaits clinical review.', {
+        exact: true,
+      }),
     ).toBeVisible();
     await dialog
       .getByLabel('Clinician assessment', { exact: true })
@@ -216,7 +304,7 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
     ).toEqual(
       expect.arrayContaining([
         'Corrected report received while the review was open.',
-        'A later same-day update must re-enter the review queue.',
+        'Report amended during handover; still awaits clinical review.',
       ]),
     );
     await audit(page);

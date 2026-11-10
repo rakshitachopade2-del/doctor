@@ -30,6 +30,7 @@ These are intentionally public **development-only credentials**. Production star
 
 - **Discovery:** doctor profiles, focus areas, qualifications, languages, consultation fees, and clinic contact information.
 - **Booking:** in-person or online appointments, live availability, protection against overlapping doctor and patient bookings, rescheduling, cancellation, check-in, consultation progression, no-shows, and `.ics` calendar export with the recorded visit duration.
+- **Waitlist:** patient and reception requests with a preferred clinician, mode and date window; explicit confirmation before booking; atomic appointment linkage, withdrawal and retained history. Requests do not reserve slots.
 - **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute appointments, doctor leave, and clinic-wide closures. Schedule changes protect existing bookings.
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
 - **Patient preparation:** a structured four-step history intake, reviewable summary, explicit sharing agreement, and clinician access to submitted history.
@@ -38,9 +39,9 @@ These are intentionally public **development-only credentials**. Production star
 - **Procedure records:** documented indication, benefits, risks, alternatives, estimated cost and aftercare; patient agree/decline decisions and their history; clinician completion and outcome records. These record a discussion and decision, not a validated legal e-signature.
 - **PDF reports:** private uploads up to 5 MB, original-file retention, source/author/date metadata, SHA-256 file fingerprints, and authorized downloads. Uploading a report does not interpret its medical contents.
 - **Treatment communication:** clinician-entered medication instructions, schedules, duration, expectations, costs, precautions, and follow-up dates. Patients can review both active and completed plans.
-- **Follow-up:** daily patient-reported check-ins, worklists for due reviews and new reports, clinician assessments, shared next steps, requested visits, and documented completion. Reviews preserve the exact report versions considered; corrected reports return to the review queue.
-- **Activity inbox:** private in-app updates for messages, appointments, patient reports, shared investigation findings, procedures, and follow-up reviews; unread counts, explicit read controls, pagination, and links to the underlying record. Reading an update does not complete a clinical review.
-- **Billing:** itemized invoices, exact integer-paise arithmetic, recorded cash/card/UPI/bank payments, partial balances, printable invoices, and private patient invoice access. Invoice and payment retries are idempotent.
+- **Follow-up:** daily patient-reported check-ins, worklists for due reviews and new reports, assignable clinical ownership, clinician assessments, shared next steps, requested visits, and documented completion. Reviews preserve the exact report versions considered; corrected reports return to the review queue.
+- **Activity inbox:** private in-app updates for messages, appointments, waitlist changes, invoices and received payments, patient reports, shared investigation findings, procedures, and follow-up reviews; unread counts, explicit read controls, pagination, and links to the underlying record. Reading an update does not complete a clinical review.
+- **Billing:** itemized invoices, exact integer-paise arithmetic, recorded cash/card/UPI/bank payments, partial balances, printable invoices, and private patient invoice access. Procedures can link to one invoice with staff-entered agreed charges; estimates are never charged automatically. Invoice and payment retries are idempotent.
 - **Knowledge library:** clinician-authored drafts, explicit review before public publication, search, and retained article revisions. No AI-generated clinical claims are presented as approved information.
 - **Administration:** clinic details, doctor profiles, staff accounts, optional module switches, activity logs, and verified portal access for an existing clinic patient. Pausing a module stops new activity while preserving access to existing records.
 - **Accounts and access:** searchable account management, staff-role/profile changes, suspension/restoration without deleting records, required initial-password changes, and protection against removing the last active administrator. Patients and staff cannot be converted into each other or linked to different patient records.
@@ -69,6 +70,14 @@ In **Accounts & access**, an administrator can suspend access, restore an accoun
 
 Every signed-in person can use **Account & security** to change their password, see their active browser sessions, and end sessions they no longer need. Session labels describe the browser family; they are not verified device identities or locations.
 
+## Coordinate a waiting patient
+
+Patients can join the waitlist from **My care** or booking. Reception can add requests in **Waitlist**, filter by doctor and status, and contact the patient using the recorded phone number. A request records a clinician, consultation mode and inclusive date window. One active request is allowed per patient, clinician and mode. It does not reserve time or send an external offer.
+
+After the patient confirms a specific slot, staff can book directly from the request. The appointment and booked state save together; a conflict leaves the request waiting. Patients can also choose and confirm their own available slot. Withdrawn, booked and expired requests remain in history. Cancelling the resulting appointment does not automatically reopen the old request.
+
+For procedure charges, open **Procedure billing** from the clinical record or choose a procedure when creating an invoice. Reception sees the procedure title, estimate and billing status without clinical discussion or outcomes. Enter agreed amounts explicitly. Each procedure links to one invoice, and reopening the action displays that invoice. Cancelling a procedure preserves an already issued invoice; refunds and adjustments are not automated.
+
 ## Continue a documented care journey
 
 An investigation connects the clinician’s request to submitted results and a separate clinical review. Patients can upload a PDF directly while sharing a result, or select reports already in their private record. Results remain submitted information until reviewed; the platform produces no automatic interpretation. A clinician can retain an internal review and publish it later. Patients only receive published summaries, with the reviewing clinician and date shown.
@@ -79,11 +88,11 @@ Consultation corrections use attributed amendments with a reason, preserving the
 
 ## Close the follow-up loop
 
-**Follow-up care** separates due plans, new patient reports, upcoming reviews, and completed plans. Doctors start with their own authored plans; administrators start with all clinic plans. This ownership filter organizes work and does not restrict authorized clinicians from reviewing another clinic plan.
+**Follow-up care** separates due plans, new patient reports, upcoming reviews, and completed plans. Doctors start with plans currently assigned to them; administrators start with all clinic plans. A plan initially belongs to its author. Its current owner or an administrator can transfer follow-up responsibility to another clinician with an active account, with a required reason and retained assignment history. This ownership filter organizes work and does not restrict authorized clinicians from reviewing another clinic plan.
 
 A review records a clinician-only assessment, patient-facing instructions, and an outcome. Continuing follow-up or requesting a visit requires a next review date; completing the plan ends new check-ins. The original treatment instructions, medication schedule, treatment end date, and original follow-up date remain intact. A later review date does not extend a prescription, and requesting a visit does not book an appointment. Instructions appear in the patient portal as soon as the review is saved.
 
-Each review preserves snapshots of the patient reports available at that point. Correcting a same-day check-in makes the changed report eligible for review again. If a report or another review changes while the review form is open, saving is rejected; the form keeps the draft and asks the clinician to refresh the context before trying again. Previous reviews remain available when the follow-up module is paused.
+Each review preserves snapshots of the patient reports available at that point. Correcting a same-day check-in makes the changed report eligible for review again. If a report, another review, or ownership changes while the review form is open, saving is rejected; the form keeps the draft and asks the clinician to refresh the context before trying again. Previous reviews remain available when the follow-up module is paused.
 
 The **Activity** inbox records new events from this release onward. It does not backfill notifications for older records or for events that occurred before an eligible account was available. Updates become visible when the app is opened or refreshed; there is no external delivery, background reminder service, or push subscription. Unread/read is the account holder’s explicit inbox state, not evidence that a clinician assessed a report or that a patient followed instructions. Marking the current activity snapshot read leaves subsequent arrivals unread.
 

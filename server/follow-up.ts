@@ -9,9 +9,11 @@ import type {
   FollowUpSummary,
   FollowUpWorkItem,
   PatientFollowUpReview,
+  FollowUpAssignment,
+  FollowUpOwner,
 } from '../shared/follow-up.ts';
 import { clinicToday, get, id, list, nowISO, type DB } from './db.ts';
-import { notifyPatient } from './activity.ts';
+import { notifyPatient, notifyClinicians } from './activity.ts';
 
 interface FollowUpContext {
   db: DB;
@@ -45,7 +47,15 @@ export function createFollowUp(context: FollowUpContext) {
   CREATE TRIGGER IF NOT EXISTS prevent_follow_up_review_update BEFORE UPDATE ON followUpReviews
     BEGIN SELECT RAISE(ABORT,'Follow-up review history is append-only'); END;
   CREATE TRIGGER IF NOT EXISTS prevent_follow_up_review_delete BEFORE DELETE ON followUpReviews
-    BEGIN SELECT RAISE(ABORT,'Follow-up review history is append-only'); END;`);
+    BEGIN SELECT RAISE(ABORT,'Follow-up review history is append-only'); END;
+  CREATE TABLE IF NOT EXISTS followUpAssignments (
+    id TEXT PRIMARY KEY, carePlanId TEXT NOT NULL REFERENCES carePlans(id), data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS follow_up_assignments_plan ON followUpAssignments(carePlanId);
+  CREATE TRIGGER IF NOT EXISTS prevent_follow_up_assignment_update BEFORE UPDATE ON followUpAssignments
+    BEGIN SELECT RAISE(ABORT,'Follow-up assignment history is append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS prevent_follow_up_assignment_delete BEFORE DELETE ON followUpAssignments
+    BEGIN SELECT RAISE(ABORT,'Follow-up assignment history is append-only'); END;`);
   function transaction<T>(operation: () => T): T {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -62,6 +72,40 @@ export function createFollowUp(context: FollowUpContext) {
       .prepare('SELECT data FROM followUpReviews WHERE carePlanId=? ORDER BY rowid DESC')
       .all(carePlanId)
       .map((row) => JSON.parse(row.data as string) as FollowUpReview);
+  }
+  function assignments(carePlanId: string): FollowUpAssignment[] {
+    return db
+      .prepare('SELECT data FROM followUpAssignments WHERE carePlanId=? ORDER BY rowid DESC')
+      .all(carePlanId)
+      .map((row) => JSON.parse(row.data as string) as FollowUpAssignment);
+  }
+  function owner(plan: CarePlan) {
+    const assignment = assignments(plan.id)[0] ?? null;
+    const doctorId = assignment?.doctorId ?? plan.doctorId;
+    return {
+      doctorId,
+      doctorName:
+        get<Doctor>(db, 'doctors', doctorId)?.name ??
+        assignment?.doctorName ??
+        plan.doctorName ??
+        'Clinic doctor',
+      assignment,
+    };
+  }
+  function eligibleOwners(): FollowUpOwner[] {
+    const counts = new Map<string, number>();
+    for (const user of list<User>(db, 'users')) {
+      if (user.active !== false && ['doctor', 'admin'].includes(user.role) && user.doctorId)
+        counts.set(user.doctorId, (counts.get(user.doctorId) ?? 0) + 1);
+    }
+    return list<Doctor>(db, 'doctors')
+      .filter((doctor) => counts.has(doctor.id))
+      .map((doctor) => ({
+        doctorId: doctor.id,
+        doctorName: doctor.name,
+        activeAccounts: counts.get(doctor.id)!,
+      }))
+      .sort((a, b) => a.doctorName.localeCompare(b.doctorName));
   }
   function snapshots(carePlanId: string): CheckInSnapshot[] {
     return db
@@ -120,6 +164,7 @@ export function createFollowUp(context: FollowUpContext) {
       endDate: plan.endDate,
       followUpDate: plan.followUpDate,
       latestReviewId: latestReview?.id ?? null,
+      latestAssignmentId: owner(plan).assignment?.id ?? null,
       checkIns: currentSnapshots.map((version) => ({
         id: version.id,
         contentHash: version.contentHash,
@@ -245,22 +290,89 @@ export function createFollowUp(context: FollowUpContext) {
     });
   }
   function register(app: Express) {
+    app.get('/api/follow-up-owners', (req: AuthRequest, res) => {
+      actor(req, ['admin', 'doctor']);
+      res.json(eligibleOwners());
+    });
+    app.get('/api/care-plans/:id/assignments', (req: AuthRequest, res) => {
+      actor(req, ['admin', 'doctor']);
+      const plan = planAccess(req, String(req.params.id));
+      audit(req, 'viewed follow-up assignment history', 'carePlan', plan.id);
+      res.json(assignments(plan.id));
+    });
+    app.post('/api/care-plans/:id/assignment', (req: AuthRequest, res) => {
+      const user = actor(req, ['admin', 'doctor']);
+      const input = z
+        .object({
+          doctorId: z.string().trim().min(1).max(300),
+          reason: z.string().trim().min(1).max(8000),
+          expectedRevision: revisionSchema,
+        })
+        .strict()
+        .parse(req.body);
+      const result = transaction(() => {
+        const plan = planAccess(req, String(req.params.id));
+        const previous = owner(plan);
+        if (user.role === 'doctor' && user.doctorId !== previous.doctorId)
+          fail(
+            403,
+            'Only the current follow-up owner or an administrator can reassign this care plan.',
+          );
+        assertCurrent(input.expectedRevision, state(plan).revision);
+        const next = eligibleOwners().find((candidate) => candidate.doctorId === input.doctorId);
+        if (!next) return fail(400, 'Choose a clinician with an active linked account.');
+        if (next.doctorId === previous.doctorId)
+          fail(409, 'This clinician already owns this follow-up.');
+        const assignment: FollowUpAssignment = {
+          id: id(),
+          carePlanId: plan.id,
+          doctorId: next.doctorId,
+          doctorName: next.doctorName,
+          previousDoctorId: previous.doctorId,
+          previousDoctorName: previous.doctorName,
+          reason: input.reason,
+          assignedById: user.id,
+          assignedByName: user.name,
+          createdAt: nowISO(),
+        };
+        db.prepare('INSERT INTO followUpAssignments(id,carePlanId,data) VALUES (?,?,?)').run(
+          assignment.id,
+          plan.id,
+          JSON.stringify(assignment),
+        );
+        audit(req, 'assigned follow-up ownership', 'carePlan', plan.id);
+        notifyClinicians(
+          db,
+          plan.patientId,
+          `follow-up-assignment:${assignment.id}`,
+          {
+            kind: 'follow-up',
+            title: 'Follow-up care was assigned to you',
+            detail: 'Open the care plan to review the handover and current patient reports.',
+            href: `/clinic/patients/${plan.patientId}?tab=care&plan=${plan.id}`,
+          },
+          { doctorId: next.doctorId, excludeActorId: user.id },
+        );
+        return hydratePlan(plan);
+      });
+      res.status(201).json(result);
+    });
     app.get('/api/follow-up-worklist', (req: AuthRequest, res) => {
       const user = actor(req, ['admin', 'doctor']);
       const query = z.object({ scope: z.enum(['mine', 'all']).optional() }).parse(req.query);
       const scope = query.scope ?? (user.role === 'admin' ? 'all' : 'mine');
       const today = clinicToday();
       const worklist: FollowUpWorkItem[] = list<CarePlan>(db, 'carePlans')
-        .filter((plan) => scope === 'all' || plan.doctorId === user.doctorId)
+        .filter((plan) => scope === 'all' || owner(plan).doctorId === user.doctorId)
         .map((plan) => {
           const current = state(plan),
-            patient = get<Patient>(db, 'patients', plan.patientId)!;
+            patient = get<Patient>(db, 'patients', plan.patientId)!,
+            assignedOwner = owner(plan);
           return {
             carePlan: hydratePlan(plan, false, current),
             patient,
-            ownerDoctorId: plan.doctorId,
-            ownerDoctorName:
-              get<Doctor>(db, 'doctors', plan.doctorId)?.name ?? plan.doctorName ?? 'Clinic doctor',
+            ownerDoctorId: assignedOwner.doctorId,
+            ownerDoctorName: assignedOwner.doctorName,
             revision: current.revision,
             latestReview: current.latestReview,
             unreviewedCheckIns: current.unreviewedCheckIns,
@@ -342,5 +454,5 @@ export function createFollowUp(context: FollowUpContext) {
       res.status(201).json(updated);
     });
   }
-  return { hydratePlan, hydratePlans, recordLegacyStatus, register };
+  return { hydratePlan, hydratePlans, recordLegacyStatus, owner, register };
 }

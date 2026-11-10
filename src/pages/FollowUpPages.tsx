@@ -10,7 +10,12 @@ import {
   Search,
 } from 'lucide-react';
 import type { CarePlan, CheckIn, ClinicSettings } from '../../shared/types';
-import type { FollowUpReview, FollowUpWorkItem } from '../../shared/follow-up';
+import type {
+  FollowUpAssignment,
+  FollowUpOwner,
+  FollowUpReview,
+  FollowUpWorkItem,
+} from '../../shared/follow-up';
 import { ApiError, api, formatDate, today, useResource, useSession, useToast } from '../lib';
 import {
   Avatar,
@@ -52,6 +57,7 @@ export function FollowUpsPage() {
   const [filter, setFilter] = useState('due');
   const [search, setSearch] = useState('');
   const [reviewId, setReviewId] = useState<string | null>(null);
+  const [assignmentId, setAssignmentId] = useState<string | null>(null);
   const enabled = settings.data?.modules.followUp === true;
   const canReview = !!session.user?.doctorId;
   const data = resource.data ?? [];
@@ -216,7 +222,7 @@ export function FollowUpsPage() {
                               {item.patient.name}
                             </Link>
                             <span className="table-sub">{plan.title}</span>
-                            <span className="table-sub">{item.ownerDoctorName}</span>
+                            <span className="table-sub">Owner: {item.ownerDoctorName}</span>
                           </div>
                         </div>
                       </td>
@@ -269,6 +275,15 @@ export function FollowUpsPage() {
                               Review progress
                             </button>
                           )}
+                          {(session.user?.role === 'admin' ||
+                            session.user?.doctorId === item.ownerDoctorId) && (
+                            <button
+                              className="button button-secondary button-small"
+                              onClick={() => setAssignmentId(plan.id)}
+                            >
+                              Assign follow-up
+                            </button>
+                          )}
                           <Link className="button button-ghost button-small" to={planLink(plan)}>
                             View plan <ArrowRight size={13} />
                           </Link>
@@ -290,6 +305,16 @@ export function FollowUpsPage() {
           reminders.
         </span>
       </div>
+      {assignmentId && (
+        <FollowUpAssignmentModal
+          carePlanId={assignmentId}
+          onClose={() => setAssignmentId(null)}
+          onSaved={() => {
+            setAssignmentId(null);
+            void resource.reload();
+          }}
+        />
+      )}
       {reviewId && (
         <FollowUpReviewModal
           carePlanId={reviewId}
@@ -394,6 +419,7 @@ export function FollowUpPlanSection({
   const active = statusOf(plan) === 'active';
   return (
     <section className="fu-plan-section">
+      <FollowUpOwnerPanel plan={plan} onChanged={onChanged} />
       <div className="fu-plan-section-heading">
         <h3>
           <History size={16} /> Follow-up reviews
@@ -526,8 +552,8 @@ export function FollowUpReviewModal({
                 <span className="eyebrow">{item.patient.name}</span>
                 <h3>{item.carePlan.title}</h3>
                 <p>
-                  {item.ownerDoctorName} · Original plan {formatDate(item.carePlan.startDate)} –{' '}
-                  {formatDate(item.carePlan.endDate)}
+                  Follow-up owner: {item.ownerDoctorName} · Original plan{' '}
+                  {formatDate(item.carePlan.startDate)} – {formatDate(item.carePlan.endDate)}
                 </p>
                 <details>
                   <summary>Read original treatment instructions</summary>
@@ -684,6 +710,283 @@ export function FollowUpReviewModal({
             }
           >
             {busy ? 'Saving…' : 'Save review & share instructions'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AssignmentHistory({
+  assignments,
+  authorName,
+}: {
+  assignments: FollowUpAssignment[];
+  authorName?: string;
+}) {
+  return (
+    <div className="fu-assignment-history">
+      <p className="fu-owner-origin">
+        Original care-plan author: {authorName || 'Recorded in the care plan'}
+      </p>
+      {assignments.length ? (
+        assignments.map((assignment) => (
+          <article className="fu-assignment-event" key={assignment.id}>
+            <strong>
+              {assignment.previousDoctorName} → {assignment.doctorName}
+            </strong>
+            <p>{assignment.reason}</p>
+            <small>
+              Assigned by {assignment.assignedByName} · {dateTime(assignment.createdAt)} IST
+            </small>
+          </article>
+        ))
+      ) : (
+        <p className="muted small">
+          No handovers. Follow-up responsibility remains with the original plan author.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FollowUpOwnerPanel({ plan, onChanged }: { plan: CarePlan; onChanged: () => void }) {
+  const { session } = useSession();
+  const assignments = useResource<FollowUpAssignment[]>(`/api/care-plans/${plan.id}/assignments`);
+  const [assigning, setAssigning] = useState(false);
+  const ownerId = assignments.data?.[0]?.doctorId ?? plan.doctorId;
+  const ownerName = assignments.data?.[0]?.doctorName ?? plan.doctorName ?? 'Original plan author';
+  const canAssign = session.user?.role === 'admin' || session.user?.doctorId === ownerId;
+  return (
+    <div className="fu-owner-panel">
+      <div className="fu-owner-current">
+        <div>
+          <span>Follow-up owner</span>
+          <strong>{ownerName}</strong>
+        </div>
+        {canAssign && (
+          <button
+            className="button button-secondary button-small"
+            disabled={assignments.loading || !!assignments.error}
+            onClick={() => setAssigning(true)}
+          >
+            Assign follow-up
+          </button>
+        )}
+      </div>
+      {assignments.error ? (
+        <ErrorState message={assignments.error} retry={assignments.reload} />
+      ) : assignments.loading ? (
+        <p className="muted small">Loading responsibility history…</p>
+      ) : (
+        <details>
+          <summary>
+            Responsibility history{assignments.data?.length ? ` (${assignments.data.length})` : ''}
+          </summary>
+          <AssignmentHistory assignments={assignments.data ?? []} authorName={plan.doctorName} />
+        </details>
+      )}
+      {assigning && (
+        <FollowUpAssignmentModal
+          carePlanId={plan.id}
+          onClose={() => setAssigning(false)}
+          onSaved={() => {
+            setAssigning(false);
+            void assignments.reload();
+            onChanged();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function FollowUpAssignmentModal({
+  carePlanId,
+  onClose,
+  onSaved,
+}: {
+  carePlanId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { session } = useSession();
+  const [item, setItem] = useState<FollowUpWorkItem | null>(null);
+  const [owners, setOwners] = useState<FollowUpOwner[]>([]);
+  const [history, setHistory] = useState<FollowUpAssignment[]>([]);
+  const [doctorId, setDoctorId] = useState('');
+  const [reason, setReason] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
+  const [error, setError] = useState('');
+  const toast = useToast();
+  const loadContext = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [items, eligible, assignments] = await Promise.all([
+        api<FollowUpWorkItem[]>('/api/follow-up-worklist?scope=all'),
+        api<FollowUpOwner[]>('/api/follow-up-owners'),
+        api<FollowUpAssignment[]>(`/api/care-plans/${carePlanId}/assignments`),
+      ]);
+      const current = items.find((value) => value.carePlan.id === carePlanId);
+      if (!current) throw new Error('This care plan is no longer available. Refresh the worklist.');
+      setItem(current);
+      setOwners(eligible);
+      setHistory(assignments);
+      setStale(false);
+      setError('');
+    } catch (problem) {
+      setLoadError(message(problem));
+    } finally {
+      setLoading(false);
+    }
+  }, [carePlanId]);
+  useEffect(() => {
+    void loadContext();
+  }, [loadContext]);
+  const canAssign =
+    !!item && (session.user?.role === 'admin' || session.user?.doctorId === item.ownerDoctorId);
+  const eligible = owners.filter((owner) => owner.doctorId !== item?.ownerDoctorId);
+  const validOwner = eligible.some((owner) => owner.doctorId === doctorId);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!item || !canAssign || !validOwner || busy || stale) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/api/care-plans/${carePlanId}/assignment`, {
+        method: 'POST',
+        body: { doctorId, reason, expectedRevision: item.revision },
+      });
+      toast('Follow-up responsibility assigned. The care plan and reports remain unchanged.');
+      onSaved();
+    } catch (problem) {
+      setError(message(problem));
+      if (problem instanceof ApiError && problem.status === 409) setStale(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal
+      title="Assign follow-up owner"
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+    >
+      <form className="stack" onSubmit={submit}>
+        {loading ? (
+          <Loading />
+        ) : loadError ? (
+          <ErrorState message={loadError} retry={loadContext} />
+        ) : (
+          item && (
+            <>
+              <div className="fu-review-context">
+                <span className="eyebrow">{item.patient.name}</span>
+                <h3>{item.carePlan.title}</h3>
+                <p>
+                  Current follow-up owner: <strong>{item.ownerDoctorName}</strong>
+                </p>
+                <p>Original care-plan author: {item.carePlan.doctorName}</p>
+              </div>
+              {!canAssign && (
+                <div className="notice">
+                  Only the current follow-up owner or an administrator can assign this plan. The
+                  responsibility history remains available.
+                </div>
+              )}
+              {history.length > 0 && (
+                <details className="fu-owner-history-disclosure">
+                  <summary>Previous handovers ({history.length})</summary>
+                  <AssignmentHistory assignments={history} authorName={item.carePlan.doctorName} />
+                </details>
+              )}
+            </>
+          )
+        )}
+        <Field
+          label="New follow-up owner"
+          hint="Only doctor profiles with an active linked clinical account are eligible."
+        >
+          <select
+            required
+            disabled={loading || busy || !canAssign}
+            value={doctorId}
+            onChange={(event) => setDoctorId(event.target.value)}
+          >
+            <option value="">Select a clinician</option>
+            {eligible.map((owner) => (
+              <option key={owner.doctorId} value={owner.doctorId}>
+                {owner.doctorName}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {!loading && !loadError && !eligible.length && (
+          <p className="muted small">
+            There is no other eligible clinician. An administrator can link an active clinical
+            account to another doctor profile in Accounts & access.
+          </p>
+        )}
+        <Field
+          label="Reason for handover"
+          hint="Clinic-only context for the receiving clinician. This history is preserved."
+        >
+          <textarea
+            required
+            rows={4}
+            maxLength={8000}
+            disabled={busy || !canAssign}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </Field>
+        <div className="notice">
+          This changes follow-up responsibility. It does not change the original treatment plan,
+          mark patient reports reviewed, or restrict authorized clinicians from reading the record.
+          Assignment remains available when follow-up activity is paused.
+        </div>
+        {error && (
+          <div className="notice notice-error" role="alert">
+            <div>
+              <strong>{error}</strong>
+              {stale && (
+                <p>
+                  The plan or its reports changed. Your handover note is preserved. Refresh and
+                  confirm the current owner before saving again.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+        {stale && (
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={loadContext}
+            disabled={loading}
+          >
+            <RefreshCw size={14} /> Refresh assignment context
+          </button>
+        )}
+        <div className="fu-form-actions">
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            className="button button-primary"
+            disabled={loading || busy || !!loadError || stale || !canAssign || !validOwner}
+          >
+            {busy ? 'Assigning…' : 'Save assignment'}
           </button>
         </div>
       </form>

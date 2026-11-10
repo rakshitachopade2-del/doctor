@@ -37,3 +37,22 @@ export interface FollowUpWorkItem {
   unreviewedCount: number;
   due: boolean;
 }
+
+export interface FollowUpOwner {
+  doctorId: string;
+  doctorName: string;
+  activeAccounts: number;
+}
+
+export interface FollowUpAssignment {
+  id: string;
+  carePlanId: string;
+  doctorId: string;
+  doctorName: string;
+  previousDoctorId: string;
+  previousDoctorName: string;
+  reason: string;
+  assignedById: string;
+  assignedByName: string;
+  createdAt: string;
+}

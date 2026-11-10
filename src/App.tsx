@@ -100,6 +100,9 @@ const FollowUpsPage = lazy(() =>
 const ActivityPage = lazy(() =>
   import('./pages/ActivityPage').then((module) => ({ default: module.ActivityPage })),
 );
+const WaitlistPage = lazy(() =>
+  import('./pages/WaitlistPage').then((module) => ({ default: module.WaitlistPage })),
+);
 import type { Role } from '../shared/types';
 
 export function Brand({ small = false }: { small?: boolean }) {
@@ -174,6 +177,7 @@ function PublicLayout() {
 const staffNav = [
   { to: '/clinic', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/clinic/appointments', label: 'Appointments', icon: CalendarDays },
+  { to: '/clinic/waitlist', label: 'Waitlist', icon: ClipboardList },
   { to: '/clinic/scheduling', label: 'Schedules & closures', icon: Clock3 },
   { to: '/clinic/patients', label: 'Patients', icon: Users },
   { to: '/clinic/follow-ups', label: 'Follow-up care', icon: HeartHandshake, clinical: true },
@@ -459,6 +463,7 @@ export function App() {
             }
           />
           <Route path="clinic/billing" element={<BillingPage />} />
+          <Route path="clinic/waitlist" element={<WaitlistPage />} />
           <Route
             path="clinic/activity"
             element={

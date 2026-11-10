@@ -48,6 +48,8 @@ import {
 import './patient.css';
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import { PatientWorkflowPanel } from './PatientWorkflowPanel';
+import type { WaitlistEntry } from '../../shared/waitlist';
+import { PatientWaitlistPanel, WaitlistJoinModal } from '../components/PatientWaitlist';
 import {
   PatientFollowUp,
   effectivePlanStatus,
@@ -338,7 +340,7 @@ export function BookingPage() {
         }
       />
     );
-  return <BookingForm />;
+  return <BookingForm key={params.toString()} />;
 }
 
 function BookingForm() {
@@ -346,6 +348,9 @@ function BookingForm() {
   const doctors = useResource<Doctor[]>('/api/doctors');
   const appointments = useResource<Appointment[]>('/api/appointments');
   const appointmentId = params.get('appointmentId');
+  const waitlistId = params.get('waitlist');
+  const waitlist = useResource<WaitlistEntry[]>(waitlistId ? '/api/waitlist' : null);
+  const waitlistEntry = waitlist.data?.find((entry) => entry.id === waitlistId);
   const existing = appointments.data?.find((appointment) => appointment.id === appointmentId);
   const [doctorId, setDoctorId] = useState(params.get('doctor') ?? '');
   const [date, setDate] = useState(today());
@@ -355,6 +360,8 @@ function BookingForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [booked, setBooked] = useState<Appointment | null>(null);
+  const [joinWaitlist, setJoinWaitlist] = useState(false);
+  const [waitlistCreated, setWaitlistCreated] = useState<WaitlistEntry | null>(null);
   useEffect(() => {
     if (existing) {
       setDoctorId(existing.doctorId);
@@ -365,8 +372,18 @@ function BookingForm() {
     }
   }, [existing?.id]);
   useEffect(() => {
-    if (!appointmentId && !doctorId && doctors.data?.length) setDoctorId(doctors.data[0].id);
-  }, [doctors.data, doctorId, appointmentId]);
+    if (waitlistEntry && !appointmentId) {
+      setDoctorId(waitlistEntry.doctorId);
+      setMode(waitlistEntry.mode);
+      setDate(waitlistEntry.startDate < today() ? today() : waitlistEntry.startDate);
+      setReason(waitlistEntry.reason);
+      setTime('');
+    }
+  }, [waitlistEntry?.id, appointmentId]);
+  useEffect(() => {
+    if (!appointmentId && !waitlistId && !doctorId && doctors.data?.length)
+      setDoctorId(doctors.data[0].id);
+  }, [doctors.data, doctorId, appointmentId, waitlistId]);
   const doctor = doctors.data?.find((value) => value.id === doctorId);
   const slots = useResource<string[]>(
     doctorId && date
@@ -377,8 +394,22 @@ function BookingForm() {
   availableSlots.sort();
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!time) {
+    if (busy || slots.loading) return;
+    if (!time || !availableSlots.includes(time)) {
+      setTime('');
       setError('Choose an available appointment time.');
+      return;
+    }
+    if (
+      waitlistId &&
+      (!waitlistEntry ||
+        waitlistEntry.status !== 'waiting' ||
+        doctorId !== waitlistEntry.doctorId ||
+        mode !== waitlistEntry.mode ||
+        date < waitlistEntry.startDate ||
+        date > waitlistEntry.endDate)
+    ) {
+      setError('Choose a date within this waiting request. Refresh if the request has changed.');
       return;
     }
     setBusy(true);
@@ -388,26 +419,67 @@ function BookingForm() {
         appointmentId ? `/api/appointments/${appointmentId}` : '/api/appointments',
         {
           method: appointmentId ? 'PATCH' : 'POST',
-          body: appointmentId ? { doctorId, date, time } : { doctorId, date, time, mode, reason },
+          body: appointmentId
+            ? { doctorId, date, time }
+            : {
+                doctorId,
+                date,
+                time,
+                mode,
+                reason,
+                ...(waitlistId ? { waitlistId, patientConfirmed: true } : {}),
+              },
         },
       );
       setBooked(result);
     } catch (problem) {
       setError(errorMessage(problem));
+      setTime('');
       slots.reload();
+      if (waitlistId) waitlist.reload();
     } finally {
       setBusy(false);
     }
   }
-  if (doctors.loading || (appointmentId && appointments.loading)) return <Loading />;
-  if (doctors.error || (appointmentId && appointments.error))
+  if (
+    doctors.loading ||
+    (appointmentId && appointments.loading) ||
+    (waitlistId && waitlist.loading)
+  )
+    return <Loading />;
+  if (doctors.error || (appointmentId && appointments.error) || (waitlistId && waitlist.error))
     return (
       <ErrorState
-        message={doctors.error || appointments.error || 'Unable to load appointment.'}
+        message={
+          doctors.error || appointments.error || waitlist.error || 'Unable to load appointment.'
+        }
         retry={() => {
           doctors.reload();
           appointments.reload();
+          waitlist.reload();
         }}
+      />
+    );
+  if (
+    waitlistId &&
+    !booked &&
+    (appointmentId ||
+      !waitlistEntry ||
+      waitlistEntry.status !== 'waiting' ||
+      waitlistEntry.endDate < today())
+  )
+    return (
+      <EmptyState
+        title="This waitlist request cannot be booked"
+        description="It may have been booked, withdrawn, or reached the end of its date range. Open your own requests to check its current status."
+        action={
+          <Link
+            className="button button-primary"
+            to={`/my-care?waitlist=${encodeURIComponent(waitlistId)}`}
+          >
+            View my waitlist requests
+          </Link>
+        }
       />
     );
   if (appointmentId && !existing)
@@ -443,6 +515,11 @@ function BookingForm() {
         <span className="eyebrow">YOUR NEXT STEP IS READY</span>
         <h1>{appointmentId ? 'Appointment rescheduled.' : 'You’re booked in.'}</h1>
         <p className="muted">Your appointment is saved in your care workspace.</p>
+        {waitlistId && (
+          <p className="patient-waitlist-help">
+            Your waitlist request is now marked booked. You can find it in your request history.
+          </p>
+        )}
         <Card>
           <h3>{booked.doctorName}</h3>
           <div className="booking-confirmation-details">
@@ -489,34 +566,62 @@ function BookingForm() {
         title={appointmentId ? 'Reschedule your visit' : 'Let’s plan your visit'}
         description="Choose your dermatologist and a time that works for you. All times are in Asia/Kolkata."
       />
+      {waitlistEntry && (
+        <div className="notice booking-waitlist-notice">
+          <Clock3 size={18} />
+          <span>
+            You’re booking from your waitlist request for {waitlistEntry.doctorName}. Choose a time
+            between {formatDate(waitlistEntry.startDate)} and {formatDate(waitlistEntry.endDate)}.
+            Your clinician and consultation mode stay as requested. A slot is reserved only after
+            you confirm.
+          </span>
+        </div>
+      )}
+      {waitlistCreated && (
+        <div className="notice booking-waitlist-notice" role="status">
+          <CheckCircle2 size={18} />
+          <span>
+            Your waitlist request is saved. No appointment is reserved.{' '}
+            <Link
+              className="text-link"
+              to={`/my-care?waitlist=${encodeURIComponent(waitlistCreated.id)}`}
+            >
+              View your request →
+            </Link>
+          </span>
+        </div>
+      )}
       <form onSubmit={submit} className="booking-grid">
         <div className="stack">
           <Card>
             <h2 className="section-title">01 / Your dermatologist</h2>
             <div className="booking-doctors">
-              {(doctors.data ?? []).map((item) => (
-                <label
-                  className={`booking-doctor-option ${doctorId === item.id ? 'selected' : ''}`}
-                  key={item.id}
-                >
-                  <input
-                    type="radio"
-                    name="doctor"
-                    value={item.id}
-                    checked={doctorId === item.id}
-                    onChange={() => {
-                      setDoctorId(item.id);
-                      setTime('');
-                    }}
-                  />
-                  <Avatar name={item.name} color={item.color} />
-                  <span>
-                    <strong>{item.name}</strong>
-                    <small>{item.specialties.join(' · ')}</small>
-                  </span>
-                  <strong>{money(item.fee)}</strong>
-                </label>
-              ))}
+              {(doctors.data ?? [])
+                .filter((item) => !waitlistEntry || item.id === waitlistEntry.doctorId)
+                .map((item) => (
+                  <label
+                    className={`booking-doctor-option ${doctorId === item.id ? 'selected' : ''}`}
+                    key={item.id}
+                  >
+                    <input
+                      type="radio"
+                      name="doctor"
+                      value={item.id}
+                      checked={doctorId === item.id}
+                      disabled={!!waitlistEntry}
+                      onChange={() => {
+                        setDoctorId(item.id);
+                        setTime('');
+                      }}
+                    />
+                    <Avatar name={item.name} color={item.color} />
+                    <span>
+                      <strong>{item.name}</strong>
+                      <small>{item.specialties.join(' · ')}</small>
+                    </span>
+                    <strong>{money(item.fee)}</strong>
+                  </label>
+                ))}
             </div>
             {!doctors.data?.length && (
               <EmptyState
@@ -532,8 +637,12 @@ function BookingForm() {
                 className="input"
                 type="date"
                 value={date}
-                min={today()}
-                max={dateAfter(180)}
+                min={
+                  waitlistEntry && waitlistEntry.startDate > today()
+                    ? waitlistEntry.startDate
+                    : today()
+                }
+                max={waitlistEntry ? waitlistEntry.endDate : dateAfter(180)}
                 required
                 onChange={(event) => {
                   setDate(event.target.value);
@@ -565,7 +674,11 @@ function BookingForm() {
             ) : (
               <EmptyState
                 title="No slots on this date"
-                description="Try another day or dermatologist."
+                description={
+                  waitlistEntry
+                    ? 'Try another date within your requested range. Your request remains waiting until an appointment is confirmed.'
+                    : 'Try another day or dermatologist, or join the waitlist below with a preferred date range.'
+                }
               />
             )}
           </Card>
@@ -576,7 +689,7 @@ function BookingForm() {
                 <select
                   className="select"
                   value={mode}
-                  disabled={!!appointmentId}
+                  disabled={!!appointmentId || !!waitlistEntry}
                   onChange={(event) => {
                     setMode(event.target.value as typeof mode);
                     setTime('');
@@ -649,7 +762,14 @@ function BookingForm() {
             <button
               className="button button-primary full-width"
               type="submit"
-              disabled={busy || !doctorId || !time}
+              disabled={
+                busy ||
+                slots.loading ||
+                !!slots.error ||
+                !doctorId ||
+                !time ||
+                !availableSlots.includes(time)
+              }
             >
               {busy
                 ? 'Saving your visit…'
@@ -661,9 +781,39 @@ function BookingForm() {
             <Link to="/my-care" className="button button-ghost full-width">
               Back to my care
             </Link>
+            {!appointmentId && !waitlistEntry && (
+              <div className="booking-waitlist-alternative">
+                <h3>Need a different time?</h3>
+                <p>
+                  Share a preferred date range with the clinic. Joining the waitlist does not hold
+                  an appointment or send email or SMS.
+                </p>
+                <button
+                  type="button"
+                  className="button button-secondary full-width"
+                  disabled={!doctorId}
+                  onClick={() => setJoinWaitlist(true)}
+                >
+                  Join waitlist
+                </button>
+              </div>
+            )}
           </Card>
         </aside>
       </form>
+      {joinWaitlist && (
+        <WaitlistJoinModal
+          doctorId={doctorId}
+          mode={mode}
+          startDate={date}
+          reason={reason}
+          onClose={() => setJoinWaitlist(false)}
+          onCreated={(entry) => {
+            setJoinWaitlist(false);
+            setWaitlistCreated(entry);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1213,6 +1363,7 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
               />
             )}
           </Card>
+          <PatientWaitlistPanel />
           {settings.data?.modules.intake && (
             <Card className="preparation-card">
               <FileText size={25} />
