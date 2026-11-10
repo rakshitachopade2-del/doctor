@@ -31,6 +31,7 @@ import type {
 import type { PatientClinicalWorkflows } from '../../shared/clinical';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
 import { DocumentsPanel } from '../components/DocumentsPanel';
+import { FollowUpPlanSection } from './FollowUpPages';
 import { api, formatDate, today, useResource, useSession, useToast } from '../lib';
 import {
   Avatar,
@@ -769,20 +770,51 @@ export function PatientDetailPage() {
     id ? `/api/patients/${id}/clinical-workflows` : null,
   );
   const settings = useResource<ClinicSettings>('/api/settings');
-  const [tab, setTab] = useState<RecordTab>('overview');
+  const [recordParams, setRecordParams] = useSearchParams();
+  const requestedTab = recordParams.get('tab');
+  const validTabs: RecordTab[] = [
+    'overview',
+    'visits',
+    'care',
+    'workup',
+    'images',
+    'reports',
+    'messages',
+  ];
+  const tab: RecordTab = validTabs.includes(requestedTab as RecordTab)
+    ? (requestedTab as RecordTab)
+    : 'overview';
+  const selectedPlan = recordParams.get('plan');
+  function setTab(value: RecordTab) {
+    setRecordParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.set('tab', value);
+        if (value !== 'care') next.delete('plan');
+        return next;
+      },
+      { replace: true },
+    );
+  }
   const [modal, setModal] = useState<'visit' | 'care' | 'image' | null>(null);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   useEffect(() => {
-    setTab('overview');
     setSelectedImages([]);
     setModal(null);
   }, [id]);
+  useEffect(() => {
+    if (tab !== 'care' || !selectedPlan || loading) return;
+    const frame = window.requestAnimationFrame(() =>
+      document.getElementById(`care-plan-${selectedPlan}`)?.scrollIntoView({ block: 'start' }),
+    );
+    return () => window.cancelAnimationFrame(frame);
+  }, [tab, selectedPlan, loading]);
   const imagesEnabled = settings.data?.modules.images !== false;
   if (loading) return <Loading />;
   if (error) return <ErrorState message={error} retry={reload} />;
   if (!data) return <EmptyState title="Patient not found" />;
   const { patient } = data;
-  const activePlans = data.carePlans.filter((p) => p.status === 'active');
+  const activePlans = data.carePlans.filter((p) => (p.effectiveStatus ?? p.status) === 'active');
   const tabs: [RecordTab, string][] = [
     ['overview', 'Overview'],
     ['visits', `Visits (${data.encounters.length})`],
@@ -1039,7 +1071,19 @@ export function PatientDetailPage() {
         <div className="stack">
           {data.carePlans.length ? (
             data.carePlans.map((plan) => (
-              <CarePlanCard key={plan.id} plan={plan} onChanged={reload} />
+              <div
+                key={plan.id}
+                id={`care-plan-${plan.id}`}
+                className={
+                  selectedPlan === plan.id ? 'fu-selected-plan fu-plan-anchor' : 'fu-plan-anchor'
+                }
+              >
+                <CarePlanCard
+                  plan={plan}
+                  onChanged={reload}
+                  followUpEnabled={settings.data?.modules.followUp === true}
+                />
+              </div>
             ))
           ) : (
             <Card>
@@ -1525,21 +1569,18 @@ function CarePlanModal({
   );
 }
 
-function CarePlanCard({ plan, onChanged }: { plan: CarePlan; onChanged: () => void }) {
-  const [saving, setSaving] = useState(false);
-  const toast = useToast();
-  async function complete() {
-    setSaving(true);
-    try {
-      await api(`/api/care-plans/${plan.id}`, { method: 'PATCH', body: { status: 'completed' } });
-      toast('Care plan marked complete.');
-      onChanged();
-    } catch (e) {
-      toast(errorText(e), 'error');
-    } finally {
-      setSaving(false);
-    }
-  }
+function CarePlanCard({
+  plan,
+  onChanged,
+  followUpEnabled,
+}: {
+  plan: CarePlan;
+  onChanged: () => void;
+  followUpEnabled: boolean;
+}) {
+  const status = plan.effectiveStatus ?? plan.status;
+  const followUpDate =
+    plan.effectiveFollowUpDate === undefined ? plan.followUpDate : plan.effectiveFollowUpDate;
   return (
     <Card>
       <div className="clinic-panel-heading">
@@ -1550,8 +1591,8 @@ function CarePlanCard({ plan, onChanged }: { plan: CarePlan; onChanged: () => vo
             {plan.doctorName ? ` · ${plan.doctorName}` : ''}
           </p>
         </div>
-        <Badge tone={plan.status === 'active' ? 'green' : 'neutral'}>
-          {plan.status === 'active' ? 'Active plan' : 'Completed'}
+        <Badge tone={status === 'active' ? 'green' : 'neutral'}>
+          {status === 'active' ? 'Active plan' : 'Completed'}
         </Badge>
       </div>
       <FieldValue label="Instructions" value={plan.instructions} />
@@ -1584,19 +1625,16 @@ function CarePlanCard({ plan, onChanged }: { plan: CarePlan; onChanged: () => vo
       )}
       <div className="care-plan-footer">
         <span className="row">
-          <CalendarDays size={17} /> Follow-up{' '}
-          {plan.followUpDate ? formatDate(plan.followUpDate) : 'not scheduled'}
+          <CalendarDays size={17} />{' '}
+          {status === 'completed'
+            ? 'Follow-up completed'
+            : `Next review ${followUpDate ? formatDate(followUpDate) : 'not scheduled'}`}
         </span>
-        {plan.status === 'active' && (
-          <button
-            className="button button-secondary button-small"
-            onClick={complete}
-            disabled={saving}
-          >
-            {saving ? 'Saving…' : 'Mark plan complete'}
-          </button>
+        {plan.latestReview && (
+          <span className="muted small">Original follow-up: {formatDate(plan.followUpDate)}</span>
         )}
       </div>
+      <FollowUpPlanSection plan={plan} enabled={followUpEnabled} onChanged={onChanged} />
     </Card>
   );
 }
@@ -1795,166 +1833,5 @@ function PatientMessages({
         </div>
       )}
     </Card>
-  );
-}
-
-export function FollowUpsPage() {
-  const { data, error, loading, reload } = useResource<CarePlan[]>('/api/care-plans');
-  const [filter, setFilter] = useState('due');
-  const [search, setSearch] = useState('');
-  const currentDate = today();
-  const plans = useMemo(
-    () =>
-      (data || [])
-        .filter(
-          (p) =>
-            (filter === 'all' ||
-              (filter === 'due'
-                ? p.status === 'active' && p.followUpDate <= currentDate
-                : filter === 'upcoming'
-                  ? p.status === 'active' && p.followUpDate > currentDate
-                  : p.status === 'completed')) &&
-            `${p.patientName} ${p.title}`.toLowerCase().includes(search.toLowerCase()),
-        )
-        .sort((a, b) => a.followUpDate.localeCompare(b.followUpDate)),
-    [data, filter, search, currentDate],
-  );
-  const due = (data || []).filter(
-    (p) => p.status === 'active' && p.followUpDate && p.followUpDate <= currentDate,
-  ).length;
-  const upcoming = (data || []).filter(
-    (p) => p.status === 'active' && p.followUpDate > currentDate,
-  ).length;
-  return (
-    <>
-      <PageHeader
-        eyebrow="CONTINUITY OF CARE"
-        title="Follow-ups"
-        description="Keep each treatment journey moving forward."
-      />
-      <div className="followup-metrics">
-        <Card>
-          <span className="muted">Due for review</span>
-          <strong>{due}</strong>
-          <span className="small muted">Active plans due today or earlier</span>
-        </Card>
-        <Card>
-          <span className="muted">Upcoming reviews</span>
-          <strong>{upcoming}</strong>
-          <span className="small muted">Patients with a future follow-up</span>
-        </Card>
-        <Card>
-          <span className="muted">Completed plans</span>
-          <strong>{data?.filter((p) => p.status === 'completed').length || 0}</strong>
-          <span className="small muted">Clinician-confirmed completion</span>
-        </Card>
-      </div>
-      <Card>
-        <div className="clinic-panel-heading">
-          <div className="segmented">
-            {[
-              ['due', 'Due for review'],
-              ['upcoming', 'Upcoming'],
-              ['completed', 'Completed'],
-              ['all', 'All plans'],
-            ].map(([v, label]) => (
-              <button className={filter === v ? 'active' : ''} key={v} onClick={() => setFilter(v)}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="clinic-search-field">
-            <Search size={16} />
-            <input
-              aria-label="Search follow-ups"
-              placeholder="Search patient or plan"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        </div>
-        {loading ? (
-          <Loading />
-        ) : error ? (
-          <ErrorState message={error} retry={reload} />
-        ) : !plans.length ? (
-          <EmptyState
-            title={filter === 'due' ? 'All caught up' : 'No plans in this view'}
-            description={
-              filter === 'due'
-                ? 'There are no active care plans awaiting a scheduled review.'
-                : 'Try a different filter or create a care plan from a patient record.'
-            }
-          />
-        ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Patient</th>
-                  <th>Care plan</th>
-                  <th>Follow-up</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {plans.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <div className="row">
-                        <Avatar name={p.patientName || 'Patient'} size="sm" />
-                        <Link className="table-name" to={`/clinic/patients/${p.patientId}`}>
-                          {p.patientName || 'View patient'}
-                        </Link>
-                      </div>
-                    </td>
-                    <td>
-                      <strong>{p.title}</strong>
-                      <span className="table-sub">{p.doctorName}</span>
-                    </td>
-                    <td>{p.followUpDate ? formatDate(p.followUpDate) : 'Not scheduled'}</td>
-                    <td>
-                      <Badge
-                        tone={
-                          p.status === 'completed'
-                            ? 'neutral'
-                            : p.followUpDate < currentDate
-                              ? 'amber'
-                              : 'green'
-                        }
-                      >
-                        {p.status === 'completed'
-                          ? 'Completed'
-                          : p.followUpDate < currentDate
-                            ? 'Review overdue'
-                            : p.followUpDate === currentDate
-                              ? 'Due today'
-                              : 'Upcoming'}
-                      </Badge>
-                    </td>
-                    <td>
-                      <Link
-                        className="button button-secondary button-small"
-                        to={`/clinic/patients/${p.patientId}`}
-                      >
-                        Review patient <ArrowRight size={14} />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-      <div className="notice followup-note">
-        <MessageSquare size={18} />
-        <span>
-          Review each patient’s progress and check-ins before contacting them. Follow-up dates do
-          not automatically book appointments or send external reminders.
-        </span>
-      </div>
-    </>
   );
 }

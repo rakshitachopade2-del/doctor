@@ -45,7 +45,11 @@ A database seeded in demo mode is deliberately rejected by production. Keep demo
 
 ## Upgrade an existing installation
 
-Create and verify a backup before replacing the running application. Stop the service, install the new dependencies, build, and restart against the same production database. Startup creates the scheduling and recovery tables and adds session metadata where needed. Existing users retain their current access; the new mandatory-password rule applies to newly provisioned accounts. Existing doctor profiles retain the original default hours until an authorized user saves another schedule. Previously booked appointments without a stored duration continue to count as 30 minutes.
+Create and verify a backup before replacing the running application. Stop the service, install the new dependencies, build, and restart against the same production database. Startup creates the scheduling, recovery, clinical workflow, private PDF, follow-up review and activity tables and adds session metadata where needed. Existing users retain their current access; the mandatory-password rule applies to newly provisioned accounts. Existing doctor profiles retain the original default hours until an authorized user saves another schedule. Previously booked appointments without a stored duration continue to count as 30 minutes.
+
+Existing notes, plans, appointments, reports and images remain intact. The `followUpReviews` table preserves append-only clinician reviews and status changes, including the check-in versions reviewed at that time. New reviews can set an effective next review date or complete a plan without changing its original medication instructions or regimen dates. Patients receive the shared instructions and dated review history; internal assessments and check-in snapshots remain available only to clinicians. Previously completed plans remain completed without fabricated review entries.
+
+The `activity` table preserves notification contents and recipient ownership; only read status can change. The inbox starts empty after an upgrade and records supported events that occur afterward. It does not reconstruct notifications from existing records or send historical updates to newly created accounts. Clinical records remain the source of truth. Marking activity read does not record a clinician review, book a visit, or change treatment.
 
 After restart, confirm account access and review each doctor’s actual hours and planned closures. An upgrade does not automatically reschedule, cancel, or notify patients. Keep the pre-upgrade backup so application code and database state can be restored together if rollback is required.
 
@@ -113,7 +117,7 @@ mkdir -p backups
 docker compose cp app:/app/data/backups/clinic-2026-11-10.sqlite ./backups/
 ```
 
-Move a copy to separately protected storage. A backup includes private patient records, image bytes, messages, password hashes, account access flags, sessions, hashed recovery grants, schedules, and closures. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
+Move a copy to separately protected storage. A backup includes private patient records, image and PDF bytes, messages, immutable clinical workflow events and follow-up reviews, activity contents and read status, password hashes, account access flags, sessions, hashed recovery grants, schedules, and closures. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
 
 To restore:
 
@@ -127,11 +131,13 @@ Restoring also restores account access, passwords, scheduling changes, and recov
 
 ## Integration boundaries
 
-Booking, clinical documentation, images, care plans, check-ins, private messaging, invoice creation, manual payment records, calendar export and approved clinic articles work within the application. Billing records payments already received; it does not charge a card or initiate a UPI payment. Tax calculation, refunds and payment-provider reconciliation are not automated.
+Booking, clinical documentation, images and PDFs, investigations, procedure records, care plans, check-ins, clinician follow-up reviews, private messaging, activity inboxes, invoice creation, manual payment records, calendar export and approved clinic articles work within the application. Billing records payments already received; it does not charge a card or initiate a UPI payment. Tax calculation, refunds and payment-provider reconciliation are not automated.
+
+Activity updates are visible when the app opens or the inbox refreshes. There is no background external delivery service, email/SMS/WhatsApp dispatch, push subscription or automatic reminder scheduler. Staff should continue their clinic’s existing process for time-sensitive outreach. A clinician’s request for a visit offers the patient a booking link; it does not reserve an appointment.
 
 Email, SMS, WhatsApp, video meetings, native mobile packaging, AI diagnosis and voice transcription require separate implementation and provider configuration. Online appointments do not create video rooms. No external delivery is represented as successful when a provider is absent. Clinician-entered instructions and warnings are not validated against a drug-interaction database.
 
-Booking uses the configured doctor sessions and closures in Asia/Kolkata, up to 180 days ahead. New bookings use the doctor’s current appointment length; saved appointments retain their recorded duration. Overnight sessions, waitlists, external calendar synchronization, and automatic reschedule notifications are not implemented. Clinic opening-hours text is display content; change **Availability & time off** to alter bookable hours.
+Booking uses the configured doctor sessions and closures in Asia/Kolkata, up to 180 days ahead. New bookings use the doctor’s current appointment length; saved appointments retain their recorded duration. Appointment changes create in-app activity updates. Overnight sessions, waitlists, external calendar synchronization, and external reschedule notifications are not implemented. Clinic opening-hours text is display content; change **Availability & time off** to alter bookable hours.
 
 ## Reproducible runtime verification
 
@@ -146,4 +152,4 @@ npm run test:production -- --image derma-platform:verify
 
 The container check publishes only to a random loopback port and removes its disposable container and anonymous data volume after verification. The production image build and startup were verified locally on 10 November 2026. These checks do not provision public hosting, HTTPS certificates, or external providers.
 
-Clinical workflow and private PDF tables are added automatically on startup. Existing notes, plans, appointments, and images remain intact. Include the SQLite database in backups: it now contains original report bytes and immutable investigation/procedure/amendment events. PDFs have format/size checks and download as authenticated attachments; a malware-scanning or document-sanitization service is not connected.
+PDFs have format/size checks and download as authenticated attachments; a malware-scanning or document-sanitization service is not connected.

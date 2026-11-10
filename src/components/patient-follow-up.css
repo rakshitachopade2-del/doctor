@@ -1,0 +1,153 @@
+.patient-follow-up {
+  border-top: 1px solid #e0e8da;
+  margin-top: 23px;
+  padding-top: 21px;
+}
+.patient-shared-review {
+  background: #eff5e9;
+  border: 1px solid #dce7d1;
+  border-radius: 11px;
+  padding: 20px;
+}
+.patient-review-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.patient-review-heading > div {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+.patient-review-icon {
+  color: #466c35;
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.patient-review-heading h3 {
+  color: #35512b;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+.patient-review-heading .badge {
+  flex-shrink: 0;
+}
+.patient-review-attribution {
+  color: #5e714e;
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 11px 0 14px;
+}
+.patient-review-instructions {
+  color: #3f5833;
+  font-size: 13px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0 0 17px;
+}
+.patient-review-date {
+  display: flex;
+  gap: 9px;
+  color: #48623a;
+  align-items: center;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.patient-review-date strong {
+  display: block;
+  font-size: 13px;
+}
+.patient-review-next-step {
+  color: #536947;
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 13px 0 0;
+}
+.patient-review-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 13px;
+  flex-wrap: wrap;
+}
+.patient-review-empty {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  color: #607151;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.patient-review-empty svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.patient-review-history {
+  display: grid;
+  gap: 17px;
+}
+.patient-plan-anchor {
+  scroll-margin-top: 30px;
+  border-radius: 13px;
+}
+.patient-plan-target {
+  outline: 2px solid #92af7b;
+  outline-offset: 4px;
+}
+.patient-completed-plans {
+  display: grid;
+  gap: 18px;
+  margin-top: 13px;
+}
+.patient-completed-plans-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #e0e8d7;
+  padding-top: 23px;
+}
+.patient-completed-plans-heading h2 {
+  font-size: 17px;
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .patient-review-heading {
+    flex-wrap: wrap;
+  }
+  .patient-shared-review {
+    padding: 17px;
+  }
+  .patient-review-heading h3 {
+    font-size: 13px;
+  }
+  .patient-review-actions {
+    gap: 9px;
+  }
+  .patient-review-actions .button {
+    font-size: 11px;
+  }
+  .patient-completed-plans-heading {
+    flex-wrap: wrap;
+  }
+  .patient-plan-anchor {
+    scroll-margin-top: 20px;
+  }
+}
+@media print {
+  .patient-review-actions,
+  .patient-completed-plans-heading button {
+    display: none;
+  }
+  .patient-shared-review {
+    break-inside: avoid;
+  }
+  .patient-plan-target {
+    outline: none;
+  }
+}

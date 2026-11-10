@@ -13,7 +13,8 @@ flowchart LR
   Staff[Clinic workspace] --> API
   API --> Access[Session, CSRF, roles, ownership]
   Access --> Records[(SQLite records, images and PDF reports)]
-  Access --> Audit[Append-only activity log]
+  Access --> Audit[Append-only audit log]
+  Access --> Inbox[Recipient activity and read receipts]
 ```
 
 ## Code map
@@ -25,7 +26,9 @@ flowchart LR
 | `src/components/ui.tsx`               | Shared accessible UI, fields, modal focus handling                                     |
 | `src/components/DocumentsPanel.tsx`   | Private PDF-report list, upload agreement and authenticated downloads                  |
 | `src/pages/PatientPages.tsx`          | Discovery, booking, intake, patient plans, history, images, messages                   |
-| `src/pages/ClinicPages.tsx`           | Appointments, patient directory, records, treatment plans, follow-up lists             |
+| `src/pages/ClinicPages.tsx`           | Appointments, patient directory, records and treatment plans                           |
+| `src/pages/FollowUpPages.tsx`         | Clinical worklist, review history, current check-ins and review submission             |
+| `src/pages/ActivityPage.tsx`          | Account-scoped activity, cursor pagination and read-state controls                     |
 | `src/pages/ClinicalWorkflowPanel.tsx` | Investigation orders/results/reviews, procedure records and encounter amendments       |
 | `src/pages/OperationsPages.tsx`       | Invoices, payments, public/managed knowledge                                           |
 | `src/pages/SettingsPages.tsx`         | Clinic configuration, staff/profiles, patient portal access, audit                     |
@@ -38,6 +41,8 @@ flowchart LR
 | `server/identity.ts`                  | Account lifecycle, session metadata migration/revocation, recovery grants              |
 | `server/documents.ts`                 | Immutable PDF originals, upload provenance, patient-scoped attachment downloads        |
 | `server/clinical.ts`                  | Investigation review/publication, procedure agreement/completion, encounter amendments |
+| `server/follow-up.ts`                 | Immutable review snapshots, optimistic revisions, effective plan state and worklist    |
+| `server/activity.ts`                  | Transactional recipient notifications, event deduplication and scoped read receipts    |
 | `shared/`                             | Frontend/backend data contracts                                                        |
 | `tests/`                              | Isolated API tests and real-browser workflows                                          |
 
@@ -52,7 +57,7 @@ flowchart LR
 - Appointment creation/rescheduling validates full time intervals for both doctor and patient inside an immediate SQLite transaction. Partial unique indexes additionally reject identical active start times. This prevents overlaps when doctors use different appointment lengths. Payment balance changes are checked within a transaction; idempotency keys distinguish retries from new invoice/payment requests.
 - Private image and PDF retrieval pass the same authorization as patient records. Files have size and content-signature checks and are served with `nosniff`; SVG/HTML uploads are not accepted. PDF originals are downloaded as attachments under generated filenames and are not embedded in application pages.
 - Private API responses use `Cache-Control: no-store`. No offline worker or analytics service stores or transmits medical records.
-- Database triggers reject updates/deletes to audit entries, clinical encounters/amendments, clinical workflow events, PDF originals and payment records. This protects application-level history; it is not proof against a database/server administrator. Article revisions preserve earlier versions.
+- Database triggers reject updates/deletes to audit entries, clinical encounters/amendments, clinical workflow events, follow-up reviews, PDF originals and payment records. Activity contents are immutable while read receipts can change. This protects application-level history; it is not proof against a database/server administrator. Article revisions preserve earlier versions.
 - Database and backups contain sensitive plaintext application records. Protect host storage and backups, restrict filesystem access, and configure operational monitoring before real use.
 
 The permission model is clinic-wide for clinicians. A second organization must use a separate deployment/database until true tenancy and clinic-scoped authorization are implemented.
@@ -109,8 +114,30 @@ These events record communication and reported decisions; they are not an electr
 
 All new clinical tables have update/delete rejection triggers. Status, publication and completion are represented by additional rows instead of edits to earlier explanations or decisions. The database-level guards complement endpoint permissions and preserve application history; administrative database access remains a separate trust boundary.
 
+## Follow-up review and preserved evidence
+
+`followUpReviews` stores immutable clinician reviews and explicitly identified status-only events. Each clinical review includes an internal assessment, patient-facing instructions, the linked doctor, disposition and next review date. Patient responses strip internal assessments and check-in snapshots at every entry point, including plan lists, patient records and review history. Reception has no access. The worklist defaults to the clinician's originally authored care plans; authorized clinicians can inspect the whole clinic. Completed plans remain available for history and filtering.
+
+Check-ins retain the original one-record-per-plan/day behavior. A review captures the complete submitted check-ins as immutable snapshots with their IDs, submission timestamps and canonical SHA-256 fingerprints. A same-day replacement can therefore re-enter the review queue without erasing evidence captured by earlier reviews. A current check-in counts as reviewed only when its version matches the latest clinical review's snapshot. Merely reading an activity item or changing plan status does not acknowledge that clinical information.
+
+The review revision hashes the relevant care-plan fields, latest review ID and current check-in versions. Review submission requires that exact revision inside an immediate transaction. A concurrent review or check-in change returns `409` rather than silently signing stale information. The review, operational plan status, audit entry and generic patient notification commit together. Clinical text and snapshot content are derived or validated on the server; notifications contain no internal assessment.
+
+Hydration exposes `effectiveStatus`, `effectiveFollowUpDate`, `followUpRevision` and `latestReview` without rewriting original treatment dates or instructions. The latest review determines the effective next review date and active/completed state. Dashboard due counts use active plans whose effective date is today or earlier. Closing a plan prevents new check-ins; reopening or continuing follow-up does not extend the original treatment period. Requesting a visit records instructions but does not create an appointment.
+
+The legacy status endpoint appends a `source:'status-change'` event with factual patient text, while leaving the latest clinical review's acknowledgement boundary intact. It accepts an optional revision for existing-client compatibility and makes a repeated current status a no-op. New clinical reviews and check-ins require the follow-up module; existing history and status-only closure remain accessible when that module is disabled. These workflows support clinician documentation and patient reporting, without automatic diagnosis, risk classification or treatment generation.
+
+## Recipient activity and read receipts
+
+`activity` stores one immutable notification per recipient and source-event key, enforced by `UNIQUE(userId,eventKey)`. Appointment, care-plan, message, check-in and clinical workflow mutations write their notifications in the same SQLite transaction as the source record. A notification failure rolls back the source mutation, so the application does not return a partially saved event. There is no independent delivery worker or external message transport.
+
+Only active accounts receive newly created events. Patient notifications resolve to accounts linked to that patient. Assigned clinical events resolve to active clinician accounts linked to the owning doctor; if none exist, they fall back to the active linked clinical team. Recipient selection precedes author exclusion, preventing an author's own event from being incorrectly rerouted. General patient messages notify the active clinical team. New or reactivated accounts do not receive historical backfill.
+
+Feed reads are scoped by current account ID and audience, with an additional patient-ID condition for patients. Reception's scope is empty, and current authorization still applies to old entries after a role change. Feed content uses safe server-generated summaries and internal links; message bodies, internal assessments and unpublished interpretations are not copied into notifications.
+
+Pagination resolves an opaque item ID to a recipient-scoped SQLite row position and returns older rows. New arrivals do not shift an existing cursor. `unreadCount` covers the entire permitted feed. Listing has no read side effect. Individual reads preserve the first receipt timestamp; bulk reads mark all eligible older rows through the supplied snapshot ID, including unloaded pages, while preserving newer arrivals. Receipt updates and their audit entries commit together; audit failures leave items unread. Read state is separate from clinical review state and does not clear a follow-up worklist entry. The inbox provides in-app updates only, with no scheduled reminders, email/SMS/push integration or emergency-monitoring service.
+
 ## Verification strategy
 
-API tests create isolated databases and real temporary HTTP servers. They assert unauthorized access, database-backed invariants, monetary arithmetic, concurrency, and persistence. Scheduling tests include breaks, modes, closures, protected bookings, interval overlap, and temporary-password privacy. Identity tests include access changes, session ownership, recovery replay/expiry, rate limits, and migrations from the previous session schema. Report tests check exact bytes, digest/provenance, size/format rejection, private downloads and immutability. Clinical workflow tests cover same-patient report linkage, unpublished interpretation privacy, latest-result review, original-note preservation, explicit decision histories, visit timing and concurrent withdrawal/completion. Browser tests exercise user workflows through rendered forms and verify their saved outcomes. Each browser-suite run uses its own temporary database and dedicated ports, leaving the local demonstration database alone.
+API tests create isolated databases and real temporary HTTP servers. They assert unauthorized access, database-backed invariants, monetary arithmetic, concurrency, and persistence. Scheduling tests include breaks, modes, closures, protected bookings, interval overlap, and temporary-password privacy. Identity tests include access changes, session ownership, recovery replay/expiry, rate limits, and migrations from the previous session schema. Report tests check exact bytes, digest/provenance, size/format rejection, private downloads and immutability. Clinical workflow tests cover same-patient report linkage, unpublished interpretation privacy, latest-result review, original-note preservation, explicit decision histories, visit timing and concurrent withdrawal/completion. Follow-up tests cover snapshot preservation, same-day edits, stale/concurrent review rejection, patient filtering, effective dates and status-only compatibility. Activity tests cover recipient and role isolation, owner routing, inactive-owner fallback, stable pagination, bounded bulk reads, deduplication, publication privacy and source-event rollback. Browser tests exercise user workflows through rendered forms and verify their saved outcomes. Each browser-suite run uses its own temporary database and dedicated ports, leaving the local demonstration database alone.
 
 Implementation references: [Node.js SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html), [Express production security guidance](https://expressjs.com/en/advanced/best-practice-security.html). The code and tests define this release's actual guarantees.

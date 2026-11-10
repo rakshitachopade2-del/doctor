@@ -1,3 +1,5 @@
+import type { FollowUpReview, PatientFollowUpReview } from './follow-up';
+
 export type Role = 'admin' | 'doctor' | 'receptionist' | 'patient';
 export interface User {
   id: string;
@@ -90,6 +92,10 @@ export interface Medication {
   warnings: string;
 }
 export interface CarePlan {
+  effectiveStatus?: 'active' | 'completed';
+  effectiveFollowUpDate?: string | null;
+  followUpRevision?: string;
+  latestReview?: FollowUpReview | PatientFollowUpReview | null;
   id: string;
   patientId: string;
   doctorId: string;

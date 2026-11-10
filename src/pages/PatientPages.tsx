@@ -48,6 +48,11 @@ import {
 import './patient.css';
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import { PatientWorkflowPanel } from './PatientWorkflowPanel';
+import {
+  PatientFollowUp,
+  effectivePlanStatus,
+  effectiveReviewDate,
+} from '../components/PatientFollowUp';
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -1013,7 +1018,22 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
   const [checkIn, setCheckIn] = useState<CarePlan | null>(null);
   const [cancel, setCancel] = useState<Appointment | null>(null);
   const [busy, setBusy] = useState(false);
-  const activePlans = record.data?.carePlans.filter((plan) => plan.status === 'active') ?? [];
+  const [params] = useSearchParams();
+  const selectedPlanId = params.get('plan');
+  const [showCompleted, setShowCompleted] = useState(false);
+  const activePlans =
+    record.data?.carePlans.filter((plan) => effectivePlanStatus(plan) === 'active') ?? [];
+  const completedPlans =
+    record.data?.carePlans.filter((plan) => effectivePlanStatus(plan) === 'completed') ?? [];
+  useEffect(() => {
+    if (
+      record.data?.carePlans.some(
+        (plan) => plan.id === selectedPlanId && effectivePlanStatus(plan) === 'completed',
+      )
+    ) {
+      setShowCompleted(true);
+    }
+  }, [selectedPlanId, record.data]);
   const upcoming =
     record.data?.appointments
       .filter(
@@ -1091,15 +1111,50 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           ) : (
             <Card>
               <EmptyState
-                title="A plan built around you"
-                description="After your consultation, your clinician’s treatment plan and follow-up instructions will appear here."
+                title={
+                  completedPlans.length ? 'No active treatment plans' : 'A plan built around you'
+                }
+                description={
+                  completedPlans.length
+                    ? 'Your completed plans and shared reviews remain available below.'
+                    : 'After your consultation, your clinician’s treatment plan and follow-up instructions will appear here.'
+                }
                 action={
                   <Link to="/book" className="button button-secondary">
-                    Book your first visit
+                    {completedPlans.length ? 'Book a visit' : 'Book your first visit'}
                   </Link>
                 }
               />
             </Card>
+          )}
+          {completedPlans.length > 0 && (
+            <section className="patient-completed-plans" aria-label="Completed treatment plans">
+              <div className="patient-completed-plans-heading">
+                <h2>
+                  Completed plans <span className="muted small">({completedPlans.length})</span>
+                </h2>
+                <button
+                  className="button button-ghost button-small"
+                  aria-expanded={showCompleted}
+                  aria-controls="completed-patient-plans"
+                  onClick={() => setShowCompleted((value) => !value)}
+                >
+                  {showCompleted ? 'Hide completed plans' : 'Show completed plans'}
+                </button>
+              </div>
+              <div id="completed-patient-plans" className="stack" hidden={!showCompleted}>
+                {showCompleted &&
+                  completedPlans.map((plan) => (
+                    <CarePlanCard
+                      key={plan.id}
+                      plan={plan}
+                      checkIns={
+                        record.data?.checkIns.filter((value) => value.carePlanId === plan.id) ?? []
+                      }
+                    />
+                  ))}
+              </div>
+            </section>
           )}
         </div>
         <aside className="stack">
@@ -1231,120 +1286,143 @@ function CarePlanCard({
   onCheckIn?: () => void;
 }) {
   const todaysCheckIn = checkIns.find((value) => value.date === today());
+  const [params] = useSearchParams();
+  const selected = params.get('plan') === plan.id;
+  const anchor = useRef<HTMLDivElement>(null);
+  const status = effectivePlanStatus(plan);
+  const reviewDate = effectiveReviewDate(plan);
+  useEffect(() => {
+    if (!selected) return;
+    const frame = requestAnimationFrame(() => {
+      anchor.current?.focus({ preventScroll: true });
+      anchor.current?.scrollIntoView({ block: 'start' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selected]);
   return (
-    <Card className="care-plan-card">
-      <div className="row between">
-        <div>
-          <span className="eyebrow">YOUR CLINICIAN’S PLAN</span>
-          <h2>{plan.title}</h2>
+    <div
+      ref={anchor}
+      id={`care-plan-${plan.id}`}
+      className={`patient-plan-anchor${selected ? ' patient-plan-target' : ''}`}
+      tabIndex={-1}
+      role="region"
+      aria-label={`${plan.title} treatment plan`}
+    >
+      <Card className="care-plan-card">
+        <div className="row between">
+          <div>
+            <span className="eyebrow">YOUR CLINICIAN’S PLAN</span>
+            <h2>{plan.title}</h2>
+          </div>
+          <Badge>{status}</Badge>
         </div>
-        <Badge>{plan.status}</Badge>
-      </div>
-      <p className="muted">
-        {plan.doctorName ? `${plan.doctorName} · ` : ''}
-        {formatDate(plan.startDate)} – {formatDate(plan.endDate)}
-      </p>
-      <p className="pre-line">{plan.instructions}</p>
-      {plan.medications.length > 0 && (
-        <div className="medication-list">
-          {plan.medications.map((medication, index) => (
-            <div className="medication-item" key={`${medication.name}-${index}`}>
-              <div className="medication-number">{index + 1}</div>
-              <div>
-                <h3>{medication.name}</h3>
-                <p>{medication.instructions}</p>
-                <div className="row">
-                  <span className="pill">{medication.schedule}</span>
-                  <span className="muted small">{medication.duration}</span>
+        <p className="muted">
+          {plan.doctorName ? `${plan.doctorName} · ` : ''}
+          {formatDate(plan.startDate)} – {formatDate(plan.endDate)}
+        </p>
+        <p className="pre-line">{plan.instructions}</p>
+        {plan.medications.length > 0 && (
+          <div className="medication-list">
+            {plan.medications.map((medication, index) => (
+              <div className="medication-item" key={`${medication.name}-${index}`}>
+                <div className="medication-number">{index + 1}</div>
+                <div>
+                  <h3>{medication.name}</h3>
+                  <p>{medication.instructions}</p>
+                  <div className="row">
+                    <span className="pill">{medication.schedule}</span>
+                    <span className="muted small">{medication.duration}</span>
+                  </div>
+                  {medication.warnings && (
+                    <p className="medication-warning">
+                      Clinician’s precautions: {medication.warnings}
+                    </p>
+                  )}
                 </div>
-                {medication.warnings && (
-                  <p className="medication-warning">
-                    Clinician’s precautions: {medication.warnings}
-                  </p>
-                )}
               </div>
+            ))}
+          </div>
+        )}
+        {plan.expectations && (
+          <div className="care-plan-note">
+            <strong>What to expect</strong>
+            <p>{plan.expectations}</p>
+          </div>
+        )}
+        {plan.warnings && (
+          <div className="notice">
+            <strong>Important instructions from your clinician</strong>
+            <p>{plan.warnings}</p>
+          </div>
+        )}
+        <div className="plan-facts">
+          {reviewDate && (
+            <div>
+              <CalendarDays size={18} />
+              <span>
+                Follow-up requested<strong>{formatDate(reviewDate)}</strong>
+              </span>
+              <Link to={`/book?doctor=${plan.doctorId}`}>Book</Link>
             </div>
-          ))}
+          )}
+          {plan.cost && (
+            <div>
+              <span>
+                Estimated treatment cost<strong>{plan.cost}</strong>
+              </span>
+            </div>
+          )}
         </div>
-      )}
-      {plan.expectations && (
-        <div className="care-plan-note">
-          <strong>What to expect</strong>
-          <p>{plan.expectations}</p>
-        </div>
-      )}
-      {plan.warnings && (
-        <div className="notice">
-          <strong>Important instructions from your clinician</strong>
-          <p>{plan.warnings}</p>
-        </div>
-      )}
-      <div className="plan-facts">
-        {plan.followUpDate && (
-          <div>
-            <CalendarDays size={18} />
-            <span>
-              Follow-up requested<strong>{formatDate(plan.followUpDate)}</strong>
-            </span>
-            <Link to={`/book?doctor=${plan.doctorId}`}>Book</Link>
+        <PatientFollowUp plan={plan} />
+        {onCheckIn && status === 'active' && (
+          <div className="plan-check-in">
+            <div>
+              <strong>
+                {todaysCheckIn ? 'Today’s check-in is saved' : 'How is your plan going today?'}
+              </strong>
+              <p>
+                {todaysCheckIn
+                  ? `Reported: ${todaysCheckIn.adherence === 'taken' ? 'followed the plan' : todaysCheckIn.adherence === 'partial' ? 'partly followed' : 'missed the plan'} · feeling ${todaysCheckIn.feeling}`
+                  : 'A quick update helps your clinic see your experience.'}
+              </p>
+            </div>
+            <button className="button button-secondary" onClick={onCheckIn}>
+              {todaysCheckIn ? 'Update check-in' : 'Daily check-in'} <ArrowRight size={15} />
+            </button>
           </div>
         )}
-        {plan.cost && (
-          <div>
-            <span>
-              Estimated treatment cost<strong>{plan.cost}</strong>
-            </span>
-          </div>
-        )}
-      </div>
-      {onCheckIn && (
-        <div className="plan-check-in">
-          <div>
-            <strong>
-              {todaysCheckIn ? 'Today’s check-in is saved' : 'How is your plan going today?'}
-            </strong>
-            <p>
-              {todaysCheckIn
-                ? `Reported: ${todaysCheckIn.adherence === 'taken' ? 'followed the plan' : todaysCheckIn.adherence === 'partial' ? 'partly followed' : 'missed the plan'} · feeling ${todaysCheckIn.feeling}`
-                : 'A quick update helps your clinic see your experience.'}
+        {checkIns.length > 0 && (
+          <div className="check-in-week" aria-label="Your recent reported check-ins">
+            {Array.from({ length: 7 }, (_, index) => dateAfter(index - 6)).map((date) => {
+              const entry = checkIns.find((value) => value.date === date);
+              return (
+                <div key={date} title={`${formatDate(date)}: ${entry?.adherence ?? 'No check-in'}`}>
+                  <span className={`check-in-dot ${entry?.adherence ?? ''}`}>
+                    {entry?.adherence === 'taken' ? (
+                      <Check size={13} />
+                    ) : entry?.adherence === 'missed' ? (
+                      <X size={12} />
+                    ) : entry?.adherence === 'partial' ? (
+                      '–'
+                    ) : (
+                      '·'
+                    )}
+                  </span>
+                  <small>
+                    {new Date(`${date}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'short' })}
+                  </small>
+                </div>
+              );
+            })}
+            <p className="muted small">
+              Your reported routine
+              <br />
+              No clinical score is inferred.
             </p>
           </div>
-          <button className="button button-secondary" onClick={onCheckIn}>
-            {todaysCheckIn ? 'Update check-in' : 'Daily check-in'} <ArrowRight size={15} />
-          </button>
-        </div>
-      )}
-      {checkIns.length > 0 && (
-        <div className="check-in-week" aria-label="Your recent reported check-ins">
-          {Array.from({ length: 7 }, (_, index) => dateAfter(index - 6)).map((date) => {
-            const entry = checkIns.find((value) => value.date === date);
-            return (
-              <div key={date} title={`${formatDate(date)}: ${entry?.adherence ?? 'No check-in'}`}>
-                <span className={`check-in-dot ${entry?.adherence ?? ''}`}>
-                  {entry?.adherence === 'taken' ? (
-                    <Check size={13} />
-                  ) : entry?.adherence === 'missed' ? (
-                    <X size={12} />
-                  ) : entry?.adherence === 'partial' ? (
-                    '–'
-                  ) : (
-                    '·'
-                  )}
-                </span>
-                <small>
-                  {new Date(`${date}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'short' })}
-                </small>
-              </div>
-            );
-          })}
-          <p className="muted small">
-            Your reported routine
-            <br />
-            No clinical score is inferred.
-          </p>
-        </div>
-      )}
-    </Card>
+        )}
+      </Card>
+    </div>
   );
 }
 
@@ -1454,7 +1532,26 @@ export function MyRecordPage() {
 function PatientRecordView({ patientId }: { patientId: string }) {
   const record = useResource<PatientRecord>(`/api/patients/${patientId}`);
   const settings = useResource<ClinicSettings>('/api/settings');
-  const [tab, setTab] = useState('timeline');
+  const [params, setParams] = useSearchParams();
+  const requestedTab = params.get('tab') ?? 'timeline';
+  const aliases: Record<string, string> = {
+    careplans: 'plans',
+    'care-plans': 'plans',
+    reports: 'images',
+    investigations: 'workflows',
+    procedures: 'workflows',
+  };
+  const normalizedTab = aliases[requestedTab] ?? requestedTab;
+  const tab = ['timeline', 'plans', 'workflows', 'history', 'images', 'visits'].includes(
+    normalizedTab,
+  )
+    ? normalizedTab
+    : 'timeline';
+  function setTab(value: string) {
+    const next = new URLSearchParams(params);
+    next.set('tab', value);
+    setParams(next, { replace: true });
+  }
   const [upload, setUpload] = useState(false);
   const [compare, setCompare] = useState(false);
   const [firstImage, setFirstImage] = useState('');

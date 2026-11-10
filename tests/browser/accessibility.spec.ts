@@ -54,4 +54,9 @@ test('patient care and records remain accessible on a narrow screen', async ({
   await page.goto('/my-care/record');
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await audit(page);
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await audit(page);
 });

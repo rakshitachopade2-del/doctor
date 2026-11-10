@@ -133,7 +133,19 @@ test('clinician documents a full longitudinal care journey with private images a
   await expect(
     page.getByRole('heading', { name: 'Browser-tested care plan', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Mark plan complete', exact: true }).click();
+  await page.getByRole('button', { name: 'Review progress', exact: true }).click();
+  dialog = page.getByRole('dialog');
+  await dialog
+    .getByLabel('Clinician assessment', { exact: true })
+    .fill('Synthetic final review confirms the documentation workflow is complete.');
+  await dialog
+    .getByLabel('Instructions for the patient', { exact: true })
+    .fill('Your synthetic care plan is complete. Contact the clinic for further review if needed.');
+  await dialog.getByLabel('Review outcome', { exact: true }).selectOption('complete');
+  await dialog
+    .getByRole('button', { name: 'Save review & share instructions', exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
   await expect(page.getByText('Completed', { exact: true })).toBeVisible();
 });
 

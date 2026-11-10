@@ -13,6 +13,7 @@ import type {
   ProcedureRecord,
 } from '../shared/clinical.ts';
 import { clinicToday, get, id, insert, list, nowISO, type DB } from './db.ts';
+import { notifyPatient, notifyClinicians } from './activity.ts';
 
 interface ClinicalContext {
   db: DB;
@@ -211,6 +212,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     transaction(() => {
       insert(db, 'investigations', order);
       audit(req, 'ordered investigation', 'investigation', order.id);
+      notifyPatient(db, order.patientId, `investigation-ordered:${order.id}`, {
+        kind: 'investigation',
+        title: 'Your clinician requested an investigation',
+        detail: order.title,
+        href: '/my-care/record?tab=workflows',
+      });
     });
     res.status(201).json(investigationView(order));
   });
@@ -247,6 +254,18 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         JSON.stringify(result),
       );
       audit(req, 'submitted unreviewed investigation result', 'investigation', order.id);
+      notifyClinicians(
+        db,
+        order.patientId,
+        `investigation-result:${result.id}`,
+        {
+          kind: 'investigation',
+          title: 'An investigation result is ready for review',
+          detail: `${get<Patient>(db, 'patients', order.patientId)!.name} · ${order.title}`,
+          href: `/clinic/patients/${order.patientId}?tab=workup`,
+        },
+        { doctorId: order.doctorId, excludeActorId: user.id },
+      );
     });
     res.status(201).json(investigationView(order, user.role === 'patient'));
   });
@@ -292,6 +311,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
           nowISO(),
         );
         audit(req, 'published investigation review to patient', 'investigationReview', review.id);
+        notifyPatient(db, order.patientId, `investigation-review:${review.id}`, {
+          kind: 'investigation',
+          title: 'Your clinician shared a report review',
+          detail: order.title,
+          href: '/my-care/record?tab=workflows',
+        });
       }
       audit(req, 'reviewed investigation result', 'investigation', order.id);
     });
@@ -317,6 +342,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
           nowISO(),
         );
         audit(req, 'published investigation review to patient', 'investigationReview', review.id);
+        notifyPatient(db, order.patientId, `investigation-review:${review.id}`, {
+          kind: 'investigation',
+          title: 'Your clinician shared a report review',
+          detail: order.title,
+          href: '/my-care/record?tab=workflows',
+        });
       }
     });
     res.json(investigationView(order));
@@ -337,6 +368,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         JSON.stringify({ ...input, createdAt: nowISO() }),
       );
       audit(req, 'cancelled investigation', 'investigation', order.id);
+      notifyPatient(db, order.patientId, `investigation-cancelled:${order.id}`, {
+        kind: 'investigation',
+        title: 'An investigation request was cancelled',
+        detail: order.title,
+        href: '/my-care/record?tab=workflows',
+      });
     });
     res.json(investigationView(order));
   });
@@ -398,6 +435,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
       }
       insert(db, 'procedures', plan);
       audit(req, 'planned procedure and documented discussion information', 'procedure', plan.id);
+      notifyPatient(db, plan.patientId, `procedure-planned:${plan.id}`, {
+        kind: 'procedure',
+        title: 'A procedure plan is ready to discuss',
+        detail: plan.title,
+        href: '/my-care/record?tab=workflows',
+      });
     });
     res.status(201).json(procedureView(plan));
   });
@@ -444,6 +487,26 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         JSON.stringify(agreement),
       );
       audit(req, `recorded procedure decision: ${agreement.decision}`, 'procedure', plan.id);
+      if (user.role === 'patient')
+        notifyClinicians(
+          db,
+          plan.patientId,
+          `procedure-decision:${agreement.id}`,
+          {
+            kind: 'procedure',
+            title: 'A patient recorded a procedure decision',
+            detail: `${user.name} · ${plan.title}`,
+            href: `/clinic/patients/${plan.patientId}?tab=workup`,
+          },
+          { doctorId: plan.doctorId, excludeActorId: user.id },
+        );
+      else
+        notifyPatient(db, plan.patientId, `procedure-decision:${agreement.id}`, {
+          kind: 'procedure',
+          title: 'Your procedure discussion was recorded',
+          detail: plan.title,
+          href: '/my-care/record?tab=workflows',
+        });
     });
     res.status(201).json(procedureView(plan));
   });
@@ -480,6 +543,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         JSON.stringify(completion),
       );
       audit(req, 'completed procedure and recorded aftercare', 'procedure', plan.id);
+      notifyPatient(db, plan.patientId, `procedure-completed:${plan.id}`, {
+        kind: 'procedure',
+        title: 'Your procedure aftercare is available',
+        detail: plan.title,
+        href: '/my-care/record?tab=workflows',
+      });
     });
     res.json(procedureView(plan));
   });
@@ -494,6 +563,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         JSON.stringify({ ...input, createdAt: nowISO() }),
       );
       audit(req, 'cancelled procedure', 'procedure', plan.id);
+      notifyPatient(db, plan.patientId, `procedure-cancelled:${plan.id}`, {
+        kind: 'procedure',
+        title: 'A procedure plan was cancelled',
+        detail: plan.title,
+        href: '/my-care/record?tab=workflows',
+      });
     });
     res.json(procedureView(plan));
   });

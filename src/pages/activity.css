@@ -1,0 +1,161 @@
+.activity-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.activity-item {
+  display: flex;
+  gap: 18px;
+  padding: 25px 12px;
+  border-top: 1px solid #e5ebdf;
+}
+.activity-unread {
+  background: #f6f9f1;
+}
+.activity-kind-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: #e9f0df;
+  color: #506b40;
+}
+.activity-copy {
+  flex: 1;
+  min-width: 0;
+}
+.activity-item-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 10px;
+  color: #5c6b53;
+}
+.activity-item-meta > span {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+.activity-copy h2 {
+  font-size: 15px;
+  margin: 10px 0 8px;
+  line-height: 1.5;
+}
+.activity-copy h2 a:hover {
+  text-decoration: underline;
+}
+.activity-copy p {
+  font-size: 12px;
+  color: #56694d;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.activity-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 13px;
+}
+.activity-item-actions .text-link {
+  font-size: 11px;
+}
+.activity-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 25px;
+}
+.activity-bell {
+  position: relative;
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #e4eadf;
+  border-radius: 10px;
+  color: #496341;
+}
+.activity-bell-count {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 18px;
+  line-height: 18px;
+  border-radius: 10px;
+  background: #286456;
+  color: white;
+  padding: 0 4px;
+  font-size: 9px;
+  text-align: center;
+}
+.activity-nav-count {
+  margin-left: auto;
+  min-width: 18px;
+  line-height: 18px;
+  border-radius: 8px;
+  background: #e4eddb;
+  color: #3f5f31;
+  font-size: 10px;
+  text-align: center;
+  padding: 0 4px;
+}
+@media (max-width: 700px) {
+  .activity-toolbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .activity-item {
+    padding: 20px 4px;
+    gap: 11px;
+  }
+  .activity-kind-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+  }
+  .activity-item-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .activity-copy h2 {
+    font-size: 14px;
+  }
+  .activity-item-actions {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .activity-bell {
+    width: 32px;
+    height: 32px;
+  }
+  .activity-toolbar .segmented {
+    flex-wrap: wrap;
+  }
+}
+
+.nav-item[href$='/activity'].active:after {
+  display: none;
+}
+@media (max-width: 700px) {
+  .topbar-left {
+    min-width: 0;
+    flex: 1;
+  }
+  .topbar-left .breadcrumb {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar-right {
+    flex-shrink: 0;
+  }
+  .topbar .view-clinic {
+    display: none;
+  }
+}

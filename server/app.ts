@@ -1,6 +1,13 @@
 import { registerOperations } from './operations.ts';
 import { registerClinical } from './clinical.ts';
+import { createFollowUp } from './follow-up.ts';
 import { registerDocuments } from './documents.ts';
+import {
+  initializeActivity,
+  notifyPatient,
+  notifyClinicians,
+  registerActivity,
+} from './activity.ts';
 import {
   initializeIdentity,
   managedAccount,
@@ -141,6 +148,7 @@ export function createApp(options: AppOptions = {}) {
   }
   if (demoMode) seedDemo(db);
   initializeIdentity(db);
+  initializeActivity(db);
   const app = express();
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 1);
@@ -307,6 +315,15 @@ export function createApp(options: AppOptions = {}) {
     return a;
   };
   const scheduling = createScheduling({ db, actor, audit, fail });
+  const followUp = createFollowUp({
+    db,
+    actor,
+    patientAccess,
+    clinicianId,
+    moduleEnabled,
+    audit,
+    fail,
+  });
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
   app.get('/api/session', (req: AuthRequest, res) =>
     res.json({ user: req.user ?? null, csrfToken: req.csrfToken, demoMode }),
@@ -545,7 +562,10 @@ export function createApp(options: AppOptions = {}) {
       ),
       intakes: list<Intake>(db, 'intakes', key),
       encounters: user.role === 'patient' ? [] : list<Encounter>(db, 'encounters', key),
-      carePlans: list<CarePlan>(db, 'carePlans', key),
+      carePlans: followUp.hydratePlans(
+        list<CarePlan>(db, 'carePlans', key),
+        user.role === 'patient',
+      ),
       checkIns: list<CheckIn>(db, 'checkIns', key),
       images: list<ClinicalImage>(db, 'images', key),
       messages: list<Message>(db, 'messages', key).reverse(),
@@ -603,6 +623,12 @@ export function createApp(options: AppOptions = {}) {
         'INSERT INTO appointments(id,patientId,doctorId,date,time,status,data) VALUES (?,?,?,?,?,?,?)',
       ).run(value.id, patientId, d.id, value.date, value.time, value.status, JSON.stringify(value));
       audit(req, 'booked appointment', 'appointment', value.id);
+      notifyPatient(db, patientId, `appointment-created:${value.id}`, {
+        kind: 'appointment',
+        title: 'Your appointment is booked',
+        detail: `${value.date} at ${value.time} IST · ${value.doctorName}`,
+        href: '/my-care',
+      });
       return value;
     });
     res.status(201).json(appointment);
@@ -687,6 +713,19 @@ export function createApp(options: AppOptions = {}) {
         'appointment',
         a.id,
       );
+      if (
+        JSON.stringify([a.date, a.time, a.mode, a.doctorId, a.status]) !==
+        JSON.stringify([value.date, value.time, value.mode, value.doctorId, value.status])
+      ) {
+        notifyPatient(db, value.patientId, `appointment-changed:${value.id}:${id()}`, {
+          kind: 'appointment',
+          title: rescheduling
+            ? 'Your appointment was rescheduled'
+            : `Appointment ${value.status.replaceAll('-', ' ')}`,
+          detail: `${value.date} at ${value.time} IST · ${value.doctorName}`,
+          href: rescheduling ? '/my-care' : '/my-care/record?tab=visits',
+        });
+      }
       return value;
     });
     res.json(updated);
@@ -780,7 +819,12 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get('/api/care-plans', (req: AuthRequest, res) => {
     const user = actor(req, ['admin', 'doctor', 'patient']);
-    res.json(list<CarePlan>(db, 'carePlans', user.role === 'patient' ? user.patientId : undefined));
+    res.json(
+      followUp.hydratePlans(
+        list<CarePlan>(db, 'carePlans', user.role === 'patient' ? user.patientId : undefined),
+        user.role === 'patient',
+      ),
+    );
   });
   app.post('/api/care-plans', (req: AuthRequest, res) => {
     const doctorId = clinicianId(req);
@@ -820,20 +864,32 @@ export function createApp(options: AppOptions = {}) {
       status: 'active',
       createdAt: nowISO(),
     };
-    insert(db, 'carePlans', plan);
-    audit(req, 'created care plan', 'carePlan', plan.id);
+    scheduling.transaction(() => {
+      insert(db, 'carePlans', plan);
+      audit(req, 'created care plan', 'carePlan', plan.id);
+      notifyPatient(db, plan.patientId, `care-plan-created:${plan.id}`, {
+        kind: 'care-plan',
+        title: 'Your care plan is ready',
+        detail: plan.title,
+        href: `/my-care?plan=${encodeURIComponent(plan.id)}`,
+      });
+    });
     res.status(201).json(plan);
   });
   app.patch('/api/care-plans/:id', (req: AuthRequest, res) => {
-    clinical(req);
-    const input = z.object({ status: z.enum(['active', 'completed']) }).parse(req.body);
-    const key = String(req.params.id),
-      plan = get<CarePlan>(db, 'carePlans', key);
-    if (!plan) return fail(404, 'Care plan not found.');
-    const updated = { ...plan, status: input.status };
-    db.prepare('UPDATE carePlans SET data=? WHERE id=?').run(JSON.stringify(updated), key);
-    audit(req, `care plan ${input.status}`, 'carePlan', key);
-    res.json(updated);
+    const input = z
+      .object({
+        status: z.enum(['active', 'completed']),
+        expectedRevision: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+      })
+      .strict()
+      .parse(req.body);
+    res.json(
+      followUp.recordLegacyStatus(req, String(req.params.id), input.status, input.expectedRevision),
+    );
   });
   app.post('/api/check-ins', (req: AuthRequest, res) => {
     moduleEnabled('followUp');
@@ -862,15 +918,29 @@ export function createApp(options: AppOptions = {}) {
       patientId: user.patientId!,
       createdAt: nowISO(),
     };
-    db.prepare(
-      'INSERT INTO checkIns(id,patientId,carePlanId,date,data) VALUES (?,?,?,?,?) ON CONFLICT(carePlanId,date) DO UPDATE SET data=excluded.data',
-    ).run(check.id, check.patientId, check.carePlanId, check.date, JSON.stringify(check));
-    audit(
-      req,
-      existing ? 'updated daily check-in' : 'recorded daily check-in',
-      'checkIn',
-      check.id,
-    );
+    scheduling.transaction(() => {
+      db.prepare(
+        'INSERT INTO checkIns(id,patientId,carePlanId,date,data) VALUES (?,?,?,?,?) ON CONFLICT(carePlanId,date) DO UPDATE SET data=excluded.data',
+      ).run(check.id, check.patientId, check.carePlanId, check.date, JSON.stringify(check));
+      audit(
+        req,
+        existing ? 'updated daily check-in' : 'recorded daily check-in',
+        'checkIn',
+        check.id,
+      );
+      notifyClinicians(
+        db,
+        check.patientId,
+        `check-in:${check.id}:${digest(JSON.stringify(check))}`,
+        {
+          kind: 'check-in',
+          title: existing ? 'A patient updated their check-in' : 'A patient shared a check-in',
+          detail: `${get<Patient>(db, 'patients', check.patientId)!.name} · ${plan.title}`,
+          href: `/clinic/patients/${check.patientId}?tab=care&plan=${plan.id}`,
+        },
+        { doctorId: plan.doctorId, excludeActorId: user.id },
+      );
+    });
     res.status(existing ? 200 : 201).json(check);
   });
   app.post('/api/images', (req: AuthRequest, res) => {
@@ -957,8 +1027,30 @@ export function createApp(options: AppOptions = {}) {
       authorRole: user.role,
       createdAt: nowISO(),
     };
-    insert(db, 'messages', message);
-    audit(req, 'sent care message', 'message', message.id);
+    scheduling.transaction(() => {
+      insert(db, 'messages', message);
+      audit(req, 'sent care message', 'message', message.id);
+      if (user.role === 'patient')
+        notifyClinicians(
+          db,
+          patientId,
+          `message:${message.id}`,
+          {
+            kind: 'message',
+            title: 'A patient sent a message',
+            detail: user.name,
+            href: `/clinic/patients/${patientId}?tab=messages`,
+          },
+          { excludeActorId: user.id },
+        );
+      else
+        notifyPatient(db, patientId, `message:${message.id}`, {
+          kind: 'message',
+          title: 'Your clinic sent a message',
+          detail: 'Open your private conversation to read it.',
+          href: '/my-care/messages',
+        });
+    });
     res.status(201).json(message);
   });
   app.get('/api/audit', (req: AuthRequest, res) => {
@@ -972,10 +1064,17 @@ export function createApp(options: AppOptions = {}) {
       appointments = all
         .filter((a) => a.date === today)
         .sort((a, b) => a.time.localeCompare(b.time)),
-      allPlans = list<CarePlan>(db, 'carePlans'),
+      allPlans = followUp.hydratePlans(list<CarePlan>(db, 'carePlans')),
       followUps = allPlans
-        .filter((p) => p.status === 'active' && p.followUpDate <= today)
-        .sort((a, b) => a.followUpDate.localeCompare(b.followUpDate));
+        .filter(
+          (p) =>
+            p.effectiveStatus === 'active' &&
+            p.effectiveFollowUpDate !== null &&
+            p.effectiveFollowUpDate <= today,
+        )
+        .sort((a, b) =>
+          (a.effectiveFollowUpDate ?? '').localeCompare(b.effectiveFollowUpDate ?? ''),
+        );
     const patients = list<Patient>(db, 'patients');
     res.json({
       date: today,
@@ -1005,9 +1104,11 @@ export function createApp(options: AppOptions = {}) {
     });
   });
   scheduling.register(app);
+  registerActivity(app, { db, actor, audit, fail });
   registerDocuments(app, { db, actor, patientAccess, audit, fail });
   registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });
   registerClinical(app, { db, actor, patientAccess, clinicianId, audit, fail });
+  followUp.register(app);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   const dist = resolve('dist');
   if (existsSync(resolve(dist, 'index.html'))) {

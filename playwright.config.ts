@@ -18,7 +18,8 @@ export default defineConfig({
     { name: 'operations', testMatch: /(?:accessibility|identity|operations|scheduling)\.spec\.ts/ },
     {
       name: 'care',
-      testMatch: /(?:clinic|patient|clinical-workflows|patient-workflows)\.spec\.ts/,
+      testMatch:
+        /(?:clinic|patient|clinical-workflows|patient-workflows|follow-up|patient-follow-up|activity)\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5184' },
     },
   ],

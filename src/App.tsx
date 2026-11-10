@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import {
   Link,
   Navigate,
@@ -11,6 +11,7 @@ import {
 } from 'react-router-dom';
 import {
   Activity,
+  Bell,
   ArrowUpRight,
   CalendarDays,
   Clock3,
@@ -31,7 +32,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { useSession, api, useToast } from './lib';
+import { useSession, api, useToast, useResource } from './lib';
+import type { ActivityFeed } from '../shared/activity';
+import './pages/activity.css';
 import { Avatar, Badge, ErrorState, Loading } from './components/ui';
 import './operations.css';
 const AuthPage = lazy(() =>
@@ -92,7 +95,10 @@ const PatientDetailPage = lazy(() =>
   import('./pages/ClinicPages').then((module) => ({ default: module.PatientDetailPage })),
 );
 const FollowUpsPage = lazy(() =>
-  import('./pages/ClinicPages').then((module) => ({ default: module.FollowUpsPage })),
+  import('./pages/FollowUpPages').then((module) => ({ default: module.FollowUpsPage })),
+);
+const ActivityPage = lazy(() =>
+  import('./pages/ActivityPage').then((module) => ({ default: module.ActivityPage })),
 );
 import type { Role } from '../shared/types';
 
@@ -171,6 +177,7 @@ const staffNav = [
   { to: '/clinic/scheduling', label: 'Schedules & closures', icon: Clock3 },
   { to: '/clinic/patients', label: 'Patients', icon: Users },
   { to: '/clinic/follow-ups', label: 'Follow-up care', icon: HeartHandshake, clinical: true },
+  { to: '/clinic/activity', label: 'Activity', icon: Bell, clinical: true },
   { to: '/clinic/billing', label: 'Billing', icon: Receipt },
   { to: '/clinic/knowledge', label: 'Knowledge library', icon: BookOpen, clinical: true },
 ];
@@ -182,11 +189,29 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
   const [menu, setMenu] = useState(false);
   const [query, setQuery] = useState('');
   const user = session.user!;
+  const activity = useResource<ActivityFeed>(
+    user.role !== 'receptionist' ? '/api/activity?limit=1' : null,
+  );
+  useEffect(() => {
+    if (user.role !== 'receptionist') void activity.reload();
+  }, [location.pathname, activity.reload, user.role]);
+  useEffect(() => {
+    const refresh = () => {
+      if (user.role !== 'receptionist') void activity.reload();
+    };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('derma:activity-changed', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('derma:activity-changed', refresh);
+    };
+  }, [activity.reload, user.role]);
   const nav = patient
     ? [
         { to: '/my-care', label: 'My care', icon: HeartHandshake, end: true },
         { to: '/my-care/record', label: 'My health record', icon: ClipboardList },
         { to: '/my-care/messages', label: 'Clinic messages', icon: MessageSquare },
+        { to: '/my-care/activity', label: 'Activity', icon: Bell },
         { to: '/my-care/invoices', label: 'My invoices', icon: Receipt },
         { to: '/my-care/library', label: 'Clinic library', icon: BookOpen },
         { to: '/book', label: 'Book a visit', icon: CalendarDays },
@@ -246,6 +271,11 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
             >
               <item.icon size={19} />
               {item.label}
+              {item.label === 'Activity' && !!activity.data?.unreadCount && (
+                <span className="activity-nav-count" aria-hidden="true">
+                  {activity.data.unreadCount > 99 ? '99+' : activity.data.unreadCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -305,7 +335,7 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
       </aside>
       <div className="workspace-body">
         <header className="topbar">
-          <div className="row">
+          <div className="row topbar-left">
             <button
               className="icon-button mobile-only"
               aria-label="Open navigation"
@@ -329,6 +359,20 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
             </span>
           </div>
           <div className="topbar-right">
+            {user.role !== 'receptionist' && (
+              <Link
+                to={patient ? '/my-care/activity' : '/clinic/activity'}
+                className="activity-bell"
+                aria-label={`Activity${activity.data?.unreadCount ? `, ${activity.data.unreadCount} unread` : ''}`}
+              >
+                <Bell size={17} />
+                {!!activity.data?.unreadCount && (
+                  <span className="activity-bell-count" aria-hidden="true">
+                    {activity.data.unreadCount > 99 ? '99+' : activity.data.unreadCount}
+                  </span>
+                )}
+              </Link>
+            )}
             {!patient && (
               <form
                 className="global-search"
@@ -416,6 +460,14 @@ export function App() {
           />
           <Route path="clinic/billing" element={<BillingPage />} />
           <Route
+            path="clinic/activity"
+            element={
+              <Guard roles={['admin', 'doctor']}>
+                <ActivityPage />
+              </Guard>
+            }
+          />
+          <Route
             path="clinic/knowledge"
             element={
               <Guard roles={['admin', 'doctor']}>
@@ -470,6 +522,7 @@ export function App() {
           <Route path="my-care/library" element={<LibraryPage />} />
           <Route path="my-care/record" element={<MyRecordPage />} />
           <Route path="my-care/messages" element={<MessagesPage />} />
+          <Route path="my-care/activity" element={<ActivityPage />} />
         </Route>
         <Route
           path="account"

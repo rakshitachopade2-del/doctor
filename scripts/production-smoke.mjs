@@ -156,6 +156,12 @@ try {
   assert.equal((await accounts.json()).length, 1);
   const schedules = await fetch(`${base}/api/scheduling`, { headers: apiHeaders });
   assert.deepEqual((await schedules.json()).schedules, []);
+  const activity = await fetch(`${base}/api/activity`, { headers: apiHeaders });
+  assert.equal(activity.status, 200);
+  assert.deepEqual((await activity.json()).items, []);
+  const followUps = await fetch(`${base}/api/follow-up-worklist`, { headers: apiHeaders });
+  assert.equal(followUps.status, 200);
+  assert.deepEqual(await followUps.json(), []);
   assert.equal(
     (await fetch(`${base}/api/documents?patientId=missing`, { headers: apiHeaders })).status,
     404,

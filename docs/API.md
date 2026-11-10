@@ -4,7 +4,7 @@ All paths below start with `/api`. JSON errors use `{error: string}` and an appr
 
 Requests that change state use JSON. Except for login, registration and recovery-token redemption, they require an authenticated session and the session’s `X-CSRF-Token` header. Browser-origin checks also apply. The session cookie is HTTP-only, uses `SameSite=Lax`, and is secure in production. Roles, account status and patient ownership are enforced by the server, not only the interface.
 
-Core models are in `shared/types.ts`; scheduling, identity, operations, clinical workflows and PDF-report models are in `shared/scheduling.ts`, `shared/identity.ts`, `shared/operations.ts`, `shared/clinical.ts` and `shared/documents.ts`.
+Core models are in `shared/types.ts`; scheduling, identity, operations, clinical workflows, PDF reports, follow-up reviews and activity models are in `shared/scheduling.ts`, `shared/identity.ts`, `shared/operations.ts`, `shared/clinical.ts`, `shared/documents.ts`, `shared/follow-up.ts` and `shared/activity.ts`.
 
 Demo accounts use `DemoClinic2026!` with `doctor@derma.demo`, `reception@derma.demo`, `patient@derma.demo` and `admin@derma.demo`. Demo records are synthetic and cannot be used as a production database.
 
@@ -68,14 +68,38 @@ Temporary-password sessions receive anonymous slot availability: their patient-s
 - `POST /patients/:id/portal-account {email,password,identityVerified:true}` → `User` (administrator). Requires an unlinked patient record and unused email; creates an active account requiring an initial-password change. Existing accounts cannot be relinked through this endpoint.
 - `POST /intakes {patientId?,concern,location,duration,symptoms,triggers,previousTreatment,medications,allergies,goals,consent:true}` → `Intake` (owning patient or clinician; intake module must be enabled).
 - `POST /encounters {patientId,appointmentId?,history,examination,assessment,investigations,plan}` → `Encounter` (clinician with a linked doctor profile). Notes are immutable; a linked appointment must belong to the same patient.
-- `GET /care-plans` → `CarePlan[]` (clinician or owning patient).
+- `GET /care-plans` → `CarePlan[]` (clinician or owning patient), including effective follow-up status/date, revision and latest review as described below.
 - `POST /care-plans {patientId,title,instructions,expectations,warnings,cost,startDate,endDate,followUpDate,medications}` → `CarePlan` (clinician with a linked doctor profile). Each medication has name, instructions, schedule, duration and warnings.
-- `PATCH /care-plans/:id {status}` → `CarePlan` (clinician); status is `active` or `completed`.
+- `PATCH /care-plans/:id {status,expectedRevision?}` → hydrated `CarePlan` (clinician with a linked doctor profile); status is `active` or `completed`. A change appends a factual `source:'status-change'` event and patient notification. It does not clear unreviewed check-ins or record new clinical advice. Repeating the current status creates no additional event. An optional stale revision returns `409`.
 - `POST /check-ins {carePlanId,date,adherence,feeling,note}` → `CheckIn` (owning patient, active plan, follow-up module enabled). One per plan/day, updated on repeat; dates must be within the plan and not in the future. Adherence is `taken | partial | missed`; feeling is `better | same | worse`.
 - `POST /images {patientId?,caption,category,consent:true,dataUrl}` → `ClinicalImage` (owning patient or clinician; image module enabled). Category is `clinical` or `report`. Private JPEG/PNG/WebP images are limited to 5 MB and checked for a matching file signature.
 - `GET /images/:id/file` → private image bytes with ownership checks.
 - `GET /messages?patientId=` → `Message[]` (clinician or owning patient).
 - `POST /messages {patientId?,body}` → `Message` (clinician or owning patient; follow-up module enabled). Messages have a 4,000-character limit and remain inside the platform.
+
+## Follow-up review and worklist
+
+- `GET /follow-up-worklist?scope=mine|all` → `FollowUpWorkItem[]` (doctor/administrator). Defaults to `mine` for doctors and `all` for administrators. Ownership is the original care-plan doctor; `all` uses the existing clinic-wide clinical permissions. Includes active and completed plans, sorted by due status, unreviewed count, next review date and patient name. Each item contains `carePlan`, `patient`, `ownerDoctorId`, `ownerDoctorName`, `revision`, `latestReview`, `unreviewedCheckIns`, `unreviewedCount` and `due`.
+- `GET /care-plans/:id/reviews` → newest-first `FollowUpReview[]` (clinician) or `PatientFollowUpReview[]` (owning patient). Reception is denied. Patient responses omit internal `assessment` and `checkInSnapshots`.
+- `POST /care-plans/:id/reviews {expectedRevision,assessment,patientInstructions,disposition,nextReviewDate?}` → hydrated `CarePlan` with `201` (linked clinician; follow-up module enabled). Assessment and patient instructions are required, with an 8,000-character limit each. Disposition is `continue | visit-requested | complete`. Continuing or requesting a visit requires today's date or a future `nextReviewDate`; completion stores `null`. `expectedRevision` must match the current 64-character revision from the plan/worklist. A new review or new/edited check-in makes an earlier revision stale and returns `409` without saving.
+
+Hydrated care plans in plan lists, patient records and dashboard follow-ups include `effectiveStatus`, `effectiveFollowUpDate`, `followUpRevision` and `latestReview`. Their original `startDate`, `endDate` and `followUpDate` remain unchanged. A plan is due when active and its effective review date is today or earlier. The latest event determines active/completed status and the next review date; completed plans have no effective review date. Patient-facing hydration applies the same internal-field filtering as review history.
+
+Each immutable `FollowUpReview` records its ID, plan, linked doctor/name, `source` (`clinical-review | status-change`), assessment, patient instructions, disposition, next review date, timestamp and full check-in snapshots. Each snapshot carries the check-in `id`, `updatedAt`, SHA-256 `contentHash` and original `snapshot`. The snapshot timestamp reflects the check-in's latest stored submission time, including a same-day replacement. The server captures these fields; clients cannot provide or replace them. Current versions not captured by the latest clinical review remain unreviewed. Editing a previously reviewed check-in reopens that work while preserving the exact evidence previously reviewed.
+
+Completing a plan stops check-ins. Continuing follow-up does not extend the original treatment dates or medication duration; `visit-requested` does not book an appointment. A status-only change can reopen a plan but does not count as clinical review. Existing history and the status-only endpoint remain available when the follow-up module is disabled. Check-ins describe patient reports; review queues and dispositions do not diagnose, triage urgency or generate treatment advice.
+
+## In-app activity
+
+- `GET /activity?unread=true|false&limit=&cursor=` → `ActivityFeed` (`items`, `unreadCount`, `nextCursor`). Limit defaults to 30, with a range of 1–100. `unread=true` filters the page; `false` or omission includes read and unread items. The count covers all currently unread items for the recipient, not just the page. Items are newest first. Pass the previous `nextCursor` to load older items; a cursor outside the account's permitted feed returns `400`.
+- `POST /activity/:id/read {}` → `ActivityItem`. Only the recipient can mark an item read; an inaccessible item returns `404`. Repeated reads preserve the initial `readAt`.
+- `POST /activity/read-all {throughId}` → `{markedRead:number}`. Marks all unread items for the recipient at or before the supplied feed item, including older pages not yet loaded. Use the newest item from the displayed snapshot. Items arriving after that snapshot stay unread; an inaccessible snapshot ID returns `404`.
+
+An `ActivityItem` has `id`, `kind`, `title`, `detail`, `href`, `createdAt` and nullable `readAt`. Kinds are `appointment`, `care-plan`, `message`, `check-in`, `investigation`, `procedure` and `follow-up`. Event contents are immutable; read state is separate. Listing a feed never marks it read, and reading a notification does not mark clinical information reviewed or complete a task.
+
+Feeds are account-specific. Patients see only their own patient notifications; doctors and administrators see their own clinical notifications; reception receives an empty feed. Current account permissions still apply after role changes. Clinical events with an assigned doctor route to active linked accounts for that doctor, falling back to the active clinical team only when no owner account is active. The author is excluded after recipient selection. Patient messages without a specific owner notify the active clinical team. No notification exposes internal assessments, unpublished interpretations or private message text.
+
+Notifications are recorded with the source event in one transaction and deduplicated by recipient/event key. Events notify accounts active at that moment; creating or reactivating an account does not backfill earlier events. These are in-app updates only: no email, SMS, push delivery, background due-date reminders or emergency monitoring is configured.
 
 ## Private PDF reports
 
@@ -133,6 +157,6 @@ These records capture a clinician's explanation and a reported patient decision.
 
 Public routes: `/`, `/login`, `/register`, `/recover`, `/library`; authenticated booking: `/book`; patient intake: `/intake`.
 
-Patient routes: `/my-care`, `/my-care/record`, `/my-care/messages`, `/my-care/invoices`, `/my-care/library`. Staff routes: `/clinic`, `/clinic/appointments`, `/clinic/scheduling`, `/clinic/patients`, `/clinic/billing`. Clinical-only routes: `/clinic/patients/:id`, `/clinic/follow-ups`, `/clinic/knowledge`. Administrator routes: `/clinic/settings`, `/clinic/accounts`, `/clinic/audit`. Every signed-in role can use `/account`; temporary-password sessions are directed there before entering their workspace.
+Patient routes: `/my-care`, `/my-care/record`, `/my-care/messages`, `/my-care/invoices`, `/my-care/library`, `/my-care/activity`. Staff routes: `/clinic`, `/clinic/appointments`, `/clinic/scheduling`, `/clinic/patients`, `/clinic/billing`. Clinical-only routes: `/clinic/patients/:id`, `/clinic/follow-ups`, `/clinic/knowledge`, `/clinic/activity`. Administrator routes: `/clinic/settings`, `/clinic/accounts`, `/clinic/audit`. Every signed-in role can use `/account`; temporary-password sessions are directed there before entering their workspace.
 
 Shared client helpers in `src/lib.tsx` include `api<T>()`, `useSession()`, `useResource<T>()`, `useToast()`, `today()`, `formatDate()` and `money()`. Shared accessible controls live in `src/components/ui.tsx`; page-specific styles supplement `src/styles.css`.

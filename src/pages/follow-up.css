@@ -1,0 +1,410 @@
+.fu-workspace {
+  display: grid;
+  gap: 24px;
+}
+.fu-workspace > .page-header {
+  margin-bottom: 0;
+}
+.fu-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.fu-metrics > .card {
+  padding: 22px 24px;
+}
+.fu-metrics > .card > span {
+  display: block;
+  font-size: 12px;
+  color: #5e6e60;
+}
+.fu-metrics > .card > strong {
+  display: block;
+  font-family: var(--font-heading);
+  font-size: 31px;
+  margin: 9px 0;
+  color: #2b5341;
+}
+.fu-metrics p {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #626f5e;
+  margin: 0;
+}
+.fu-worklist-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 17px;
+  margin-bottom: 24px;
+}
+.fu-filters {
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.fu-filters button {
+  font-size: 11px;
+  padding: 10px 13px;
+}
+.fu-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 190px;
+  border: 1px solid #dfe5da;
+  border-radius: 8px;
+  padding: 0 11px;
+  color: #65765d;
+  height: 40px;
+}
+.fu-search input {
+  width: 100%;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 8px 0 !important;
+  box-shadow: none !important;
+}
+.fu-search:focus-within {
+  outline: 2px solid #458068;
+  outline-offset: 2px;
+}
+.fu-worklist-controls > .field {
+  min-width: 150px;
+  margin: 0;
+}
+.fu-worklist-controls > .field select {
+  min-height: 40px;
+}
+.fu-table td {
+  vertical-align: middle;
+}
+.fu-table td:first-child {
+  min-width: 220px;
+}
+.fu-table td:nth-child(2) {
+  min-width: 130px;
+}
+.fu-table td:nth-child(3) {
+  min-width: 190px;
+}
+.fu-table td:nth-child(4) {
+  min-width: 150px;
+}
+.fu-table .table-sub {
+  line-height: 1.7;
+}
+.fu-row-actions {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 5px;
+}
+.fu-row-actions > .button {
+  white-space: nowrap;
+}
+.fu-worklist-note {
+  align-items: flex-start;
+  line-height: 1.8;
+}
+.fu-worklist-note svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.fu-plan-section {
+  border-top: 1px solid #e0e7da;
+  margin-top: 19px;
+  padding-top: 20px;
+}
+.fu-plan-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 17px;
+}
+.fu-plan-section-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+.fu-paused {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #66715a;
+  margin: 0 0 15px;
+}
+.fu-history {
+  display: grid;
+  gap: 15px;
+}
+.fu-review-record {
+  border: 1px solid #e0e8d9;
+  border-radius: 10px;
+  background: #f7faf3;
+  padding: 20px;
+}
+.fu-review-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 13px;
+  margin-bottom: 18px;
+}
+.fu-review-heading h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: #365d45;
+}
+.fu-review-heading p {
+  font-size: 10px;
+  color: #5f7258;
+  margin: 0;
+  line-height: 1.8;
+}
+.fu-record-field {
+  margin-bottom: 15px;
+}
+.fu-record-field > span {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #5e7055;
+  margin-bottom: 6px;
+}
+.fu-record-field p,
+.fu-prose {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #3b5340;
+  margin: 0;
+}
+.fu-next-date {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #4c6540;
+  margin: 8px 0 0;
+}
+.fu-snapshots {
+  border-top: 1px solid #e1e8da;
+  margin-top: 16px;
+  padding-top: 14px;
+}
+.fu-snapshots summary,
+.fu-previous-review > summary,
+.fu-review-context summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #48613e;
+  font-weight: 600;
+  line-height: 1.7;
+}
+.fu-reports {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 330px;
+  overflow: auto;
+}
+.fu-report {
+  background: white;
+  border: 1px solid #e0e7d9;
+  border-radius: 8px;
+  padding: 13px 15px;
+}
+.fu-report-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fu-report-heading > strong {
+  font-size: 12px;
+  color: #47623c;
+}
+.fu-report > p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #42583d;
+  margin: 10px 0 5px;
+}
+.fu-report > small {
+  font-size: 10px;
+  line-height: 1.7;
+  color: #617257;
+  display: block;
+  margin-top: 7px;
+}
+.fu-review-context {
+  background: #eef4e8;
+  border: 1px solid #dfe8d6;
+  border-radius: 11px;
+  padding: 19px;
+}
+.fu-review-context > .eyebrow {
+  font-size: 10px;
+  margin: 0 0 7px;
+  color: #596c4d;
+}
+.fu-review-context > h3 {
+  font-size: 17px;
+  line-height: 1.5;
+  margin: 0 0 6px;
+}
+.fu-review-context > p {
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 0 0 13px;
+  color: #5c7052;
+}
+.fu-review-context details > p {
+  margin-top: 12px;
+}
+.fu-original-item {
+  padding-top: 13px;
+  margin-top: 13px;
+  border-top: 1px solid #dce6d3;
+}
+.fu-original-item > strong {
+  font-size: 12px;
+}
+.fu-original-item p {
+  font-size: 12px;
+  white-space: pre-wrap;
+  line-height: 1.8;
+  margin: 5px 0;
+}
+.fu-original-item small {
+  font-size: 11px;
+  color: #5c7052;
+}
+.fu-review-reports > h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+.fu-review-reports > h3 > span {
+  display: inline-grid;
+  place-items: center;
+  background: #edf3e7;
+  border-radius: 5px;
+  font-size: 11px;
+  min-width: 23px;
+  padding: 3px;
+  color: #4d6441;
+}
+.fu-previous-review > .fu-history {
+  margin-top: 13px;
+}
+.fu-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 18px;
+  margin-top: 5px;
+  border-top: 1px solid #e3e9dc;
+}
+.fu-selected-plan {
+  scroll-margin-top: 24px;
+  outline: 2px solid #538066;
+  outline-offset: 4px;
+  border-radius: 13px;
+}
+.fu-plan-anchor {
+  scroll-margin-top: 24px;
+}
+@media (max-width: 1100px) {
+  .fu-worklist-controls {
+    align-items: flex-end;
+  }
+  .fu-filters {
+    flex-basis: 100%;
+    width: max-content;
+  }
+  .fu-worklist-controls > .field {
+    flex: 1;
+  }
+  .fu-search {
+    flex: 2;
+  }
+  .fu-review-heading {
+    flex-wrap: wrap;
+  }
+  .fu-metrics > .card {
+    padding: 20px;
+  }
+}
+@media (max-width: 700px) {
+  .fu-metrics {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .fu-metrics > .card {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 3px 16px;
+    padding: 17px 20px;
+  }
+  .fu-metrics > .card > strong {
+    grid-column: 2;
+    grid-row: 1/3;
+    font-size: 26px;
+    margin: 0;
+  }
+  .fu-metrics p {
+    grid-column: 1;
+  }
+  .fu-filters button {
+    padding: 9px 10px;
+    font-size: 10px;
+  }
+  .fu-worklist {
+    padding: 20px 16px !important;
+  }
+  .fu-worklist-controls {
+    gap: 13px;
+  }
+  .fu-worklist-controls > .field {
+    min-width: 140px;
+  }
+  .fu-plan-section-heading {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .fu-review-record {
+    padding: 17px 14px;
+  }
+  .fu-review-context {
+    padding: 16px;
+  }
+  .fu-report {
+    padding: 12px;
+  }
+  .fu-report-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .fu-form-actions {
+    flex-wrap: wrap;
+  }
+  .fu-form-actions > .button {
+    flex: 1;
+    min-width: 100px;
+  }
+  .fu-form-actions > .button-primary {
+    min-width: 210px;
+  }
+  .fu-reports {
+    max-height: 350px;
+  }
+}
