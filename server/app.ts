@@ -3,6 +3,12 @@ import { registerClinical } from './clinical.ts';
 import { createFollowUp } from './follow-up.ts';
 import { createWaitlist } from './waitlist.ts';
 import { registerInsights } from './insights.ts';
+import { registerCareSummary } from './care-summary.ts';
+import {
+  registerImageAnnotations,
+  imageProvenance,
+  publishedImageAnnotationsForPatient,
+} from './image-annotations.ts';
 import { registerDocuments } from './documents.ts';
 import {
   initializeActivity,
@@ -990,14 +996,17 @@ export function createApp(options: AppOptions = {}) {
       mimeType,
       createdAt: nowISO(),
       url: `/api/images/${key}/file`,
+      ...imageProvenance(bytes, actor(req)),
     };
-    db.prepare('INSERT INTO images(id,patientId,data,bytes) VALUES (?,?,?,?)').run(
-      key,
-      patientId,
-      JSON.stringify(image),
-      bytes,
-    );
-    audit(req, 'uploaded private image', 'image', key);
+    scheduling.transaction(() => {
+      db.prepare('INSERT INTO images(id,patientId,data,bytes) VALUES (?,?,?,?)').run(
+        key,
+        patientId,
+        JSON.stringify(image),
+        bytes,
+      );
+      audit(req, 'uploaded private image', 'image', key);
+    });
     res.status(201).json(image);
   });
   app.get('/api/images/:id/file', (req: AuthRequest, res) => {
@@ -1116,7 +1125,34 @@ export function createApp(options: AppOptions = {}) {
   registerActivity(app, { db, actor, audit, fail });
   registerDocuments(app, { db, actor, patientAccess, audit, fail });
   registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });
-  registerClinical(app, { db, actor, patientAccess, clinicianId, audit, fail });
+  const clinicalWorkflows = registerClinical(app, {
+    db,
+    actor,
+    patientAccess,
+    clinicianId,
+    audit,
+    fail,
+  });
+  registerImageAnnotations(app, {
+    db,
+    actor,
+    patientAccess,
+    clinicianId,
+    moduleEnabled,
+    audit,
+    fail,
+  });
+  registerCareSummary(app, {
+    db,
+    actor,
+    patientAccess,
+    audit,
+    fail,
+    hydratePlans: followUp.hydratePlans,
+    patientReviews: followUp.patientReviews,
+    patientWorkflows: clinicalWorkflows.patientView,
+    publishedAnnotations: (patientId) => publishedImageAnnotationsForPatient(db, patientId),
+  });
   registerInsights(app, { db, actor, audit, fail });
   followUp.register(app);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));

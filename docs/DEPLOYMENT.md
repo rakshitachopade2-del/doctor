@@ -45,11 +45,11 @@ A database seeded in demo mode is deliberately rejected by production. Keep demo
 
 ## Upgrade an existing installation
 
-Create and verify a backup before replacing the running application. Stop the service, install the new dependencies, build, and restart against the same production database. Startup creates the scheduling, recovery, clinical workflow, private PDF, follow-up review/assignment, waitlist, procedure-invoice link, expense and activity tables and adds session metadata where needed. Existing users retain their current access; the mandatory-password rule applies to newly provisioned accounts. Existing doctor profiles retain the original default hours until an authorized user saves another schedule. Previously booked appointments without a stored duration continue to count as 30 minutes.
+Create and verify a backup before replacing the running application. Stop the service, install the new dependencies, build, and restart against the same production database. Startup creates the scheduling, recovery, clinical workflow, private PDF, follow-up review/assignment, waitlist, procedure-invoice link, expense, image annotation/publication and activity tables and adds session metadata where needed. Existing users retain their current access; the mandatory-password rule applies to newly provisioned accounts. Existing doctor profiles retain the original default hours until an authorized user saves another schedule. Previously booked appointments without a stored duration continue to count as 30 minutes.
 
 Existing notes, plans, appointments, reports and images remain intact. The `followUpReviews` table preserves append-only clinician reviews and status changes, including the check-in versions reviewed at that time. New reviews can set an effective next review date or complete a plan without changing its original medication instructions or regimen dates. Patients receive the shared instructions and dated review history; internal assessments and check-in snapshots remain available only to clinicians. Previously completed plans remain completed without fabricated review entries.
 
-Waitlist requests, follow-up assignments, procedure-invoice links and expense entries start empty on upgrade. Existing plans keep their original author as follow-up owner until an explicit handover. Existing invoices are not retroactively linked to procedures. Expense corrections use attributed void events; originals remain in the database and backups.
+Waitlist requests, follow-up assignments, procedure-invoice links and expense entries start empty on upgrade. Existing plans keep their original author as follow-up owner until an explicit handover. Existing invoices are not retroactively linked to procedures. Expense corrections use attributed void events; originals remain in the database and backups. Image originals become immutable, and new uploads retain uploader identity, byte count and SHA-256 fingerprint. Legacy image uploader fields stay absent; annotation revisions can still identify the existing file bytes without inventing authorship. Existing images start without annotation/publication history.
 
 The `activity` table preserves notification contents and recipient ownership; only read status can change. The inbox starts empty after an upgrade and records supported events that occur afterward. It does not reconstruct notifications from existing records or send historical updates to newly created accounts. Clinical records remain the source of truth. Marking activity read does not record a clinician review, book a visit, or change treatment.
 
@@ -119,7 +119,7 @@ mkdir -p backups
 docker compose cp app:/app/data/backups/clinic-2026-11-10.sqlite ./backups/
 ```
 
-Move a copy to separately protected storage. A backup includes private patient records, image and PDF bytes, messages, immutable clinical workflow events follow-up reviews and assignments, waitlist requests, invoice/procedure links, expense entries and void history, activity contents and read status, password hashes, account access flags, sessions, hashed recovery grants, schedules, and closures. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
+Move a copy to separately protected storage. A backup includes private patient records, image and PDF bytes, messages, immutable clinical workflow events follow-up reviews and assignments, waitlist requests, invoice/procedure links, expense entries and void history, image annotation/publication records, activity contents and read status, password hashes, account access flags, sessions, hashed recovery grants, schedules, and closures. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
 
 To restore:
 
@@ -133,7 +133,7 @@ Restoring also restores account access, passwords, scheduling changes, and recov
 
 ## Integration boundaries
 
-Booking, clinical documentation, images and PDFs, investigations, procedure records, care plans, check-ins, clinician follow-up reviews, private messaging, confirmed waitlist booking, clinical handovers, activity inboxes, procedure-linked invoice creation, manual payment records, calendar export and approved clinic articles work within the application. Billing records payments already received; it does not charge a card or initiate a UPI payment. Tax calculation, refunds and payment-provider reconciliation are not automated. Administrators can record expenses, void mistaken entries with a reason, review clinic aggregates and export aggregate CSV reports. This does not initiate a payment or provide accounting reconciliation.
+Booking, clinical documentation, images and PDFs, clinician-authored image annotations and patient-facing summary exports, investigations, procedure records, care plans, check-ins, clinician follow-up reviews, private messaging, confirmed waitlist booking, clinical handovers, activity inboxes, procedure-linked invoice creation, manual payment records, calendar export and approved clinic articles work within the application. Billing records payments already received; it does not charge a card or initiate a UPI payment. Tax calculation, refunds and payment-provider reconciliation are not automated. Administrators can record expenses, void mistaken entries with a reason, review clinic aggregates and export aggregate CSV reports. This does not initiate a payment or provide accounting reconciliation.
 
 Activity updates are visible when the app opens or the inbox refreshes. There is no background external delivery service, email/SMS/WhatsApp dispatch, push subscription or automatic reminder scheduler. Staff should continue their clinic’s existing process for time-sensitive outreach. A clinician’s request for a visit offers the patient a booking link; it does not reserve an appointment.
 
@@ -153,5 +153,7 @@ npm run test:production -- --image derma-platform:verify
 ```
 
 The container check publishes only to a random loopback port and removes its disposable container and anonymous data volume after verification. The production image build and startup were verified locally on 10 November 2026. These checks do not provision public hosting, HTTPS certificates, or external providers.
+
+Care-summary JSON exports and printed pages contain private patient-facing care information. They omit internal notes and original file bytes; they are not a full database or internal-record export. Download permission is checked for every request, and stale patient-visible content requires a refresh.
 
 PDFs have format/size checks and download as authenticated attachments; a malware-scanning or document-sanitization service is not connected.

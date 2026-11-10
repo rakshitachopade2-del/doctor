@@ -25,6 +25,10 @@ flowchart LR
 | `src/lib.tsx`                         | API client, session context, load/error states, notifications, date/currency helpers   |
 | `src/components/ui.tsx`               | Shared accessible UI, fields, modal focus handling                                     |
 | `src/components/DocumentsPanel.tsx`   | Private PDF-report list, upload agreement and authenticated downloads                  |
+| `src/components/ImageAnnotations.tsx` | Versioned clinical overlays, explicit sharing, original images and patient viewer      |
+| `src/pages/CareSummaryPage.tsx`       | Patient-facing print view and revision-checked JSON download                           |
+| `server/image-annotations.ts`         | Immutable annotation versions/publications, source provenance and private projections  |
+| `server/care-summary.ts`              | Authorized shared-care snapshots and stale-export rejection                            |
 | `src/components/PatientWaitlist.tsx`  | Patient request creation, withdrawal, history and booking links                        |
 | `src/pages/PatientPages.tsx`          | Discovery, booking, intake, patient plans, history, images, messages                   |
 | `src/pages/ClinicPages.tsx`           | Appointments, patient directory, records and treatment plans                           |
@@ -167,6 +171,14 @@ Pagination resolves an opaque item ID to a recipient-scoped SQLite row position 
 The aggregation function converts invoice and payment timestamps to Asia/Kolkata dates, uses appointment scheduled dates and expense incurred dates, and fills every selected day with a result. Ranges are real, ordered dates with at most 366 inclusive days. Counts use current appointment states and expense void state. Current outstanding is limited to the cohort of invoices issued in the range; payment totals use their recording date independently of invoice issue date. Safe integer aggregation preserves paise without floating-point currency arithmetic and rejects totals outside representable bounds.
 
 JSON and CSV reuse the same aggregate builder. CSV contains fixed report sections and aggregate amounts/counts, without patient identifiers or expense free text. Values use CSV quoting and formula-prefix protection. Read/export audit events record the requested period. There is no asynchronous warehouse, historical as-of ledger reconstruction, revenue-recognition, tax or profit calculation. The UI explains the selected dates and separates invoices, recorded collections and incurred expenses.
+
+## Original images, overlays and patient-facing export
+
+Original image rows now reject updates and deletion. New uploads store SHA-256, byte count and authenticated uploader identity; the original insert and audit commit together. Legacy metadata remains readable without fabricated uploader fields. `imageAnnotationVersions` stores immutable, attributed notes and bounded normalized geometry alongside the original-byte fingerprint. `imageAnnotationPublications` records the separate decision to share one immutable version. Linked clinicians alone can save/publish, and both operations respect the image-module pause. A stale revision rejects a save/publication, and only the newest saved version can be newly shared. Previously published versions remain visible when later private drafts exist.
+
+Annotation geometry is typed data rendered as a controlled SVG overlay, not uploaded SVG or modified raster content. Text legends and numeric percentage controls provide the same operations without pointer dragging. Patient history and the published-summary helper use explicit projections and omit private revision state and internal account provenance. Generic patient activity is created only on publication.
+
+`server/care-summary.ts` composes a patient-facing snapshot for both clinical staff and owning patients. It reuses the clinical workflow's patient projection and follow-up's safe review projection, selects shared care-plan fields explicitly, and includes only published annotations. Messages, internal notes/amendments, private assessment/snapshot/assignment fields and file bytes never enter the response. Each read/download runs with patient authorization and audit in one transaction. A hash of visible content excludes generation time and private revisions; JSON downloads require that hash to remain current. Private-only updates and paused modules therefore preserve export access, while changed shared results or payment balances require a refresh. The UI validates the returned patient, audience and revision before saving JSON and cancels stale downloads when its displayed snapshot changes.
 
 ## Verification strategy
 

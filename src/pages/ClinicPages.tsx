@@ -32,6 +32,7 @@ import type { PatientClinicalWorkflows } from '../../shared/clinical';
 import type { WaitlistEntry } from '../../shared/waitlist';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
 import { DocumentsPanel } from '../components/DocumentsPanel';
+import { ImageAnnotationModal } from '../components/ImageAnnotations';
 import { FollowUpPlanSection } from './FollowUpPages';
 import { api, formatDate, today, useResource, useSession, useToast } from '../lib';
 import {
@@ -894,6 +895,7 @@ export function PatientDetailPage() {
         const next = new URLSearchParams(previous);
         next.set('tab', value);
         if (value !== 'care') next.delete('plan');
+        if (value !== 'images') next.delete('image');
         return next;
       },
       { replace: true },
@@ -913,10 +915,26 @@ export function PatientDetailPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [tab, selectedPlan, loading]);
   const imagesEnabled = settings.data?.modules.images !== false;
+  function openAnnotations(imageId: string | null) {
+    setRecordParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.set('tab', 'images');
+        if (imageId) next.set('image', imageId);
+        else next.delete('image');
+        return next;
+      },
+      { replace: true },
+    );
+  }
   if (loading) return <Loading />;
   if (error) return <ErrorState message={error} retry={reload} />;
   if (!data) return <EmptyState title="Patient not found" />;
   const { patient } = data;
+  const annotationImage =
+    tab === 'images'
+      ? data.images.find((image) => image.id === recordParams.get('image'))
+      : undefined;
   const activePlans = data.carePlans.filter((p) => (p.effectiveStatus ?? p.status) === 'active');
   const tabs: [RecordTab, string][] = [
     ['overview', 'Overview'],
@@ -938,6 +956,9 @@ export function PatientDetailPage() {
         description="Longitudinal patient record"
         actions={
           <>
+            <Link className="button button-secondary" to={`/clinic/patients/${patient.id}/summary`}>
+              Care summary
+            </Link>
             <button className="button button-secondary" onClick={() => setModal('care')}>
               <Plus size={16} /> Care plan
             </button>
@@ -1259,19 +1280,29 @@ export function PatientDetailPage() {
           {data.images.length ? (
             <div className="clinic-image-grid">
               {data.images.map((img) => (
-                <button
-                  className={`clinical-image ${selectedImages.includes(img.id) ? 'selected' : ''}`}
+                <article
+                  className={`clinical-image ia-image-card ${selectedImages.includes(img.id) ? 'selected' : ''}`}
                   key={img.id}
-                  onClick={() =>
-                    setSelectedImages((prev) =>
-                      prev.includes(img.id)
-                        ? prev.filter((i) => i !== img.id)
-                        : [...prev.slice(-1), img.id],
-                    )
-                  }
-                  aria-pressed={selectedImages.includes(img.id)}
                 >
-                  <img src={img.url} alt={img.caption} loading="lazy" />
+                  <button
+                    className="ia-thumbnail"
+                    aria-label={`Compare ${img.caption}`}
+                    onClick={() =>
+                      setSelectedImages((prev) =>
+                        prev.includes(img.id)
+                          ? prev.filter((i) => i !== img.id)
+                          : [...prev.slice(-1), img.id],
+                      )
+                    }
+                    aria-pressed={selectedImages.includes(img.id)}
+                  >
+                    <img src={img.url} alt={img.caption} loading="lazy" />
+                    {selectedImages.includes(img.id) && (
+                      <span className="image-selection">
+                        <Check size={16} />
+                      </span>
+                    )}
+                  </button>
                   <div>
                     <strong>{img.caption}</strong>
                     <span>
@@ -1279,12 +1310,16 @@ export function PatientDetailPage() {
                       {img.category === 'report' ? 'Report' : 'Clinical image'}
                     </span>
                   </div>
-                  {selectedImages.includes(img.id) && (
-                    <span className="image-selection">
-                      <Check size={16} />
-                    </span>
-                  )}
-                </button>
+                  <div className="ia-image-actions">
+                    <button
+                      className="button button-secondary button-small"
+                      onClick={() => openAnnotations(img.id)}
+                    >
+                      View annotations
+                    </button>
+                    <span className="muted small">Select image above to compare</span>
+                  </div>
+                </article>
               ))}
             </div>
           ) : (
@@ -1343,6 +1378,14 @@ export function PatientDetailPage() {
             setModal(null);
             reload();
           }}
+        />
+      )}
+      {annotationImage && (
+        <ImageAnnotationModal
+          key={annotationImage.id}
+          image={annotationImage}
+          enabled={imagesEnabled}
+          onClose={() => openAnnotations(null)}
         />
       )}
     </>

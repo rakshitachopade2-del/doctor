@@ -1,0 +1,405 @@
+.care-summary-page {
+  min-width: 0;
+}
+.care-summary-controls {
+  margin: 0 0 21px;
+}
+.care-summary-page .page-actions {
+  flex-wrap: wrap;
+}
+.care-summary-document {
+  max-width: 1060px;
+}
+.care-summary-identity {
+  background: white;
+  border: 1px solid #e0e7da;
+  border-radius: 13px;
+  padding: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 17px;
+}
+.care-summary-identity h2 {
+  margin: 6px 0 12px;
+  font-size: 29px;
+  letter-spacing: -0.8px;
+  color: #355c43;
+}
+.care-summary-identity > svg {
+  color: #648455;
+  flex-shrink: 0;
+}
+.care-summary-snapshot,
+.care-summary-clinic-contact {
+  font-size: 11px;
+  line-height: 1.9;
+  color: #586c50;
+  margin: 0;
+}
+.care-summary-identity dl {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px 24px;
+  margin: 9px 0 2px;
+}
+.care-summary-identity dt {
+  font-size: 10px;
+  color: #5d7053;
+  margin-bottom: 5px;
+}
+.care-summary-identity dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.8;
+  color: #3f5837;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.care-summary-allergies {
+  grid-column: 1 / -1;
+  border-top: 1px solid #e7ecdf;
+  padding-top: 15px;
+}
+.care-summary-clinic-contact {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
+.care-summary-scope {
+  margin: 22px 0;
+  background: #eef4e8;
+  border: 1px solid #dee8d4;
+  color: #4b6341;
+  font-size: 12px;
+  line-height: 1.9;
+  padding: 18px 21px;
+  border-radius: 10px;
+}
+.care-summary-scope p {
+  margin: 5px 0 0;
+}
+.care-summary-index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 24px 0 33px;
+}
+.care-summary-index a {
+  border: 1px solid #dce6d4;
+  background: white;
+  border-radius: 8px;
+  padding: 10px 13px;
+  color: #4a653e;
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 11px;
+}
+.care-summary-index a:hover {
+  background: #edf4e5;
+}
+.care-summary-index span {
+  font-size: 10px;
+  background: #e9f0e1;
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.care-summary-section {
+  margin: 32px 0;
+  scroll-margin-top: 24px;
+}
+.care-summary-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  border-bottom: 1px solid #dce6d3;
+  padding-bottom: 14px;
+  margin-bottom: 17px;
+}
+.care-summary-section-heading h2 {
+  font-size: 19px;
+  color: #3b5b34;
+  margin: 0;
+}
+.care-summary-section-heading > span {
+  color: #607052;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.care-summary-entry {
+  border: 1px solid #e2e8db;
+  border-radius: 10px;
+  padding: 23px;
+  background: #fff;
+  margin-bottom: 16px;
+}
+.care-summary-entry-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 15px;
+}
+.care-summary-entry h3 {
+  color: #3e5d35;
+  font-size: 16px;
+  line-height: 1.7;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.care-summary-entry h4 {
+  font-size: 13px;
+  color: #45613a;
+  line-height: 1.8;
+  margin: 0 0 11px;
+}
+.care-summary-entry h5 {
+  font-size: 12px;
+  margin: 0 0 9px;
+  color: #405a38;
+}
+.care-summary-entry p,
+.care-summary-entry li {
+  font-size: 12px;
+  color: #455d3e;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.care-summary-entry p {
+  margin: 7px 0 12px;
+}
+.care-summary-entry .care-summary-source,
+.care-summary-source {
+  color: #5d6f53;
+  font-size: 10px;
+  line-height: 1.9;
+}
+.care-summary-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 7px 26px;
+  margin-top: 19px;
+}
+.care-summary-detail {
+  margin: 13px 0;
+  min-width: 0;
+}
+.care-summary-detail > strong {
+  font-weight: 600;
+  color: #49643d;
+  font-size: 11px;
+}
+.care-summary-detail p {
+  margin: 5px 0 0;
+}
+.care-summary-medications {
+  padding: 18px 20px;
+  background: #f5f8f0;
+  border-radius: 9px;
+  margin: 23px 0;
+}
+.care-summary-medications > div {
+  padding: 13px 0;
+  border-top: 1px solid #e1e9d8;
+}
+.care-summary-medications > div > strong {
+  font-size: 12px;
+  color: #3d5e34;
+}
+.care-summary-events {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e9dc;
+}
+.care-summary-event {
+  border-left: 2px solid #adc29a;
+  padding: 3px 0 3px 17px;
+  margin-top: 18px;
+}
+.care-summary-published-review {
+  padding: 17px;
+  margin: 18px 0 8px;
+  border-radius: 8px;
+  background: #f1f6eb;
+}
+.care-summary-source-link {
+  font-size: 11px;
+  margin-top: 10px;
+  display: inline-block;
+}
+.care-summary-empty {
+  color: #627255;
+  font-size: 12px;
+  line-height: 1.9;
+  padding: 5px 0;
+}
+.care-summary-table {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid #e5eadf;
+  border-radius: 8px;
+  margin: 20px 0;
+}
+.care-summary-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+  text-align: right;
+}
+.care-summary-table caption {
+  text-align: left;
+  color: #5a704e;
+  padding: 12px;
+  background: #f4f8ee;
+}
+.care-summary-table td,
+.care-summary-table th {
+  padding: 12px;
+  border-bottom: 1px solid #e5eadf;
+  color: #4f6545;
+}
+.care-summary-table th:first-child {
+  text-align: left;
+  min-width: 130px;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+.care-summary-table thead th {
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 500;
+}
+.care-summary-table td {
+  white-space: nowrap;
+}
+.care-summary-invoice-totals {
+  display: flex;
+  gap: 20px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.care-summary-invoice-totals > span {
+  font-size: 10px;
+  line-height: 1.8;
+  color: #5c7150;
+}
+.care-summary-invoice-totals strong {
+  display: block;
+  font-size: 14px;
+  color: #3d6035;
+}
+.care-summary-footer {
+  font-size: 11px;
+  line-height: 1.9;
+  color: #5e6f53;
+  border-top: 1px solid #dfe7d6;
+  padding: 23px 0;
+}
+.care-summary-download-error {
+  flex-wrap: wrap;
+}
+@media (max-width: 700px) {
+  .care-summary-identity {
+    padding: 21px;
+  }
+  .care-summary-identity h2 {
+    font-size: 23px;
+  }
+  .care-summary-identity dl,
+  .care-summary-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 11px;
+  }
+  .care-summary-entry {
+    padding: 19px;
+  }
+  .care-summary-entry-heading {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .care-summary-entry h3 {
+    font-size: 15px;
+  }
+  .care-summary-section-heading h2 {
+    font-size: 17px;
+  }
+  .care-summary-section-heading {
+    align-items: flex-start;
+  }
+  .care-summary-index a {
+    font-size: 10px;
+    padding: 9px 11px;
+  }
+  .care-summary-medications {
+    padding: 16px;
+  }
+  .care-summary-page .page-actions > * {
+    max-width: 100%;
+  }
+  .care-summary-events {
+    padding-top: 16px;
+  }
+  .care-summary-event {
+    padding-left: 12px;
+  }
+  .care-summary-invoice-totals {
+    justify-content: flex-start;
+  }
+}
+@page care-summary {
+  margin: 15mm;
+}
+@media print {
+  .care-summary-document {
+    page: care-summary;
+    max-width: none;
+  }
+  .care-summary-controls,
+  .care-summary-index,
+  .care-summary-page .page-actions,
+  .care-summary-download-error,
+  .care-summary-source-link {
+    display: none !important;
+  }
+  .care-summary-identity,
+  .care-summary-entry {
+    border-color: #bbb;
+    box-shadow: none;
+  }
+  .care-summary-identity,
+  .care-summary-entry,
+  .care-summary-medications,
+  .care-summary-event {
+    break-inside: avoid;
+  }
+  .care-summary-section-heading,
+  .care-summary-entry h3,
+  .care-summary-entry h4 {
+    break-after: avoid;
+  }
+  .care-summary-section {
+    margin: 25px 0;
+  }
+  .care-summary-table {
+    overflow: visible;
+  }
+  .care-summary-table thead {
+    display: table-header-group;
+  }
+  .care-summary-table tr {
+    break-inside: avoid;
+  }
+  .care-summary-entry p,
+  .care-summary-entry li {
+    font-size: 10pt;
+  }
+  .care-summary-source,
+  .care-summary-entry .care-summary-source {
+    font-size: 8pt;
+  }
+  .care-summary-details {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}

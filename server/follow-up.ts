@@ -454,5 +454,12 @@ export function createFollowUp(context: FollowUpContext) {
       res.status(201).json(updated);
     });
   }
-  return { hydratePlan, hydratePlans, recordLegacyStatus, owner, register };
+  return {
+    hydratePlan,
+    hydratePlans,
+    recordLegacyStatus,
+    owner,
+    register,
+    patientReviews: (carePlanId: string) => reviews(carePlanId).map(patientReview),
+  };
 }

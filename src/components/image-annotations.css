@@ -1,0 +1,280 @@
+.modal:has(.ia-workspace) {
+  width: min(1120px, 100%);
+}
+.ia-workspace,
+.ia-viewer,
+.ia-controls,
+.ia-preview {
+  min-width: 0;
+}
+.ia-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.ia-heading h3 {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.ia-heading > div {
+  min-width: 0;
+}
+.ia-heading > a {
+  flex-shrink: 0;
+}
+.ia-help {
+  color: #52654e;
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 8px 0 15px;
+}
+.ia-history-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+.ia-history-toolbar .field {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.ia-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 26px;
+  align-items: start;
+}
+.ia-preview {
+  position: sticky;
+  top: 0;
+}
+.ia-preview > .checkbox-field,
+.ia-viewer > .checkbox-field {
+  margin: 0 0 13px;
+}
+.ia-image-frame {
+  background: #e9eee6;
+  border: 1px solid #cbd6c5;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ia-image-plane {
+  position: relative;
+  width: 100%;
+}
+.ia-image-plane > img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.ia-overlay {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  pointer-events: none;
+  overflow: hidden;
+}
+.ia-controls h3,
+.ia-revision-details h3 {
+  font-size: 14px;
+  margin: 21px 0 10px;
+}
+.ia-version-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+}
+.ia-version-meta > span:last-child {
+  color: #52654e;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.ia-note {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  color: #344b3d;
+  font-size: 13px;
+}
+.ia-mark-descriptions {
+  padding-left: 24px;
+  margin: 12px 0;
+}
+.ia-mark-descriptions li {
+  padding: 10px 0 13px;
+  border-bottom: 1px solid #e0e7db;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ia-mark-descriptions p {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.ia-mark-descriptions li > span {
+  color: #52654e;
+  line-height: 1.6;
+  font-size: 11px;
+}
+.ia-fieldset {
+  min-width: 0;
+  border: 1px solid #d9e2d3;
+  border-radius: 9px;
+  padding: 14px;
+  margin: 0;
+}
+.ia-fieldset legend {
+  font-weight: 600;
+  color: #3e5944;
+  font-size: 12px;
+  padding: 0 6px;
+}
+.ia-fieldset .field {
+  margin-bottom: 14px;
+}
+.ia-fieldset .ia-help {
+  margin-bottom: 0;
+}
+.ia-shape-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ia-shape-buttons .button {
+  min-height: 36px;
+}
+.ia-coordinates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ia-coordinates input {
+  min-width: 0;
+}
+.ia-share {
+  border-top: 1px solid #dfe7d9;
+  padding-top: 20px;
+  margin-top: 22px;
+}
+.ia-share .row,
+.ia-discard .row {
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 15px;
+}
+.ia-conflict,
+.ia-discard {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.ia-conflict .button {
+  white-space: normal;
+}
+.ia-conflict details {
+  margin: 15px 0;
+}
+.ia-conflict summary {
+  cursor: pointer;
+}
+.ia-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-top: 1px solid #e1e7dc;
+  padding-top: 20px;
+  margin-top: 24px;
+}
+.ia-footer > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.ia-viewer > a,
+.ia-viewer > .field {
+  margin-bottom: 17px;
+}
+.ia-viewer .ia-image-frame {
+  max-width: 680px;
+  margin-inline: auto;
+}
+.ia-image-card {
+  display: flex;
+  flex-direction: column;
+  cursor: default;
+}
+.ia-image-card > .ia-thumbnail {
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  display: block;
+  width: 100%;
+  position: relative;
+  background: #edf2e9;
+}
+.ia-thumbnail > img {
+  display: block;
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+}
+.ia-image-card > .ia-image-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 0;
+}
+.ia-image-actions .button {
+  min-height: 36px;
+}
+.patient-image-preview {
+  padding: 0;
+  border: 0;
+  display: block;
+  background: transparent;
+  width: 100%;
+  cursor: pointer;
+}
+@media (max-width: 760px) {
+  .ia-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .ia-preview {
+    position: static;
+  }
+  .ia-heading,
+  .ia-history-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ia-heading > a {
+    align-self: flex-start;
+  }
+  .ia-history-toolbar .field {
+    width: 100%;
+  }
+  .ia-workspace .button,
+  .ia-viewer .button {
+    white-space: normal;
+  }
+}
+@media (max-width: 380px) {
+  .ia-coordinates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ia-fieldset {
+    padding: 10px;
+  }
+  .ia-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

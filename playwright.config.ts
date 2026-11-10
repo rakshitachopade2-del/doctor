@@ -31,6 +31,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)(?:insights|expenses)\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5185' },
     },
+    {
+      name: 'records',
+      testMatch: /(?:^|\/)(?:image-annotations|patient-image-annotations|care-summary)\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5186' },
+    },
   ],
   webServer: [
     {
@@ -48,6 +53,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3013 E2E_VITE_PORT=5185 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5185',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3014 E2E_VITE_PORT=5186 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5186',
       reuseExistingServer: false,
       timeout: 60000,
     },

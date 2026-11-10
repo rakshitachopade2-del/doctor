@@ -6,6 +6,7 @@ import {
   Check,
   ClipboardList,
   FileText,
+  Image,
   HeartHandshake,
   MessageSquare,
   RefreshCw,
@@ -25,6 +26,7 @@ const icons = {
   'follow-up': HeartHandshake,
   waitlist: CalendarDays,
   billing: FileText,
+  'image-annotation': Image,
 };
 const labels: Record<ActivityKind, string> = {
   appointment: 'Appointment',
@@ -36,6 +38,7 @@ const labels: Record<ActivityKind, string> = {
   'follow-up': 'Follow-up',
   waitlist: 'Waitlist',
   billing: 'Billing',
+  'image-annotation': 'Image annotation',
 };
 const changed = () => window.dispatchEvent(new Event('derma:activity-changed'));
 

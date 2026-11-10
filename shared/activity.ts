@@ -7,7 +7,8 @@ export type ActivityKind =
   | 'procedure'
   | 'follow-up'
   | 'waitlist'
-  | 'billing';
+  | 'billing'
+  | 'image-annotation';
 export interface ActivityContent {
   kind: ActivityKind;
   title: string;

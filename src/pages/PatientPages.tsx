@@ -27,6 +27,7 @@ import type {
   Appointment,
   CarePlan,
   CheckIn,
+  ClinicalImage,
   ClinicSettings,
   Doctor,
   Intake,
@@ -50,6 +51,7 @@ import { DocumentsPanel } from '../components/DocumentsPanel';
 import { PatientWorkflowPanel } from './PatientWorkflowPanel';
 import type { WaitlistEntry } from '../../shared/waitlist';
 import { PatientWaitlistPanel, WaitlistJoinModal } from '../components/PatientWaitlist';
+import { ImageAnnotationViewer } from '../components/ImageAnnotations';
 import {
   PatientFollowUp,
   effectivePlanStatus,
@@ -1391,6 +1393,9 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           <Link to="/my-care/record" className="button button-secondary">
             <FileText size={17} /> View your full record
           </Link>
+          <Link to="/my-care/summary" className="button button-secondary">
+            <FileText size={17} /> View care summary
+          </Link>
         </aside>
       </div>
       {checkIn && (
@@ -1701,6 +1706,23 @@ function PatientRecordView({ patientId }: { patientId: string }) {
   function setTab(value: string) {
     const next = new URLSearchParams(params);
     next.set('tab', value);
+    next.delete('image');
+    setParams(next, { replace: true });
+  }
+  const selectedImageId = params.get('image');
+  const viewedImage =
+    tab === 'images'
+      ? record.data?.images.find((image) => image.id === selectedImageId)
+      : undefined;
+  function openImage(image: ClinicalImage) {
+    const next = new URLSearchParams(params);
+    next.set('tab', 'images');
+    next.set('image', image.id);
+    setParams(next, { replace: true });
+  }
+  function closeImage() {
+    const next = new URLSearchParams(params);
+    next.delete('image');
     setParams(next, { replace: true });
   }
   const [upload, setUpload] = useState(false);
@@ -1765,9 +1787,15 @@ function PatientRecordView({ patientId }: { patientId: string }) {
         title="My health record"
         description="Your visits, shared history, and documents in one place."
         actions={
-          <button className="button button-secondary" onClick={() => window.print()}>
-            <FileText size={17} /> Print record
-          </button>
+          <>
+            <Link to="/my-care/summary" className="button button-primary">
+              <FileText size={17} />
+              View care summary
+            </Link>
+            <button className="button button-secondary" onClick={() => window.print()}>
+              <FileText size={17} /> Print record
+            </button>
+          </>
         }
       />
       <Card className="patient-record-profile">
@@ -1900,6 +1928,14 @@ function PatientRecordView({ patientId }: { patientId: string }) {
         )}
         {tab === 'images' && (
           <div className="stack">
+            {selectedImageId && !viewedImage && (
+              <div className="notice notice-error" role="alert">
+                This image is not available in your record.{' '}
+                <button className="text-link" onClick={closeImage}>
+                  Return to images
+                </button>
+              </div>
+            )}
             <DocumentsPanel patientId={patientId} />
             <Card>
               <div className="row between">
@@ -1931,13 +1967,19 @@ function PatientRecordView({ patientId }: { patientId: string }) {
                 <div className="clinical-image-grid">
                   {data.images.map((item) => (
                     <figure key={item.id}>
-                      <a href={item.url} target="_blank" rel="noreferrer">
+                      <button
+                        type="button"
+                        className="patient-image-preview"
+                        aria-haspopup="dialog"
+                        aria-label={`View image and shared annotations: ${item.caption || formatDate(item.createdAt)}`}
+                        onClick={() => openImage(item)}
+                      >
                         <img
                           src={item.url}
                           alt={item.caption || 'Patient clinical image'}
                           loading="lazy"
                         />
-                      </a>
+                      </button>
                       <figcaption>
                         <strong>{item.caption}</strong>
                         <span>
@@ -2011,6 +2053,11 @@ function PatientRecordView({ patientId }: { patientId: string }) {
           </Card>
         )}
       </div>
+      {viewedImage && (
+        <Modal title="Image details" onClose={closeImage}>
+          <ImageAnnotationViewer image={viewedImage} enabled={settings.data?.modules.images} />
+        </Modal>
+      )}
       {upload && settings.data?.modules.images && (
         <UploadModal
           patientId={patientId}

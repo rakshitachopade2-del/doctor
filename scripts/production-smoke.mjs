@@ -177,6 +177,28 @@ try {
   assert.equal(exported.status, 200);
   assert.match(exported.headers.get('content-disposition'), /attachment/);
   assert.match(exported.headers.get('content-type'), /text\/csv/);
+  const createdPatient = await fetch(`${base}/api/patients`, {
+    method: 'POST',
+    headers: apiHeaders,
+    body: JSON.stringify({ name: 'Synthetic Smoke Patient', phone: '9000000099' }),
+  });
+  assert.equal(createdPatient.status, 201);
+  const patient = await createdPatient.json();
+  const summaryUrl = `${base}/api/patients/${patient.id}/care-summary`;
+  const summaryResponse = await fetch(summaryUrl, { headers: apiHeaders });
+  assert.equal(summaryResponse.status, 200);
+  const summary = await summaryResponse.json();
+  assert.equal(summary.audience, 'patient');
+  assert.equal(summary.patient.id, patient.id);
+  assert.deepEqual(summary.imageAnnotations, []);
+  assert.deepEqual(summary.carePlans, []);
+  const summaryDownload = await fetch(`${summaryUrl}/download?revision=${summary.revision}`, {
+    headers: apiHeaders,
+  });
+  assert.equal(summaryDownload.status, 200);
+  assert.match(summaryDownload.headers.get('content-disposition'), /attachment/);
+  assert.match(summaryDownload.headers.get('cache-control'), /no-store/);
+  assert.equal((await summaryDownload.json()).revision, summary.revision);
   assert.equal(
     (await fetch(`${base}/api/documents?patientId=missing`, { headers: apiHeaders })).status,
     404,
@@ -196,6 +218,7 @@ try {
   });
   assert.equal(logout.status, 200);
   assert.equal((await fetch(`${base}/api/accounts`, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(summaryUrl, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,

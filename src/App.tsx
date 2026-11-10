@@ -19,6 +19,7 @@ import {
   ChevronDown,
   CircleHelp,
   ClipboardList,
+  FileText,
   HeartHandshake,
   LayoutDashboard,
   LogOut,
@@ -110,6 +111,9 @@ const InsightsPage = lazy(() =>
 );
 const ExpensesPage = lazy(() =>
   import('./pages/ExpensesPage').then((module) => ({ default: module.ExpensesPage })),
+);
+const CareSummaryPage = lazy(() =>
+  import('./pages/CareSummaryPage').then((module) => ({ default: module.CareSummaryPage })),
 );
 import type { Role } from '../shared/types';
 
@@ -229,6 +233,7 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
     ? [
         { to: '/my-care', label: 'My care', icon: HeartHandshake, end: true },
         { to: '/my-care/record', label: 'My health record', icon: ClipboardList },
+        { to: '/my-care/summary', label: 'Care summary', icon: FileText },
         { to: '/my-care/messages', label: 'Clinic messages', icon: MessageSquare },
         { to: '/my-care/activity', label: 'Activity', icon: Bell },
         { to: '/my-care/invoices', label: 'My invoices', icon: Receipt },
@@ -535,6 +540,14 @@ export function App() {
             }
           />
           <Route
+            path="clinic/patients/:id/summary"
+            element={
+              <Guard roles={['admin', 'doctor']}>
+                <CareSummaryPage />
+              </Guard>
+            }
+          />
+          <Route
             path="clinic/follow-ups"
             element={
               <Guard roles={['admin', 'doctor']}>
@@ -570,6 +583,7 @@ export function App() {
           <Route path="my-care/invoices" element={<BillingPage />} />
           <Route path="my-care/library" element={<LibraryPage />} />
           <Route path="my-care/record" element={<MyRecordPage />} />
+          <Route path="my-care/summary" element={<CareSummaryPage />} />
           <Route path="my-care/messages" element={<MessagesPage />} />
           <Route path="my-care/activity" element={<ActivityPage />} />
         </Route>

@@ -132,6 +132,12 @@ export interface ClinicalImage {
   createdAt: string;
   url: string;
   consent: boolean;
+  /** Stored for new uploads; absent on legacy images whose uploader was not recorded. */
+  sha256?: string;
+  sizeBytes?: number;
+  createdById?: string;
+  createdByName?: string;
+  createdByRole?: Role;
 }
 export interface Message {
   id: string;

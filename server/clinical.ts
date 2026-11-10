@@ -170,18 +170,20 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         fail(400, 'Every linked report must belong to this patient.');
     }
   }
-  app.get('/api/patients/:id/clinical-workflows', (req: AuthRequest, res) => {
-    const patientId = String(req.params.id),
-      user = actor(req);
-    patientAccess(req, patientId);
-    const forPatient = user.role === 'patient';
-    const data: PatientClinicalWorkflows = {
+  function workflows(patientId: string, forPatient: boolean): PatientClinicalWorkflows {
+    return {
       investigations: list<InvestigationOrder>(db, 'investigations', patientId).map((order) =>
         investigationView(order, forPatient),
       ),
       procedures: list<ProcedurePlan>(db, 'procedures', patientId).map(procedureView),
       amendments: forPatient ? [] : list<EncounterAmendment>(db, 'encounterAmendments', patientId),
     };
+  }
+  app.get('/api/patients/:id/clinical-workflows', (req: AuthRequest, res) => {
+    const patientId = String(req.params.id),
+      user = actor(req);
+    patientAccess(req, patientId);
+    const data = workflows(patientId, user.role === 'patient');
     audit(req, 'viewed clinical workflows', 'patient', patientId);
     res.json(data);
   });
@@ -572,4 +574,5 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     });
     res.json(procedureView(plan));
   });
+  return { patientView: (patientId: string) => workflows(patientId, true) };
 }

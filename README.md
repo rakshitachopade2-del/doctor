@@ -35,6 +35,8 @@ These are intentionally public **development-only credentials**. Production star
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
 - **Patient preparation:** a structured four-step history intake, reviewable summary, explicit sharing agreement, and clinician access to submitted history.
 - **Longitudinal records:** original consultation notes with dated, attributed amendments, shared history, private images, treatment plans, and side-by-side image comparison. Original notes and amendments remain clinician-only.
+- **Image annotations:** clinician-authored rectangle, ellipse and arrow overlays with text notes, preserved originals, private revision history, and explicit sharing of a saved revision. Keyboard controls use image-relative positions; no measurements or diagnoses are inferred.
+- **Care summary:** a printable patient-facing snapshot and revision-checked JSON download for patients and clinicians, with shared history, treatment, results, procedures, attachment metadata and invoices. Internal notes, private annotations, private messages and file bytes are excluded.
 - **Investigations:** structured test requests, due dates and instructions, patient/clinician result submissions, PDF attachments, and clinician reviews that are shared with the patient only after explicit publication. Supplemental results require review of the newest submission.
 - **Procedure records:** documented indication, benefits, risks, alternatives, estimated cost and aftercare; patient agree/decline decisions and their history; clinician completion and outcome records. These record a discussion and decision, not a validated legal e-signature.
 - **PDF reports:** private uploads up to 5 MB, original-file retention, source/author/date metadata, SHA-256 file fingerprints, and authorized downloads. Uploading a report does not interpret its medical contents.
@@ -95,6 +97,14 @@ An investigation connects the clinician’s request to submitted results and a s
 For a planned procedure, the patient can review the clinician’s information and record agreement or decline in the portal. A clinician can instead record an in-person or telephone discussion with a note and explicit confirmation of the patient’s decision. Decisions are retained in chronological order. Completing a procedure requires the latest decision to be agreement, and records the outcome and aftercare. A patient may change their choice while the procedure remains planned; completed or cancelled records cannot be silently rewritten.
 
 Consultation corrections use attributed amendments with a reason, preserving the original note. Patients do not see these internal notes or amendments. PDF files remain separate from interpretation and download as attachments; the platform neither embeds them nor claims malware scanning or extraction of their contents.
+
+## Annotate images and take a care summary
+
+In a patient's **Images & reports**, clinicians can open **View annotations**, add numbered shapes and explanatory notes, and save a private revision. Controls use percentages of the original image, with a text description for each mark. The image file stays unchanged. Every saved revision retains its author and date; new work creates another revision.
+
+Use the explicit sharing action to publish the latest saved revision. Patients see only published versions in **My health record → Images**, including the clinician's note and marker descriptions. A newer private revision does not replace or reveal itself in the patient's history. Pausing the image module preserves existing viewing and stops new annotations and publication. Uploaded originals retain a fingerprint and uploader metadata; older images do not receive invented uploader attribution.
+
+**Care summary** is available from a clinical patient record and the patient's navigation. It shows shared records with their source dates and original treatment instructions alongside later follow-up reviews. Print retains the displayed snapshot. The JSON download checks that patient-visible content still matches; if it changed, refresh before downloading. This is a patient-facing summary, not the entire internal clinical record. Attachment metadata and fingerprints are included, while original images/PDF bytes remain behind their authenticated download links.
 
 ## Close the follow-up loop
 
