@@ -176,6 +176,63 @@ try {
   assert.equal(auditPage.items[0].action, 'signed in');
   assert.equal(auditPage.items[0].actorName, 'Smoke Administrator');
   assert.equal((await fetch(`${base}/api/search/audit`)).status, 401);
+  const attendanceUrl = `${base}/api/attendance/me`;
+  const attendanceResponse = await fetch(attendanceUrl, { headers: apiHeaders });
+  assert.equal(attendanceResponse.status, 200);
+  assert.match(attendanceResponse.headers.get('cache-control'), /no-store/);
+  const attendanceContext = await attendanceResponse.json();
+  assert.equal(attendanceContext.staff.id, account.user.id);
+  assert.equal(attendanceContext.openShift, null);
+  assert.equal((await fetch(attendanceUrl)).status, 401);
+  const attendanceDay = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+  }).format(new Date(attendanceContext.serverNow));
+  const attendanceQuery = `from=${attendanceDay}&to=${attendanceDay}`;
+  const emptyAttendance = await fetch(`${base}/api/attendance?${attendanceQuery}`, {
+    headers: apiHeaders,
+  });
+  assert.equal(emptyAttendance.status, 200);
+  assert.equal((await emptyAttendance.json()).total, 0);
+  const clockInBody = {
+    requestId: randomUUID(),
+    expectedRevision: attendanceContext.revision,
+  };
+  const clockIn = await fetch(`${base}/api/attendance/clock-in`, {
+    method: 'POST',
+    headers: apiHeaders,
+    body: JSON.stringify(clockInBody),
+  });
+  assert.equal(clockIn.status, 201);
+  const startedAttendance = await clockIn.json();
+  assert.equal(startedAttendance.shift.status, 'open');
+  assert.equal(startedAttendance.event.requestId, clockInBody.requestId);
+  const repeatedClockIn = await fetch(`${base}/api/attendance/clock-in`, {
+    method: 'POST',
+    headers: apiHeaders,
+    body: JSON.stringify(clockInBody),
+  });
+  assert.equal(repeatedClockIn.status, 200);
+  assert.equal((await repeatedClockIn.json()).event.id, startedAttendance.event.id);
+  const openAttendance = await (await fetch(attendanceUrl, { headers: apiHeaders })).json();
+  const clockOut = await fetch(
+    `${base}/api/attendance/shifts/${startedAttendance.shift.id}/clock-out`,
+    {
+      method: 'POST',
+      headers: apiHeaders,
+      body: JSON.stringify({
+        requestId: randomUUID(),
+        expectedRevision: openAttendance.revision,
+      }),
+    },
+  );
+  assert.equal(clockOut.status, 200);
+  assert.equal((await clockOut.json()).shift.status, 'closed');
+  const attendanceHistory = await fetch(
+    `${base}/api/attendance/shifts/${startedAttendance.shift.id}`,
+    { headers: apiHeaders },
+  );
+  assert.equal(attendanceHistory.status, 200);
+  assert.equal((await attendanceHistory.json()).events.length, 2);
   const schedules = await fetch(`${base}/api/scheduling`, { headers: apiHeaders });
   assert.deepEqual((await schedules.json()).schedules, []);
   const activity = await fetch(`${base}/api/activity`, { headers: apiHeaders });
@@ -423,6 +480,7 @@ try {
   assert.equal((await fetch(`${base}/api/inventory/items`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/clinic-resources`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/search/patients`, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(attendanceUrl, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,

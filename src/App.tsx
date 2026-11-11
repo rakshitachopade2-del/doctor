@@ -129,6 +129,9 @@ const CareSummaryPage = lazy(() =>
 const InventoryPage = lazy(() =>
   import('./pages/InventoryPage').then((module) => ({ default: module.InventoryPage })),
 );
+const AttendancePage = lazy(() =>
+  import('./pages/AttendancePage').then((module) => ({ default: module.AttendancePage })),
+);
 const PatientProfilePage = lazy(() =>
   import('./pages/PatientProfilePage').then((module) => ({ default: module.PatientProfilePage })),
 );
@@ -220,6 +223,7 @@ const staffNav = [
   { to: '/clinic/activity', label: 'Activity', icon: Bell, clinical: true },
   { to: '/clinic/billing', label: 'Billing', icon: Receipt },
   { to: '/clinic/inventory', label: 'Inventory', icon: Package },
+  { to: '/clinic/attendance', label: 'Attendance', icon: Clock3 },
   { to: '/clinic/knowledge', label: 'Knowledge library', icon: BookOpen, clinical: true },
 ];
 const adminPageLabels: Record<string, string> = {
@@ -524,6 +528,7 @@ export function App() {
           />
           <Route path="clinic/billing" element={<BillingPage />} />
           <Route path="clinic/inventory" element={<InventoryPage />} />
+          <Route path="clinic/attendance" element={<AttendancePage />} />
           <Route path="clinic/waitlist" element={<WaitlistPage />} />
           <Route
             path="clinic/insights"

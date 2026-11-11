@@ -35,6 +35,7 @@ import {
 import { createScheduling } from './scheduling.ts';
 import { createClinicResources } from './clinic-resources.ts';
 import { registerRecordSearch } from './record-search.ts';
+import { registerAttendance } from './attendance.ts';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -1157,6 +1158,7 @@ export function createApp(options: AppOptions = {}) {
   scheduling.register(app);
   clinicResources.register(app);
   registerRecordSearch(app, { db, actor, fail });
+  registerAttendance(app, { db, actor, audit, fail });
   waitlist.register(app);
   registerActivity(app, { db, actor, audit, fail });
   registerDocuments(app, { db, actor, patientAccess, audit, fail });

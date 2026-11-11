@@ -35,6 +35,7 @@ These are intentionally public **development-only credentials**. Production star
 - **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute appointments, doctor leave, and clinic-wide closures. Schedule changes protect existing bookings.
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
 - **Record search:** paginated patient and appointment lists, historical appointment filters, and administrator audit search beyond the latest 500 entries. Staff views load 25 matching records per page.
+- **Staff attendance:** personal clock-in/out, private attendance history, administrator missed-entry corrections and voids, and filtered timesheets with CSV export. Original entries and reasons remain recorded.
 - **Patient preparation:** a structured four-step history intake, reviewable summary, explicit sharing agreement, and clinician access to submitted history.
 - **Longitudinal records:** original consultation notes with dated, attributed amendments, shared history, private images, treatment plans, and side-by-side image comparison. Original notes and amendments remain clinician-only.
 - **Patient details:** attributed demographic corrections by staff, separate clinician-authored allergy updates, retained history, independent revision checks, and exact retries. Contact corrections leave login credentials and historical names intact; patients can read their current details and shared allergy history.
@@ -105,6 +106,16 @@ In **Appointments**, search by a patient's recorded name or current contact deta
 Administrators can use **Activity log** to search the complete stored audit history, including entries older than the previous 500-entry view. Filter recorded actor names and action text, exact record type or ID, and inclusive dates in Asia/Kolkata. Apply filters explicitly; reset them to return to all activity. Names in audit records remain the names captured when the event occurred.
 
 Results show current records. New entries or edits can change page positions between requests; refresh to check the latest view. Search treats punctuation such as `%` and `_` literally. Matching ignores ASCII letter case; non-ASCII text is matched literally. These changes cover the staff directory, appointment list and audit screen; existing booking selectors and patient records retain their current workflows.
+
+## Record staff attendance
+
+Open **Attendance** from the clinic workspace. Each staff member can clock themselves in or out using the server time and inspect their own history. An account can have one open entry; signing out or suspending the account does not close it.
+
+Administrators can switch to **Team timesheet**, filter staff, dates and entry status, record a missed interval, correct its times, or void a mistaken entry. Changes require a reason and retain the original times, author and history. Staff can read administrator changes to their own entries. Inactive staff remain available for historical corrections.
+
+Periods use the entry's current start date in **Asia/Kolkata**. Totals include the full recorded seconds of completed entries that started in the selected period, including overnight entries; open and voided entries add no time. Date ranges cover at most 366 days. Administrator CSV exports use the displayed filters and refuse a changed report or more than 10,000 rows. Refresh or narrow the filters when needed.
+
+Completed entries are limited to 36 hours as a data-entry constraint. An older open entry requires administrator correction or voiding. Attendance is a record of entered times; it does not establish physical presence, infer absence, or calculate payroll, breaks, overtime or leave.
 
 ## Reserve rooms and shared equipment
 
@@ -219,7 +230,7 @@ Follow [deployment and backups](docs/DEPLOYMENT.md) for the exact setup, Docker 
 | Investigations and procedures | Requests, results, published clinical reviews, procedure discussions/decisions, completion records, and private consultation amendments work. No laboratory-system integration, automatic result interpretation, coded procedure catalogue, or procedure-linked inventory.                                                                                                   |
 | Files and consent             | Private JPEG/PNG/WebP images and PDF reports are supported. Treatment-use permission and procedure decisions are documented. No video uploads, malware scanning, OCR, validated legal e-signature process, public image reuse, research permissions, or model training.                                                                                                      |
 | Organization                  | One clinic per deployment. Clinicians share clinic records; there is no multi-tenant isolation or assigned-doctor restriction.                                                                                                                                                                                                                                               |
-| Native apps and workbench     | Responsive web app; no separate native iOS/Android app. IPD, staff attendance, hospital navigation, research assistants, education simulations, clinical calculators, and outcome/reputation scoring remain future modules.                                                                                                                                                  |
+| Native apps and workbench     | Responsive web app; no separate native iOS/Android app. IPD, hospital navigation, research assistants, education simulations, clinical calculators, and outcome/reputation scoring remain future modules.                                                                                                                                                                    |
 | Operational assurance         | SQLite persistence, access checks, and audit records are implemented. Hosting, disk encryption, recovery policy, monitoring, and clinical/privacy review belong to the real deployment. This repository makes no certification or regulatory-compliance claim.                                                                                                               |
 
 See [concept-to-release mapping](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md), and [API contract](docs/API.md) for implementation details and remaining product scope.

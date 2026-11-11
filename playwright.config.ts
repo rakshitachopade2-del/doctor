@@ -52,6 +52,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)record-search\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5189' },
     },
+    {
+      name: 'attendance',
+      testMatch: /(?:^|\/)attendance\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5190' },
+    },
   ],
   webServer: [
     {
@@ -93,6 +98,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3017 E2E_VITE_PORT=5189 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5189',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3018 E2E_VITE_PORT=5190 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5190',
       reuseExistingServer: false,
       timeout: 60000,
     },

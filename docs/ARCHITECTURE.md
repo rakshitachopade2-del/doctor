@@ -38,7 +38,7 @@ flowchart LR
 | `src/pages/ActivityPage.tsx`                   | Account-scoped activity, cursor pagination and read-state controls                        |
 | `src/pages/ClinicalWorkflowPanel.tsx`          | Investigation orders/results/reviews, procedure records and encounter amendments          |
 | `src/pages/OperationsPages.tsx`                | Invoices, payments, public/managed knowledge                                              |
-| `src/pages/SettingsPages.tsx`                  | Clinic configuration, staff/profiles, patient portal access, audit                        |
+| `src/pages/SettingsPages.tsx`                  | Clinic configuration, staff/profiles and patient portal access                            |
 | `src/pages/SchedulingPage.tsx`                 | Weekly availability, consultation modes, appointment lengths, doctor/clinic time off      |
 | `src/pages/WaitlistPage.tsx`                   | Staff waitlist, patient confirmation and booking from available slots                     |
 | `src/pages/IdentityPages.tsx`                  | Account administration, required password rotation, sessions, recovery                    |
@@ -64,6 +64,8 @@ flowchart LR
 | `server/insights.ts`                           | Immutable expenses and voids, administrator aggregates and private CSV exports            |
 | `src/pages/InsightsPage.tsx`                   | Date-range reporting, daily charts/tables and aggregate export                            |
 | `src/pages/ExpensesPage.tsx`                   | Administrator expense creation, filtering and void history                                |
+| `server/attendance.ts`                         | Account-based clocking, immutable corrections, interval guards and private timesheets     |
+| `src/pages/AttendancePage.tsx`                 | Personal attendance, administrator timesheets, correction history and guarded exports     |
 | `server/activity.ts`                           | Transactional recipient notifications, event deduplication and scoped read receipts       |
 | `shared/`                                      | Frontend/backend data contracts                                                           |
 | `tests/`                                       | Isolated API tests and real-browser workflows                                             |
@@ -247,3 +249,13 @@ The queue and dashboard use private clinical worklist endpoints. Shared review d
 Count and page selection share one read transaction, return at most 100 rows (25 in the UI), and clamp out-of-range pages after data changes. Separate requests intentionally show current records: offset pagination is not a frozen snapshot. Patient directory fields are selected explicitly in SQL, so allergies and private notes neither appear nor affect result counts. Appointment searches may join current demographics while preserving the original appointment projection. Audit reads preserve historical actor names and do not write recursive audit events.
 
 `useSearchPage` associates data/loading/error with the exact request path, rejects malformed pagination metadata and ignores late responses for older filters. Shared pagination and URL-backed views support refresh, page changes and browser navigation. Existing booking patient selectors and patient record routes remain on their compatible APIs; this release does not claim to paginate every record or report endpoint.
+
+## Staff attendance
+
+`server/attendance.ts` registers account-based attendance without adding fields to patient or doctor records. Original entries, before/after events and actor-bound command receipts are immutable. A current projection supports interval checks, bounded page selection and aggregate timesheets. Immediate transactions commit interval changes, evidence, request receipts and audits together; a unique open-entry index and overlap triggers protect concurrent writes. Half-open intervals allow adjacency. Voiding preserves the source and releases its current claim.
+
+Own clocking uses server timestamps and an account-context revision, preventing a stale tab from silently creating a new interval after intervening attendance changes. Administrator corrections use an entry revision and retain original account/name/role snapshots. Exact command replay returns its original event alongside the current effective entry. Active account and role authorization still applies before replay. Suspension or role changes preserve attendance; administrators can repair inactive staff records without changing account access.
+
+Reports filter current effective start dates in Asia/Kolkata, count whole completed intervals in that cohort and exclude open/voided time. SQL counts, totals and bounded rows use one read snapshot. A revision covers every matching entry and the selected filters; CSV export requires the same revision and refuses oversized results. Each entry's whole elapsed seconds are floored before summing, so displayed/report totals use the same arithmetic. Attendance is recorded time, with no physical-presence verification or automatic payroll, absence, leave, break or overtime policy.
+
+The staff page keeps own clocking separate from administrator team filters. Pending commands keep their exact payload/UUID until the response confirms the event, actor, target and intended state. Context conflicts preserve drafts and require review before a new attempt. Reports and exports belong to their selected filters; errors or obsolete responses cannot supply current totals or a download. Correction history is visible only to the owner and administrators and never enters patient summaries or notifications.

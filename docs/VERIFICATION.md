@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.12.0**, verified locally on **11 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.13.0**, verified locally on **11 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 241 passed                                              |
-| Browser and accessibility tests | 44 passed                                               |
+| API and online-backup tests     | 259 passed                                              |
+| Browser and accessibility tests | 47 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -30,6 +30,10 @@ The 14 record-search API tests cover staff/admin boundaries, temporary-password 
 
 Record-search browser journeys cover audit entries older than the legacy 500-entry window, literal punctuation, combined actor/action/record/date filters, paging and clamping, current request failures and retry, obsolete response suppression, and rejection of coherent responses for the wrong page. Clinic journeys exercise multiple patient and appointment pages, status/mode/day/all-date filters, existing appointment actions, clinical-field search isolation and role restrictions. Navigation regressions cover pending text searches during Back/Forward, immediate typing after audit Reset, preservation of draft filters during page clamping and quick appointment filter changes, and the All dates checkbox across history entries. Desktop and 320-pixel views include screenshots and automated accessibility checks.
 
+The 18 attendance API checks cover staff ownership and administrator boundaries, minimal account projections, server clocking, canonical actor-bound retries, stale account/entry revisions, simultaneous clocking and administrator changes, half-open interval overlap rules including adjacency and zero-length entries, the 36-hour recovery path, inactive staff histories, preserved identity snapshots, correction/void immutability and audit rollback. Timesheet checks verify exact IST start-date cohorts, full overnight intervals, per-entry whole-second totals, off-page report revisions and formula-safe CSV with contact/reason exclusion. A 10,001-entry fixture verifies that a 17-row page decodes only 17 origins and an oversized export fails explicitly. A concurrent SQLite writer verifies a coherent report snapshot; restart tests retain sources and replay receipts.
+
+Attendance browser journeys verify lost/malformed response retries without duplicate entries, duplicate clock-in prevention, administrator missed entries, explicit review of concurrent corrections, void confirmation and original-history preservation. Reports exercise overnight IST intervals, inactive staff, formula-safe CSV, stale export rejection, incorrect MIME/revision rejection, cancelled downloads after a report fails to refresh, and rapid view/reset/filter entry. Staff and patient access boundaries are exercised alongside keyboard dialogs and 320-pixel history/timesheet accessibility. The production smoke check verifies empty attendance on a fresh database, server clock-in/out, exact replay, retained two-event history, private reads and logout rejection.
+
 Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout is also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
 
 Screenshots use only synthetic demonstration records:
@@ -42,4 +46,4 @@ Screenshots use only synthetic demonstration records:
 
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
-CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource and record-search workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search and attendance workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
