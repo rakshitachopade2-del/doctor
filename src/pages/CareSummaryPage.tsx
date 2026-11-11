@@ -3,6 +3,8 @@ import { Link, Navigate, useParams } from 'react-router-dom';
 import { ArrowDownToLine, ArrowLeft, FileText, Printer, RefreshCw } from 'lucide-react';
 import type { CareSummary } from '../../shared/care-summary';
 import type { AllergyStatus } from '../../shared/patient-profile';
+import type { InvoiceItem } from '../../shared/operations';
+import type { InvoiceHistory } from '../../shared/billing-corrections';
 import { formatDate, money, useResource, useSession } from '../lib';
 import { Badge, EmptyState, ErrorState, Loading, PageHeader } from '../components/ui';
 import './care-summary.css';
@@ -285,6 +287,100 @@ function Detail({ label, value }: { label: string; value?: string | null }) {
     <div className="care-summary-detail">
       <strong>{label}</strong>
       <p>{safeValue(value)}</p>
+    </div>
+  );
+}
+function SummaryCharges({ items, title }: { items: InvoiceItem[]; title: string }) {
+  if (!items.length) return <p className="care-summary-empty">{title}: no charges recorded.</p>;
+  return (
+    <div className="care-summary-table" role="region" aria-label={title} tabIndex={0}>
+      <table>
+        <caption>{title}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th scope="col">Quantity</th>
+            <th scope="col">Unit price</th>
+            <th scope="col">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, index) => (
+            <tr key={index}>
+              <th scope="row">{item.description}</th>
+              <td>{item.quantity}</td>
+              <td>{money(item.unitAmountPaise / 100)}</td>
+              <td>{money((item.quantity * item.unitAmountPaise) / 100)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+function SummaryInvoiceHistory({ history }: { history: InvoiceHistory }) {
+  return (
+    <div className="care-summary-events">
+      <h4>Original issued charges</h4>
+      <SummaryCharges items={history.issuedCharges.items} title="Originally issued invoice items" />
+      <Detail label="Original issued total" value={money(history.issuedCharges.totalPaise / 100)} />
+      {history.corrections.length > 0 && (
+        <>
+          <h4>Shared charge correction history</h4>
+          {history.corrections.map((correction) => (
+            <div key={correction.id} className="care-summary-event">
+              <h5>Charge correction</h5>
+              <p className="care-summary-source">
+                {correction.createdByName} · {timestamp(correction.createdAt)} IST
+              </p>
+              <Detail label="Reason shared with patient" value={correction.reason} />
+              <SummaryCharges items={correction.before.items} title="Charges before correction" />
+              <Detail
+                label="Total before correction"
+                value={money(correction.before.totalPaise / 100)}
+              />
+              <SummaryCharges items={correction.after.items} title="Charges after correction" />
+              <Detail
+                label="Total after correction"
+                value={money(correction.after.totalPaise / 100)}
+              />
+              <Detail
+                label="Paid amount recorded at this correction"
+                value={money(correction.after.paidPaise / 100)}
+              />
+            </div>
+          ))}
+        </>
+      )}
+      {history.reversals.length > 0 && (
+        <>
+          <h4>Reversed payment-entry history</h4>
+          <p>
+            These updates correct erroneous payment records. They do not return money or record a
+            refund.
+          </p>
+          {history.reversals.map((reversal) => (
+            <div key={reversal.id} className="care-summary-event">
+              <h5>Erroneous payment entry reversed</h5>
+              <p className="care-summary-source">
+                {reversal.createdByName} · {timestamp(reversal.createdAt)} IST
+              </p>
+              <Detail label="Reason shared with patient" value={reversal.reason} />
+              <div className="care-summary-details">
+                <Detail label="Recorded entry amount" value={money(reversal.amountPaise / 100)} />
+                <Detail
+                  label="Paid total before reversal"
+                  value={money(reversal.beforePaidPaise / 100)}
+                />
+                <Detail
+                  label="Paid total after reversal"
+                  value={money(reversal.afterPaidPaise / 100)}
+                />
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
@@ -745,52 +841,32 @@ function SummaryDocument({ data, recordPath }: { data: CareSummary; recordPath: 
           <SummaryEntry
             key={entry.id}
             title={entry.number}
-            source="Clinic billing record"
+            source="Clinic billing record · Originally issued"
             date={entry.createdAt}
-            badge={entry.status}
+            badge={entry.status === 'no-charge' ? 'No charges' : entry.status}
           >
+            <Detail label="Name recorded on invoice" value={entry.patientName} />
             {entry.procedureTitle && (
               <Detail label="Linked procedure" value={entry.procedureTitle} />
             )}
-            <div
-              className="care-summary-table"
-              role="region"
-              aria-label={`Items for invoice ${entry.number}`}
-              tabIndex={0}
-            >
-              <table>
-                <caption>Recorded invoice items</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Item</th>
-                    <th scope="col">Quantity</th>
-                    <th scope="col">Unit price</th>
-                    <th scope="col">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entry.items.map((item, index) => (
-                    <tr key={index}>
-                      <th scope="row">{item.description}</th>
-                      <td>{item.quantity}</td>
-                      <td>{money(item.unitAmountPaise / 100)}</td>
-                      <td>{money((item.quantity * item.unitAmountPaise) / 100)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <SummaryCharges items={entry.items} title={`Current charges for ${entry.number}`} />
             <div className="care-summary-invoice-totals">
               <span>
                 Total <strong>{money(entry.totalPaise / 100)}</strong>
               </span>
               <span>
-                Recorded paid <strong>{money(entry.paidPaise / 100)}</strong>
+                Recorded paid, excluding reversed entries{' '}
+                <strong>{money(entry.paidPaise / 100)}</strong>
               </span>
               <span>
                 Balance <strong>{money((entry.totalPaise - entry.paidPaise) / 100)}</strong>
               </span>
             </div>
+            {data.invoiceHistories
+              .filter((history) => history.invoiceId === entry.id)
+              .map((history) => (
+                <SummaryInvoiceHistory key={history.invoiceId} history={history} />
+              ))}
           </SummaryEntry>
         ))}
       </SummarySection>

@@ -245,6 +245,62 @@ try {
   });
   assert.equal(correction.status, 200);
   assert.equal((await correction.json()).changes.length, 1);
+  async function billingWrite(path, body, status = 200) {
+    const response = await fetch(`${base}/api${path}`, {
+      method: 'POST',
+      headers: apiHeaders,
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, status);
+    return response.json();
+  }
+  const invoice = await billingWrite(
+    '/invoices',
+    {
+      patientId: patient.id,
+      requestId: randomUUID(),
+      items: [{ description: 'Synthetic verification charge', quantity: 1, unitAmountPaise: 1000 }],
+    },
+    201,
+  );
+  const payment = await billingWrite(
+    `/invoices/${invoice.id}/payments`,
+    {
+      amountPaise: 400,
+      method: 'cash',
+      reference: 'Synthetic entry only',
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const revisedCharges = await billingWrite(`/invoices/${invoice.id}/corrections`, {
+    items: [{ description: 'Corrected synthetic charge', quantity: 1, unitAmountPaise: 800 }],
+    reason: 'Synthetic charge correction',
+    expectedRevision: payment.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(revisedCharges.invoice.totalPaise, 800);
+  const reversed = await billingWrite(
+    `/invoices/${invoice.id}/payments/${payment.payments[0].id}/reverse`,
+    {
+      reason: 'Synthetic erroneous entry',
+      entryErrorConfirmed: true,
+      expectedRevision: revisedCharges.revision,
+      requestId: randomUUID(),
+    },
+  );
+  assert.equal(reversed.invoice.paidPaise, 0);
+  const noCharges = await billingWrite(`/invoices/${invoice.id}/corrections`, {
+    items: [],
+    reason: 'Remove synthetic charges',
+    removeAllChargesConfirmed: true,
+    expectedRevision: reversed.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(noCharges.invoice.status, 'no-charge');
+  assert.equal(noCharges.issuedCharges.totalPaise, 1000);
+  assert.equal(noCharges.corrections.length, 2);
+  assert.equal(noCharges.reversals.length, 1);
   const summaryUrl = `${base}/api/patients/${patient.id}/care-summary`;
   const summaryResponse = await fetch(summaryUrl, { headers: apiHeaders });
   assert.equal(summaryResponse.status, 200);
@@ -254,6 +310,8 @@ try {
   assert.equal(summary.patient.phone, '9000000088');
   assert.equal(summary.patient.allergyStatus, 'not-recorded');
   assert.deepEqual(summary.allergyHistory, []);
+  assert.equal(summary.invoiceHistories[0].issuedCharges.totalPaise, 1000);
+  assert.equal(summary.invoices[0].status, 'no-charge');
   assert.deepEqual(summary.imageAnnotations, []);
   assert.deepEqual(summary.carePlans, []);
   const summaryDownload = await fetch(`${summaryUrl}/download?revision=${summary.revision}`, {

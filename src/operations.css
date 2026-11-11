@@ -79,6 +79,235 @@
 .payment-form h3 {
   margin-bottom: 0;
 }
+.billing-scope,
+.billing-help {
+  color: #536650;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.billing-scope {
+  margin: -10px 0 24px;
+}
+.billing-pending {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.billing-pending p {
+  margin-bottom: 0;
+}
+.modal:has(.invoice-document) {
+  width: min(780px, 100%);
+}
+.invoice-document,
+.billing-create-form,
+.billing-edit-panel,
+.billing-current-charges,
+.billing-correction-history,
+.billing-issued-charges {
+  min-width: 0;
+}
+.billing-invoice-heading {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.billing-invoice-heading h2 {
+  overflow-wrap: anywhere;
+}
+.billing-register-table,
+.billing-charges-table {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+.billing-charges-table .data-table {
+  min-width: 500px;
+}
+.billing-charges-table caption {
+  color: #536650;
+  text-align: left;
+  padding: 12px 0;
+  font-size: 12px;
+}
+.billing-charges-table th[scope='row'] {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: normal;
+  min-width: 160px;
+  max-width: 350px;
+  overflow-wrap: anywhere;
+}
+.invoice-document .invoice-totals > span {
+  width: min(280px, 100%);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.billing-edit-panel {
+  padding: 20px;
+  border: 1px solid #cddcce;
+  border-radius: 12px;
+  background: #f6f9f2;
+}
+.billing-edit-panel h3 {
+  margin: 0;
+}
+.billing-edit-panel .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.billing-edit-panel .field,
+.billing-create-form .field {
+  min-width: 0;
+}
+.billing-edit-panel input,
+.billing-create-form input {
+  min-width: 0;
+  max-width: 100%;
+}
+.billing-correction-preview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding: 14px 0;
+  border-block: 1px solid #dbe5d6;
+}
+.billing-correction-preview span {
+  font-size: 11px;
+  color: #536650;
+}
+.billing-correction-preview strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 16px;
+  color: #284f39;
+  overflow-wrap: anywhere;
+}
+.billing-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.billing-form-actions .button,
+.billing-conflict .button {
+  white-space: normal;
+  height: auto;
+  min-height: 40px;
+}
+.billing-retry,
+.billing-conflict {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.billing-retry p:last-child,
+.billing-conflict p:last-child {
+  margin-bottom: 0;
+}
+.invoice-document .payment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  padding: 17px 0;
+}
+.invoice-document .payment-row .button {
+  justify-self: start;
+}
+.billing-payment-record strong {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.billing-payment-record small,
+.billing-record-id {
+  display: block;
+  margin-top: 6px;
+}
+.billing-record-id {
+  font-size: 10px;
+  color: #586b52;
+}
+.billing-payment-record,
+.billing-reversal-record,
+.billing-reversal-target,
+.billing-shared-reason {
+  overflow-wrap: anywhere;
+}
+.billing-reversal-record {
+  border-left: 3px solid #afbaab;
+  padding-left: 13px;
+}
+.billing-reversal-record p,
+.billing-shared-reason {
+  white-space: pre-wrap;
+}
+.billing-reversal-target {
+  padding: 14px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #dce5d7;
+}
+.billing-reversal-target p {
+  margin-bottom: 0;
+  font-size: 12px;
+}
+.billing-issued-charges,
+.billing-correction-history {
+  border-top: 1px solid #dfe7d9;
+  padding-top: 20px;
+}
+.billing-issued-charges h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.billing-correction-record {
+  padding: 18px;
+  border: 1px solid #dfe7d9;
+  border-radius: 9px;
+  margin-top: 14px;
+}
+.billing-correction-record h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.billing-shared-reason {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.invoice-document summary {
+  cursor: pointer;
+  color: #285a46;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  padding: 8px 0;
+}
+.invoice-document summary:focus-visible {
+  outline: 2px solid #286455;
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+@media (max-width: 540px) {
+  .billing-edit-panel {
+    padding: 15px;
+  }
+  .billing-edit-panel .form-grid,
+  .billing-create-form .form-grid,
+  .billing-correction-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .billing-form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .billing-form-actions .button {
+    width: 100%;
+  }
+  .billing-correction-record {
+    padding: 13px;
+  }
+}
 .library-page {
   max-width: 1160px;
   margin: 50px auto;
@@ -161,10 +390,20 @@
     display: flex;
   }
   .modal:has(.invoice-document) .modal-header button,
-  .payment-form {
+  .payment-form,
+  .billing-edit-panel,
+  .billing-admin-action,
+  .billing-no-print {
     display: none !important;
   }
   .modal:has(.invoice-document) .modal-body {
     overflow: visible;
+  }
+  .billing-charges-table {
+    overflow: visible;
+  }
+  .billing-charges-table .data-table {
+    min-width: 0;
+    width: 100%;
   }
 }

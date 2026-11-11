@@ -3,9 +3,16 @@ import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
 import { createUser, get, id, insert, list, nowISO, type DB } from './db.ts';
 import type { Patient, User } from '../shared/types.ts';
-import type { Invoice, InvoiceDetail, KnowledgeArticle, Payment } from '../shared/operations.ts';
+import type { Invoice, KnowledgeArticle, Payment } from '../shared/operations.ts';
 import type { ProcedureRecord } from '../shared/clinical.ts';
 import { notifyPatient } from './activity.ts';
+import {
+  invoiceDetail,
+  invoiceItemSchema,
+  invoicePaymentStatus,
+  issuedInvoiceCharges,
+  registerBillingCorrections,
+} from './billing-corrections.ts';
 
 interface OperationsContext {
   db: DB;
@@ -106,18 +113,9 @@ export function registerOperations(app: Express, context: OperationsContext) {
     patientAccess(req, invoice.patientId, true);
     return invoice;
   };
-  const detail = (invoice: Invoice): InvoiceDetail => ({
-    invoice,
-    payments: db
-      .prepare('SELECT data FROM payments WHERE invoiceId=? ORDER BY rowid')
-      .all(invoice.id)
-      .map((row) => JSON.parse(row.data as string) as Payment),
-  });
-  const item = z.object({
-    description: z.string().trim().min(1).max(300),
-    quantity: z.number().int().min(1).max(1000),
-    unitAmountPaise: z.number().int().min(1).max(1_000_000_000),
-  });
+  registerBillingCorrections(app, { db, actor, invoiceAccess, audit, fail });
+  const detail = (invoice: Invoice) => invoiceDetail(db, invoice);
+  const item = invoiceItemSchema;
   app.get('/api/invoices', (req: AuthRequest, res) => {
     const user = actor(req);
     const invoices = list<Invoice>(
@@ -184,7 +182,7 @@ export function registerOperations(app: Express, context: OperationsContext) {
         if (
           invoice.patientId !== input.patientId ||
           invoice.procedureId !== input.procedureId ||
-          JSON.stringify(invoice.items) !== JSON.stringify(input.items)
+          JSON.stringify(issuedInvoiceCharges(db, invoice).items) !== JSON.stringify(input.items)
         )
           fail(409, 'This invoice request was already used with different details.');
         duplicate = true;
@@ -288,7 +286,7 @@ export function registerOperations(app: Express, context: OperationsContext) {
           JSON.stringify(payment),
         );
         invoice.paidPaise += input.amountPaise;
-        invoice.status = invoice.paidPaise === invoice.totalPaise ? 'paid' : 'partial';
+        invoice.status = invoicePaymentStatus(invoice.totalPaise, invoice.paidPaise);
         db.prepare('UPDATE invoices SET data=? WHERE id=?').run(JSON.stringify(invoice), invoiceId);
         audit(req, 'recorded manual payment', 'invoice', invoiceId);
         notifyPatient(db, invoice.patientId, `payment-recorded:${payment.id}`, {

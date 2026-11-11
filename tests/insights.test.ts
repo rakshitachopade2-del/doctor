@@ -774,3 +774,54 @@ test('legacy database startup adds reporting storage and preserves invoices and 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('billing corrections update the original invoice cohort and exclude erroneous payments at their original recording dates', async () => {
+  const invoice = storedInvoice('2011-02-01T06:00:00.000Z', 10000, 4000);
+  const payment = storedPayment(invoice, '2011-03-01T06:00:00.000Z', 4000, 'upi');
+  let detail = await call(`/invoices/${invoice.id}`, admin);
+  assert.equal(detail.status, 200);
+  const correction = await call(`/invoices/${invoice.id}/corrections`, admin, 'POST', {
+    items: [{ description: 'Corrected synthetic charge', quantity: 1, unitAmountPaise: 8000 }],
+    reason: 'Synthetic entry correction',
+    expectedRevision: detail.data.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(correction.status, 200, JSON.stringify(correction.data));
+  const february = await report('2011-02-01', '2011-02-28');
+  assert.equal(february.totals.invoicedPaise, 8000);
+  assert.equal(february.totals.issuedInvoiceOutstandingPaise, 4000);
+  assert.equal(february.totals.collectionsPaise, 0);
+  assert.equal((await report('2011-03-01', '2011-03-31')).totals.collectionsPaise, 4000);
+  const reversal = await call(
+    `/invoices/${invoice.id}/payments/${payment.id}/reverse`,
+    admin,
+    'POST',
+    {
+      reason: 'Synthetic mistaken payment entry',
+      entryErrorConfirmed: true,
+      expectedRevision: correction.data.revision,
+      requestId: randomUUID(),
+    },
+  );
+  assert.equal(reversal.status, 200, JSON.stringify(reversal.data));
+  const march = await report('2011-03-01', '2011-03-31');
+  assert.equal(march.totals.collectionsPaise, 0);
+  assert.equal(march.totals.paymentCount, 0);
+  assert.equal(march.collectionsByMethod.find((row) => row.method === 'upi')!.amountPaise, 0);
+  assert.ok(march.daily.every((day) => day.collectionsPaise === 0));
+  assert.equal(
+    (await report('2011-02-01', '2011-02-28')).totals.issuedInvoiceOutstandingPaise,
+    8000,
+  );
+  const csv = await call('/insights/export?from=2011-03-01&to=2011-03-31', admin);
+  assert.equal(csv.status, 200);
+  assert.match(csv.data, /erroneous reversed entries excluded/);
+  assert.deepEqual(
+    parseCsv(csv.data).find((row) => row[0] === 'totals' && row[2] === 'collectionsPaise'),
+    ['totals', '', 'collectionsPaise', '', '', '0'],
+  );
+  assert.equal(
+    app.locals.db.prepare('SELECT count(*) AS n FROM payments WHERE id=?').get(payment.id).n,
+    1,
+  );
+});

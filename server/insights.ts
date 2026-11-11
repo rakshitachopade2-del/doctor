@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
+import { reversedPaymentIds } from './billing-corrections.ts';
 import type { Appointment, AppointmentStatus, User } from '../shared/types.ts';
 import type { Invoice, Payment } from '../shared/operations.ts';
 import {
@@ -296,7 +297,9 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
       );
       day.invoicedPaise = addMoney(day.invoicedPaise, invoice.totalPaise);
     }
+    const reversed = reversedPaymentIds(db);
     for (const payment of list<Payment>(db, 'payments')) {
+      if (reversed.has(payment.id)) continue;
       const day = byDay.get(recordedDate(payment.createdAt));
       if (!day) continue;
       const method = result.collectionsByMethod.find((row) => row.method === payment.method)!;
@@ -338,12 +341,19 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
         '',
         '',
       ],
-      ['metadata', '', 'invoicesBasis', 'Invoice issue timestamp in Asia/Kolkata', '', ''],
+      [
+        'metadata',
+        '',
+        'invoicesBasis',
+        'Current corrected charges; original invoice issue timestamp in Asia/Kolkata',
+        '',
+        '',
+      ],
       [
         'metadata',
         '',
         'collectionsBasis',
-        'Manual payment recording timestamp in Asia/Kolkata; actual receipt date is not separately stored',
+        'Original manual payment recording timestamp in Asia/Kolkata; erroneous reversed entries excluded; actual receipt date is not separately stored',
         '',
         '',
       ],

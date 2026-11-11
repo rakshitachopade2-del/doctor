@@ -1,3 +1,5 @@
+import type { InvoiceHistory } from './billing-corrections';
+
 export interface InvoiceItem {
   description: string;
   quantity: number;
@@ -11,7 +13,7 @@ export interface Invoice {
   items: InvoiceItem[];
   totalPaise: number;
   paidPaise: number;
-  status: 'unpaid' | 'partial' | 'paid';
+  status: 'unpaid' | 'partial' | 'paid' | 'no-charge';
   createdAt: string;
   procedureId?: string;
   procedureTitle?: string;
@@ -35,9 +37,10 @@ export interface Payment {
   requestId: string;
   createdAt: string;
 }
-export interface InvoiceDetail {
+export interface InvoiceDetail extends InvoiceHistory {
   invoice: Invoice;
   payments: Payment[];
+  revision: string;
 }
 export interface KnowledgeArticle {
   id: string;

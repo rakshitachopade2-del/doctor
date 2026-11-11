@@ -302,12 +302,12 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
         <Metric
           label="Invoices issued"
           value={amount(totals.invoicedPaise)}
-          detail={`${number(totals.invoiceCount)} invoices issued during this period.`}
+          detail={`Current corrected charges for ${number(totals.invoiceCount)} invoices originally issued during this period.`}
         />
         <Metric
           label="Recorded collections"
           value={amount(totals.collectionsPaise)}
-          detail={`${number(totals.paymentCount)} received-payment entries recorded during this period.`}
+          detail={`${number(totals.paymentCount)} non-reversed received-payment entries originally recorded during this period.`}
         />
         <Metric
           label="Recorded expenses"
@@ -317,16 +317,17 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
         <Metric
           label="Outstanding on period invoices"
           value={amount(totals.issuedInvoiceOutstandingPaise)}
-          detail="Current balance of invoices issued in this period, including payments recorded afterward."
+          detail="Current corrected balance of invoices originally issued in this period, including later payment records and reversals of erroneous entries."
         />
       </div>
       <div className="insights-scope-note">
         <strong>These amounts have different date scopes.</strong>
         <p>
-          Invoice totals use issue dates; collections use the date a received payment was recorded;
-          actual receipt dates are not stored separately. Expenses use incurred dates. Outstanding
-          is a current balance, not a balance at period end. These records do not measure profit or
-          reconcile a bank account.
+          Current corrected invoice amounts use the original issue date. Collections exclude
+          reversed erroneous entries and use each payment’s original recording date; actual receipt
+          dates are not stored separately. A reversal corrects a recorded entry and does not return
+          money. Expenses use incurred dates. Outstanding is a current balance, not a balance at
+          period end. These records do not measure profit or reconcile a bank account.
         </p>
       </div>
       <div className="insights-visit-summary">
@@ -363,7 +364,7 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
         />
         <MoneyBreakdown
           title="Collections by method"
-          description="Manual payment records entered during the period."
+          description="Non-reversed payment entries, by their original recording date."
           rows={data.collectionsByMethod.map((row) => ({
             label: methodLabels[row.method] ?? row.method,
             count: row.count,

@@ -4,6 +4,7 @@ import { createFollowUp } from './follow-up.ts';
 import { createWaitlist } from './waitlist.ts';
 import { registerInsights } from './insights.ts';
 import { registerInventory } from './inventory.ts';
+import { safeInvoiceHistory } from './billing-corrections.ts';
 import {
   registerPatientProfile,
   patientWithAllergyStatus,
@@ -1167,6 +1168,7 @@ export function createApp(options: AppOptions = {}) {
     patientWorkflows: clinicalWorkflows.patientView,
     publishedAnnotations: (patientId) => publishedImageAnnotationsForPatient(db, patientId),
     allergyHistory: (patientId) => safeAllergyHistory(db, patientId).changes,
+    invoiceHistory: (invoiceId) => safeInvoiceHistory(db, invoiceId),
   });
   registerInsights(app, { db, actor, audit, fail });
   registerInventory(app, { db, actor, audit, fail });

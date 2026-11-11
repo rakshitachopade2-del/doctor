@@ -18,6 +18,7 @@ import type { Invoice } from '../shared/operations.ts';
 import type { ImageAnnotationVersion } from '../shared/image-annotations.ts';
 import type { CareSummary, SummaryCarePlan } from '../shared/care-summary.ts';
 import type { PatientAllergyChange } from '../shared/patient-profile.ts';
+import type { InvoiceHistory } from '../shared/billing-corrections.ts';
 import { list, nowISO, settings, type DB } from './db.ts';
 
 interface SummaryContext {
@@ -31,6 +32,7 @@ interface SummaryContext {
   patientWorkflows: (patientId: string) => PatientClinicalWorkflows;
   publishedAnnotations: (patientId: string) => ImageAnnotationVersion[];
   allergyHistory: (patientId: string) => PatientAllergyChange[];
+  invoiceHistory: (invoiceId: string) => InvoiceHistory;
 }
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -38,6 +40,7 @@ export function registerCareSummary(app: Express, context: SummaryContext) {
   const { db, actor, patientAccess, audit, fail } = context;
   function snapshot(patient: Patient): CareSummary {
     const clinic = settings(db);
+    const invoices = list<Invoice>(db, 'invoices', patient.id);
     const workflows = context.patientWorkflows(patient.id);
     const carePlans: SummaryCarePlan[] = context
       .hydratePlans(list<CarePlan>(db, 'carePlans', patient.id), true)
@@ -97,7 +100,8 @@ export function registerCareSummary(app: Express, context: SummaryContext) {
       images: list<ClinicalImage>(db, 'images', patient.id),
       imageAnnotations: context.publishedAnnotations(patient.id),
       documents: list<PatientDocument>(db, 'documents', patient.id),
-      invoices: list<Invoice>(db, 'invoices', patient.id),
+      invoices,
+      invoiceHistories: invoices.map((invoice) => context.invoiceHistory(invoice.id)),
     };
     return { ...content, generatedAt: nowISO(), revision: digest(JSON.stringify(content)) };
   }

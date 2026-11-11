@@ -169,12 +169,31 @@ export function Modal({
     const previous = document.activeElement as HTMLElement;
     const before = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    const inOpenDisclosure = (el: HTMLElement) => {
+      // Chromium may retain layout rectangles inside a closed details element.
+      // Only its first summary and that summary's descendants remain interactive.
+      for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+        if (parent instanceof HTMLDetailsElement && !parent.open) {
+          const summary = Array.from(parent.children).find((child) => child.tagName === 'SUMMARY');
+          if (!summary?.contains(el)) return false;
+        }
+      }
+      return true;
+    };
     const focusables = () =>
       Array.from(
         ref.current?.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex="0"]',
+          'button, [href], input, select, textarea, summary, [tabindex]',
         ) ?? [],
-      ).filter((el) => !el.hasAttribute('disabled'));
+      ).filter(
+        (el) =>
+          !el.matches(':disabled') &&
+          el.tabIndex >= 0 &&
+          !el.closest('[inert]') &&
+          inOpenDisclosure(el) &&
+          el.getClientRects().length > 0 &&
+          getComputedStyle(el).visibility !== 'hidden',
+      );
     focusables()[0]?.focus();
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeRef.current();

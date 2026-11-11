@@ -19,46 +19,47 @@ flowchart LR
 
 ## Code map
 
-| Path                                  | Responsibility                                                                         |
-| ------------------------------------- | -------------------------------------------------------------------------------------- |
-| `src/App.tsx`                         | Routing, role guards, public/clinic/patient layouts                                    |
-| `src/lib.tsx`                         | API client, session context, load/error states, notifications, date/currency helpers   |
-| `src/components/ui.tsx`               | Shared accessible UI, fields, modal focus handling                                     |
-| `src/components/DocumentsPanel.tsx`   | Private PDF-report list, upload agreement and authenticated downloads                  |
-| `src/components/ImageAnnotations.tsx` | Versioned clinical overlays, explicit sharing, original images and patient viewer      |
-| `src/pages/CareSummaryPage.tsx`       | Patient-facing print view and revision-checked JSON download                           |
-| `server/image-annotations.ts`         | Immutable annotation versions/publications, source provenance and private projections  |
-| `server/care-summary.ts`              | Authorized shared-care snapshots and stale-export rejection                            |
-| `src/components/PatientWaitlist.tsx`  | Patient request creation, withdrawal, history and booking links                        |
-| `src/pages/PatientPages.tsx`          | Discovery, booking, intake, patient plans, history, images, messages                   |
-| `src/pages/ClinicPages.tsx`           | Appointments, patient directory, records and treatment plans                           |
-| `src/pages/FollowUpPages.tsx`         | Clinical worklist, review history, current check-ins and review submission             |
-| `src/pages/ActivityPage.tsx`          | Account-scoped activity, cursor pagination and read-state controls                     |
-| `src/pages/ClinicalWorkflowPanel.tsx` | Investigation orders/results/reviews, procedure records and encounter amendments       |
-| `src/pages/OperationsPages.tsx`       | Invoices, payments, public/managed knowledge                                           |
-| `src/pages/SettingsPages.tsx`         | Clinic configuration, staff/profiles, patient portal access, audit                     |
-| `src/pages/SchedulingPage.tsx`        | Weekly availability, consultation modes, appointment lengths, doctor/clinic time off   |
-| `src/pages/WaitlistPage.tsx`          | Staff waitlist, patient confirmation and booking from available slots                  |
-| `src/pages/IdentityPages.tsx`         | Account administration, required password rotation, sessions, recovery                 |
-| `server/app.ts`                       | Core API, authorization, security headers, request validation                          |
-| `server/db.ts`                        | Schema, database utilities, synthetic demo seed                                        |
-| `server/operations.ts`                | Invoice/payment, knowledge/revision, portal-provisioning endpoints                     |
-| `server/scheduling.ts`                | Schedule/closure storage, duration-aware slot generation, booking validation           |
-| `server/waitlist.ts`                  | Immutable requests, terminal history, active claims and atomic confirmed booking       |
-| `server/identity.ts`                  | Account lifecycle, session metadata migration/revocation, recovery grants              |
-| `server/documents.ts`                 | Immutable PDF originals, upload provenance, patient-scoped attachment downloads        |
-| `server/clinical.ts`                  | Investigation review/publication, procedure agreement/completion, encounter amendments |
-| `server/follow-up.ts`                 | Review snapshots, owner assignments, optimistic revisions, plan state and worklist     |
-| `server/patient-profile.ts`           | Attributed demographic/allergy corrections, role projections and independent revisions |
-| `src/pages/PatientProfilePage.tsx`    | Current patient details, staff corrections and shared allergy history                  |
-| `server/inventory.ts`                 | Whole-unit catalogue, immutable stock events, revisions and idempotent operations      |
-| `src/pages/InventoryPage.tsx`         | Stock catalogue, lots, histories and guarded administrator forms                       |
-| `server/insights.ts`                  | Immutable expenses and voids, administrator aggregates and private CSV exports         |
-| `src/pages/InsightsPage.tsx`          | Date-range reporting, daily charts/tables and aggregate export                         |
-| `src/pages/ExpensesPage.tsx`          | Administrator expense creation, filtering and void history                             |
-| `server/activity.ts`                  | Transactional recipient notifications, event deduplication and scoped read receipts    |
-| `shared/`                             | Frontend/backend data contracts                                                        |
-| `tests/`                              | Isolated API tests and real-browser workflows                                          |
+| Path                                  | Responsibility                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `src/App.tsx`                         | Routing, role guards, public/clinic/patient layouts                                       |
+| `src/lib.tsx`                         | API client, session context, load/error states, notifications, date/currency helpers      |
+| `src/components/ui.tsx`               | Shared accessible UI, fields, modal focus handling                                        |
+| `src/components/DocumentsPanel.tsx`   | Private PDF-report list, upload agreement and authenticated downloads                     |
+| `src/components/ImageAnnotations.tsx` | Versioned clinical overlays, explicit sharing, original images and patient viewer         |
+| `src/pages/CareSummaryPage.tsx`       | Patient-facing print view and revision-checked JSON download                              |
+| `server/image-annotations.ts`         | Immutable annotation versions/publications, source provenance and private projections     |
+| `server/billing-corrections.ts`       | Immutable charge corrections and mistaken-payment reversals, safe histories and revisions |
+| `server/care-summary.ts`              | Authorized shared-care snapshots and stale-export rejection                               |
+| `src/components/PatientWaitlist.tsx`  | Patient request creation, withdrawal, history and booking links                           |
+| `src/pages/PatientPages.tsx`          | Discovery, booking, intake, patient plans, history, images, messages                      |
+| `src/pages/ClinicPages.tsx`           | Appointments, patient directory, records and treatment plans                              |
+| `src/pages/FollowUpPages.tsx`         | Clinical worklist, review history, current check-ins and review submission                |
+| `src/pages/ActivityPage.tsx`          | Account-scoped activity, cursor pagination and read-state controls                        |
+| `src/pages/ClinicalWorkflowPanel.tsx` | Investigation orders/results/reviews, procedure records and encounter amendments          |
+| `src/pages/OperationsPages.tsx`       | Invoices, payments, public/managed knowledge                                              |
+| `src/pages/SettingsPages.tsx`         | Clinic configuration, staff/profiles, patient portal access, audit                        |
+| `src/pages/SchedulingPage.tsx`        | Weekly availability, consultation modes, appointment lengths, doctor/clinic time off      |
+| `src/pages/WaitlistPage.tsx`          | Staff waitlist, patient confirmation and booking from available slots                     |
+| `src/pages/IdentityPages.tsx`         | Account administration, required password rotation, sessions, recovery                    |
+| `server/app.ts`                       | Core API, authorization, security headers, request validation                             |
+| `server/db.ts`                        | Schema, database utilities, synthetic demo seed                                           |
+| `server/operations.ts`                | Invoice/payment, knowledge/revision, portal-provisioning endpoints                        |
+| `server/scheduling.ts`                | Schedule/closure storage, duration-aware slot generation, booking validation              |
+| `server/waitlist.ts`                  | Immutable requests, terminal history, active claims and atomic confirmed booking          |
+| `server/identity.ts`                  | Account lifecycle, session metadata migration/revocation, recovery grants                 |
+| `server/documents.ts`                 | Immutable PDF originals, upload provenance, patient-scoped attachment downloads           |
+| `server/clinical.ts`                  | Investigation review/publication, procedure agreement/completion, encounter amendments    |
+| `server/follow-up.ts`                 | Review snapshots, owner assignments, optimistic revisions, plan state and worklist        |
+| `server/patient-profile.ts`           | Attributed demographic/allergy corrections, role projections and independent revisions    |
+| `src/pages/PatientProfilePage.tsx`    | Current patient details, staff corrections and shared allergy history                     |
+| `server/inventory.ts`                 | Whole-unit catalogue, immutable stock events, revisions and idempotent operations         |
+| `src/pages/InventoryPage.tsx`         | Stock catalogue, lots, histories and guarded administrator forms                          |
+| `server/insights.ts`                  | Immutable expenses and voids, administrator aggregates and private CSV exports            |
+| `src/pages/InsightsPage.tsx`          | Date-range reporting, daily charts/tables and aggregate export                            |
+| `src/pages/ExpensesPage.tsx`          | Administrator expense creation, filtering and void history                                |
+| `server/activity.ts`                  | Transactional recipient notifications, event deduplication and scoped read receipts       |
+| `shared/`                             | Frontend/backend data contracts                                                           |
+| `tests/`                              | Isolated API tests and real-browser workflows                                             |
 
 ## Data and security
 
@@ -172,7 +173,7 @@ Pagination resolves an opaque item ID to a recipient-scoped SQLite row position 
 
 `expenses` stores immutable original entries and a unique request UUID. `expenseVoids` adds one immutable, attributed correction per expense with a required reason. Database triggers reject updates and deletion of both originals and corrections. Immediate transactions couple each create/void with its audit entry; an identical create retry returns the original record, and changed request details conflict. A void never initiates a bank operation or edits an invoice/payment. Administrators alone can access the ledger and report endpoints.
 
-The aggregation function converts invoice and payment timestamps to Asia/Kolkata dates, uses appointment scheduled dates and expense incurred dates, and fills every selected day with a result. Ranges are real, ordered dates with at most 366 inclusive days. Counts use current appointment states and expense void state. Current outstanding is limited to the cohort of invoices issued in the range; payment totals use their recording date independently of invoice issue date. Safe integer aggregation preserves paise without floating-point currency arithmetic and rejects totals outside representable bounds.
+The aggregation function converts invoice and payment timestamps to Asia/Kolkata dates, uses appointment scheduled dates and expense incurred dates, and fills every selected day with a result. Ranges are real, ordered dates with at most 366 inclusive days. Counts use current appointment states and expense void state. Current outstanding is limited to the cohort of invoices issued in the range; payment totals exclude reversed erroneous entries and use their original recording date independently of invoice issue date. Invoice amounts use current corrected charges in the original issue-date cohort. Safe integer aggregation preserves paise without floating-point currency arithmetic and rejects totals outside representable bounds.
 
 JSON and CSV reuse the same aggregate builder. CSV contains fixed report sections and aggregate amounts/counts, without patient identifiers or expense free text. Values use CSV quoting and formula-prefix protection. Read/export audit events record the requested period. There is no asynchronous warehouse, historical as-of ledger reconstruction, revenue-recognition, tax or profit calculation. The UI explains the selected dates and separates invoices, recorded collections and incurred expenses.
 
@@ -203,3 +204,13 @@ Staff may read inventory without access to any patient information through these
 API tests create isolated databases and real temporary HTTP servers. They assert unauthorized access, database-backed invariants, monetary arithmetic, concurrency, and persistence. Scheduling tests include breaks, modes, closures, protected bookings, interval overlap, and temporary-password privacy. Waitlist tests cover patient scope, active-request uniqueness, expiry, confirmation, atomic booking and retained terminal history. Identity tests include access changes, session ownership, recovery replay/expiry, rate limits, and migrations from the previous session schema. Report tests check exact bytes, digest/provenance, size/format rejection, private downloads and immutability. Clinical workflow tests cover same-patient report linkage, unpublished interpretation privacy, latest-result review, original-note preservation, explicit decision histories, visit timing and concurrent withdrawal/completion. Procedure billing tests cover minimal reception projection, patient matching, exact amounts, retry/concurrency protection and immutable linkage after cancellation. Follow-up tests cover snapshot preservation, same-day edits, stale/concurrent review rejection, handover authority/revisions/privacy, patient filtering, effective dates and status-only compatibility. Activity tests cover recipient and role isolation, owner routing, inactive-owner fallback, stable pagination, bounded bulk reads, deduplication, publication privacy and source-event rollback. Browser tests exercise user workflows through rendered forms and verify their saved outcomes. Each browser-suite run uses its own temporary database and dedicated ports, leaving the local demonstration database alone.
 
 Implementation references: [Node.js SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html), [Express production security guidance](https://expressjs.com/en/advanced/best-practice-security.html). The code and tests define this release's actual guarantees.
+
+## Invoice corrections and erroneous payment entries
+
+`server/billing-corrections.ts` adds immutable `invoiceIssuedCharges`, `invoiceCorrections`, `paymentReversals` and `billingCorrectionCommands` tables. Existing invoices retain their current data; the known original charge lines are captured before the first correction, without inventing an issue author or date. Source payment rows remain append-only. A composite payment/invoice foreign key and unique payment reversal prevent cross-invoice or duplicate reversals. Current invoice identity, patient-name snapshot, issue date and procedure linkage stay fixed while charges, net paid and derived status change.
+
+Administrator commands run inside an immediate transaction with a current-detail hash, actor-bound replay receipt, immutable event, current invoice update, audit and generic patient activity. Replay checks precede revision checks and compare normalized intent without the old revision. New corrections cannot undercut net paid; removing all charges requires explicit confirmation and zero net paid. `no-charge` distinguishes an empty corrected invoice from a paid one. Reversals require explicit confirmation that the entire payment entry was erroneous and subtract it from net paid without changing or deleting the source payment. This is not a refund or money-transfer workflow.
+
+`invoiceDetail` returns current charges, all original payments, safe correction/reversal history, original issued charges and a revision spanning those records. Safe history excludes internal account/request IDs and explicitly shares reasons. Original invoice creation retries compare issued charges; original payment retries after reversal return the current balance without restoring that entry. Reports exclude reversal IDs at the payment's original recording date and use current invoice charges in the original issue-date period. Patient care summaries include safe histories, so shared corrections invalidate an older export revision.
+
+The billing page retains a submitted payload and request ID during an uncertain response, validates the matching saved event before clearing it and requires explicit review of concurrent changes. Unfinished drafts are held in memory while the billing page remains open. Admin controls are absent for other readers; server authorization independently enforces the same restriction. Nested response validation rejects incomplete or inconsistent financial records before rendering, and a matching historical correction cannot falsely confirm a new request. Printing temporarily expands invoice history and restores its previous disclosure state afterward. Dialog focus skips collapsed disclosure contents, including browsers that retain their layout rectangles.

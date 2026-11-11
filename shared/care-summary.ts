@@ -13,6 +13,7 @@ import type { PatientDocument } from './documents';
 import type { Invoice } from './operations';
 import type { ImageAnnotationVersion } from './image-annotations';
 import type { PatientAllergyChange } from './patient-profile';
+import type { InvoiceHistory } from './billing-corrections';
 
 export interface SummaryCarePlan extends Omit<CarePlan, 'followUpRevision' | 'latestReview'> {
   reviews: PatientFollowUpReview[];
@@ -39,4 +40,5 @@ export interface CareSummary {
   imageAnnotations: ImageAnnotationVersion[];
   documents: PatientDocument[];
   invoices: Invoice[];
+  invoiceHistories: InvoiceHistory[];
 }

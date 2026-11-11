@@ -28,7 +28,7 @@ export default defineConfig({
     },
     {
       name: 'reporting',
-      testMatch: /(?:^|\/)(?:insights|expenses|inventory)\.spec\.ts/,
+      testMatch: /(?:^|\/)(?:insights|expenses|inventory|billing-corrections)\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5185' },
     },
     {
