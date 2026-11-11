@@ -677,9 +677,11 @@ function BookingForm() {
               <EmptyState
                 title="No slots on this date"
                 description={
-                  waitlistEntry
-                    ? 'Try another date within your requested range. Your request remains waiting until an appointment is confirmed.'
-                    : 'Try another day or dermatologist, or join the waitlist below with a preferred date range.'
+                  appointmentId
+                    ? 'Try another day or contact the clinic for help moving this visit. Your existing appointment stays booked until a change is confirmed.'
+                    : waitlistEntry
+                      ? 'Try another date within your requested range. Your request remains waiting until an appointment is confirmed.'
+                      : 'Try another day or dermatologist, or join the waitlist below with a preferred date range.'
                 }
               />
             )}

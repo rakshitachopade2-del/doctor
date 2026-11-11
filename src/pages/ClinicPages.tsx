@@ -32,6 +32,7 @@ import type { PatientClinicalWorkflows } from '../../shared/clinical';
 import type { WaitlistEntry } from '../../shared/waitlist';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
 import { DocumentsPanel } from '../components/DocumentsPanel';
+import { AppointmentResourcesModal } from '../components/AppointmentResourcesModal';
 import { ImageAnnotationModal } from '../components/ImageAnnotations';
 import { FollowUpPlanSection } from './FollowUpPages';
 import { api, formatDate, money, today, useResource, useSession, useToast } from '../lib';
@@ -107,6 +108,13 @@ export function AppointmentsPage() {
   );
   const [busy, setBusy] = useState('');
   const [moreActions, setMoreActions] = useState<Appointment | null>(null);
+  const resourceAppointmentId = params.get('resources');
+  const openResources = (appointmentId: string | null) => {
+    const next = new URLSearchParams(params);
+    if (appointmentId) next.set('resources', appointmentId);
+    else next.delete('resources');
+    setParams(next, { replace: true });
+  };
   useEffect(() => {
     if (params.get('new') === '1') {
       setBooking('new');
@@ -271,6 +279,13 @@ export function AppointmentsPage() {
                     </td>
                     <td>
                       <div className="clinic-appointment-actions">
+                        <button
+                          className="button button-secondary button-small"
+                          aria-label={`Resources for ${a.patientName}`}
+                          onClick={() => openResources(a.id)}
+                        >
+                          Resources
+                        </button>
                         {a.status === 'scheduled' && a.date <= today() && (
                           <button
                             disabled={busy === a.id}
@@ -324,6 +339,16 @@ export function AppointmentsPage() {
           </div>
         )}
       </Card>
+      {resourceAppointmentId && (
+        <AppointmentResourcesModal
+          key={resourceAppointmentId}
+          appointmentId={resourceAppointmentId}
+          onClose={() => openResources(null)}
+          onSaved={async () => {
+            await reload();
+          }}
+        />
+      )}
       {moreActions && (
         <Modal title="Appointment actions" onClose={() => setMoreActions(null)}>
           <div className="stack">
@@ -566,6 +591,11 @@ export function ClinicBookingModal({
         <p className="muted small">
           {duration}-minute {mode === 'online' ? 'online' : 'in-clinic'} appointment
           {appointment ? ' · Rescheduling uses the doctor’s current appointment length.' : ''}
+        </p>
+        <p className="muted small">
+          {appointment
+            ? 'Assigned rooms and equipment move with this visit. Available times include those reservations.'
+            : 'Book the visit first, then use Resources to reserve any room or equipment it needs.'}
         </p>
         <Field label="Available times · IST">
           {slots.loading ? (

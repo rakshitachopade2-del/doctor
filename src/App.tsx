@@ -16,6 +16,7 @@ import {
   ArrowUpRight,
   CalendarDays,
   Clock3,
+  DoorOpen,
   ChevronDown,
   CircleHelp,
   ClipboardList,
@@ -56,6 +57,9 @@ const SecurityPage = lazy(() =>
 );
 const SchedulingPage = lazy(() =>
   import('./pages/SchedulingPage').then((module) => ({ default: module.SchedulingPage })),
+);
+const ClinicResourcesPage = lazy(() =>
+  import('./pages/ClinicResourcesPage').then((module) => ({ default: module.ClinicResourcesPage })),
 );
 const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })),
@@ -204,6 +208,7 @@ const staffNav = [
   { to: '/clinic/appointments', label: 'Appointments', icon: CalendarDays },
   { to: '/clinic/waitlist', label: 'Waitlist', icon: ClipboardList },
   { to: '/clinic/scheduling', label: 'Schedules & closures', icon: Clock3 },
+  { to: '/clinic/resources', label: 'Rooms & equipment', icon: DoorOpen },
   { to: '/clinic/patients', label: 'Patients', icon: Users },
   { to: '/clinic/follow-ups', label: 'Follow-up care', icon: HeartHandshake, clinical: true },
   {
@@ -508,6 +513,7 @@ export function App() {
         >
           <Route path="clinic" element={<DashboardPage />} />
           <Route path="clinic/scheduling" element={<SchedulingPage />} />
+          <Route path="clinic/resources" element={<ClinicResourcesPage />} />
           <Route
             path="clinic/accounts"
             element={

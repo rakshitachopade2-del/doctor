@@ -42,6 +42,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)investigation-(?:worklist|navigation)\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5187' },
     },
+    {
+      name: 'resources',
+      testMatch: /(?:^|\/)(?:clinic-resources|resource-catalogue)\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5188' },
+    },
   ],
   webServer: [
     {
@@ -71,6 +76,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3015 E2E_VITE_PORT=5187 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5187',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3016 E2E_VITE_PORT=5188 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5188',
       reuseExistingServer: false,
       timeout: 60000,
     },

@@ -1,0 +1,145 @@
+.appointment-resources-dialog,
+.appointment-resources-dialog > *,
+.ar-allocation-form,
+.ar-resource-fieldset,
+.ar-resource-option-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ar-appointment {
+  background: #f1f5ee;
+  border: 1px solid #d8e1d5;
+  border-radius: 14px;
+  padding: 18px;
+}
+.ar-appointment h3 {
+  margin: 0 0 8px;
+}
+.ar-appointment p {
+  margin: 8px 0;
+}
+.ar-help,
+.ar-attribution {
+  color: #56645c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ar-resource-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.ar-resource-fieldset legend {
+  font-size: 16px;
+  font-weight: 650;
+}
+.ar-resource-options {
+  display: grid;
+  gap: 9px;
+}
+.ar-resource-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d8e1d5;
+  border-radius: 10px;
+  background: #fffefb;
+}
+.ar-resource-option input {
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 0;
+  flex: 0 0 auto;
+  accent-color: #286455;
+}
+.ar-resource-option-copy {
+  display: grid;
+  gap: 5px;
+}
+.ar-resource-option-copy strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.ar-resource-option-copy strong svg {
+  flex: 0 0 auto;
+}
+.ar-resource-option-copy > span,
+.ar-resource-option-copy small {
+  color: #56645c;
+  font-size: 12px;
+}
+.ar-unavailable {
+  background: #f5f3ef;
+}
+.ar-unavailable .ar-resource-option-copy small {
+  color: #785127;
+}
+.ar-selection-actions,
+.ar-form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ar-selection-actions .button,
+.ar-form-actions .button,
+.ar-conflict .button {
+  white-space: normal;
+}
+.ar-conflict,
+.ar-uncertain {
+  display: block;
+}
+.ar-allocation-history {
+  margin-top: 8px;
+  border-top: 1px solid #d8e1d5;
+  padding-top: 18px;
+}
+.ar-history-event {
+  padding: 15px 0;
+  border-bottom: 1px solid #e5e8e1;
+}
+.ar-history-event h4 {
+  margin: 0 0 7px;
+}
+.ar-history-event > details {
+  margin-top: 12px;
+}
+.ar-history-event summary {
+  color: #286455;
+  cursor: pointer;
+  font-weight: 600;
+}
+.ar-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+.ar-snapshot p {
+  font-size: 12px;
+}
+.ar-snapshot ul {
+  padding-left: 18px;
+  font-size: 13px;
+}
+.ar-snapshot li {
+  margin: 8px 0;
+}
+.ar-close {
+  align-self: flex-start;
+}
+@media (max-width: 480px) {
+  .ar-appointment {
+    padding: 13px;
+  }
+  .ar-snapshot-grid {
+    grid-template-columns: 1fr;
+  }
+  .ar-selection-actions > .button,
+  .ar-form-actions > .button {
+    width: 100%;
+  }
+}

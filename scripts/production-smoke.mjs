@@ -172,7 +172,46 @@ try {
   assert.equal(investigationOwners.status, 200);
   assert.deepEqual(await investigationOwners.json(), []);
   assert.equal((await fetch(`${base}/api/investigation-worklist`)).status, 401);
+  const resources = await fetch(`${base}/api/clinic-resources`, { headers: apiHeaders });
+  assert.equal(resources.status, 200);
+  assert.match(resources.headers.get('cache-control'), /no-store/);
+  assert.deepEqual(await resources.json(), []);
+  assert.equal((await fetch(`${base}/api/clinic-resources`)).status, 401);
+  const resourceResponse = await fetch(`${base}/api/clinic-resources`, {
+    method: 'POST',
+    headers: apiHeaders,
+    body: JSON.stringify({
+      name: 'Synthetic smoke room',
+      kind: 'room',
+      location: 'Local test only',
+      notes: 'Disposable fixture',
+      requestId: randomUUID(),
+    }),
+  });
+  assert.equal(resourceResponse.status, 201);
+  const resource = await resourceResponse.json();
+  assert.equal(resource.resource.capacity, 1);
+  const resourceUpdate = await fetch(`${base}/api/clinic-resources/${resource.resource.id}`, {
+    method: 'PATCH',
+    headers: apiHeaders,
+    body: JSON.stringify({
+      active: false,
+      reason: 'Archive synthetic test room',
+      expectedRevision: resource.resource.revision,
+      requestId: randomUUID(),
+    }),
+  });
+  assert.equal(resourceUpdate.status, 200);
+  const archivedResource = await resourceUpdate.json();
+  assert.equal(archivedResource.resource.active, false);
+  assert.equal(archivedResource.changes.length, 2);
   const range = 'from=2026-01-01&to=2026-01-01';
+  const reservations = await fetch(`${base}/api/resource-reservations?${range}`, {
+    headers: apiHeaders,
+  });
+  assert.equal(reservations.status, 200);
+  assert.deepEqual((await reservations.json()).reservations, []);
+  assert.equal((await fetch(`${base}/api/resource-reservations?${range}`)).status, 401);
   const expenses = await fetch(`${base}/api/expenses?${range}`, { headers: apiHeaders });
   assert.equal(expenses.status, 200);
   assert.deepEqual(await expenses.json(), []);
@@ -352,6 +391,7 @@ try {
   assert.equal((await fetch(`${base}/api/accounts`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(summaryUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/inventory/items`, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(`${base}/api/clinic-resources`, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,

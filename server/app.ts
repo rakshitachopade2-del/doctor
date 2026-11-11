@@ -33,6 +33,7 @@ import {
   validateAccountLinkage,
 } from './identity.ts';
 import { createScheduling } from './scheduling.ts';
+import { createClinicResources } from './clinic-resources.ts';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -331,6 +332,7 @@ export function createApp(options: AppOptions = {}) {
     return a;
   };
   const scheduling = createScheduling({ db, actor, audit, fail });
+  const clinicResources = createClinicResources({ db, actor, audit, fail });
   const waitlist = createWaitlist({ db, actor, ownPatient, patientAccess, audit, fail });
   const followUp = createFollowUp({
     db,
@@ -533,7 +535,18 @@ export function createApp(options: AppOptions = {}) {
       actor(req);
       patientId = appointmentGet(req, input.excludeAppointmentId).patientId;
     }
-    res.json(scheduling.availableSlots({ ...input, patientId }));
+    const slots = scheduling.availableSlots({ ...input, patientId });
+    const duration = scheduling.schedule(input.doctorId).durationMinutes;
+    res.json(
+      input.excludeAppointmentId
+        ? clinicResources.availableSlotsForAppointment(
+            input.excludeAppointmentId,
+            input.date,
+            slots,
+            duration,
+          )
+        : slots,
+    );
   });
   app.get('/api/patients', (req: AuthRequest, res) => {
     const user = actor(req, ['admin', 'doctor', 'receptionist']);
@@ -727,6 +740,7 @@ export function createApp(options: AppOptions = {}) {
         doctorName: rescheduling ? d.name : a.doctorName,
         fee: rescheduling ? d.fee : a.fee,
       };
+      clinicResources.appointmentChanged(req, a, value);
       db.prepare('UPDATE appointments SET doctorId=?,date=?,time=?,status=?,data=? WHERE id=?').run(
         value.doctorId,
         value.date,
@@ -1135,6 +1149,7 @@ export function createApp(options: AppOptions = {}) {
     });
   });
   scheduling.register(app);
+  clinicResources.register(app);
   waitlist.register(app);
   registerActivity(app, { db, actor, audit, fail });
   registerDocuments(app, { db, actor, patientAccess, audit, fail });

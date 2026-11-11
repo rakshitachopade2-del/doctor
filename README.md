@@ -30,6 +30,7 @@ These are intentionally public **development-only credentials**. Production star
 
 - **Discovery:** doctor profiles, focus areas, qualifications, languages, consultation fees, and clinic contact information.
 - **Booking:** in-person or online appointments, live availability, protection against overlapping doctor and patient bookings, rescheduling, cancellation, check-in, consultation progression, no-shows, and `.ics` calendar export with the recorded visit duration.
+- **Rooms and equipment:** optional staff reservations for existing visits, maintenance windows, an operational diary, conflict-safe rescheduling and retained allocation history. Each resource represents one physical room or unit.
 - **Waitlist:** patient and reception requests with a preferred clinician, mode and date window; explicit confirmation before booking; atomic appointment linkage, withdrawal and retained history. Requests do not reserve slots.
 - **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute appointments, doctor leave, and clinic-wide closures. Schedule changes protect existing bookings.
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
@@ -93,6 +94,16 @@ Patients can join the waitlist from **My care** or booking. Reception can add re
 After the patient confirms a specific slot, staff can book directly from the request. The appointment and booked state save together; a conflict leaves the request waiting. Patients can also choose and confirm their own available slot. Withdrawn, booked and expired requests remain in history. Cancelling the resulting appointment does not automatically reopen the old request.
 
 For procedure charges, open **Procedure billing** from the clinical record or choose a procedure when creating an invoice. Reception sees the procedure title, estimate and billing status without clinical discussion or outcomes. Enter agreed amounts explicitly. Each procedure links to one invoice, and reopening the action displays that invoice. Cancelling a procedure preserves an already issued invoice; refunds and adjustments are not automated.
+
+## Reserve rooms and shared equipment
+
+Open **Rooms & equipment** to inspect the daily reservation diary and catalogue. Administrators can create a physical room or equipment unit, correct its details with a reason, archive it, and record or cancel maintenance windows. Names are unique across active and archived resources. Each item has capacity for one visit at a time; use separate catalogue entries for separate physical units.
+
+Book an appointment first, then open **Resources** on its appointment row to reserve up to eight items together. Booking alone reserves no room or equipment. Both clinic and online visits can have reservations. Availability follows the full recorded appointment interval, and adjacent visits can share a resource. Rescheduling carries the entire selection to the new time and current clinician duration, or rejects the change without moving anything. Patient rescheduling follows the same constraints without exposing internal resource details.
+
+Staff can add or replace allocations before a scheduled visit starts, or while a checked-in/in-consultation visit is still within its scheduled interval. Clear all allocations to release an open visit's resources, including a stale visit whose interval has passed. Cancellation and no-show release capacity automatically; a completed visit retains its recorded interval. Terminal visits keep read-only history. Archive or maintenance operations that conflict with retained reservations are rejected; resolve those allocations first.
+
+The diary records scheduled reservations, not live occupancy or overruns. Resource changes and reasons remain staff-only and do not affect billing, consumable stock or patient care summaries. No required-equipment rules, clinical compatibility checks, maintenance certification, cleaning buffers or separate procedure durations are inferred. After an uncertain response, retry the exact request while the form remains open; concurrent changes require reviewing refreshed context.
 
 ## Coordinate investigation reviews
 

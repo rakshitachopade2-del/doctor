@@ -1,0 +1,344 @@
+.crp-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 23px;
+  min-width: 0;
+}
+.crp-workspace > .page-header {
+  margin-bottom: 0;
+}
+.crp-switcher,
+.crp-badges,
+.crp-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.crp-switcher .button {
+  transition: none;
+}
+.crp-switcher .button,
+.crp-form-actions .button,
+.crp-conflict .button,
+.crp-pending .button {
+  white-space: normal;
+  min-height: 41px;
+  height: auto;
+}
+.crp-intro {
+  border: 1px solid #d9e5d6;
+  background: #f1f7ed;
+  border-radius: 11px;
+  padding: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.crp-intro > svg {
+  flex-shrink: 0;
+  color: #3e6552;
+  margin-top: 3px;
+}
+.crp-intro h2 {
+  margin: 0 0 6px;
+  color: #31573f;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.crp-intro p,
+.crp-help,
+.crp-result-count {
+  margin: 0;
+  color: #52664e;
+  font-size: 11px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.crp-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-end;
+}
+.crp-toolbar .field {
+  min-width: 150px;
+  flex: 1;
+}
+.crp-toolbar .crp-search-field {
+  flex: 2;
+}
+.crp-date-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+.crp-date-nav .field {
+  max-width: 180px;
+}
+.crp-date-nav input[type='date'] {
+  min-width: 0;
+  max-width: 100%;
+}
+.crp-search {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.crp-search input {
+  min-width: 0;
+}
+.crp-search svg {
+  flex-shrink: 0;
+  color: #53704f;
+}
+.crp-grid,
+.crp-diary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.crp-resource-card,
+.crp-day-card {
+  min-width: 0;
+}
+.crp-resource-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 17px;
+}
+.crp-resource-heading > div {
+  min-width: 0;
+}
+.crp-resource-heading h2,
+.crp-resource-heading h3 {
+  margin: 0 0 9px;
+  font-size: 16px;
+  color: #2e563e;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.crp-resource-heading a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+.crp-resource-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  background: #edf4e8;
+  border-radius: 10px;
+  color: #476d4b;
+  flex-shrink: 0;
+}
+.crp-resource-card .crp-prose {
+  margin-top: 12px;
+}
+.crp-resource-card .crp-row-actions {
+  margin-top: 20px;
+}
+.crp-prose {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  font-size: 12px;
+  color: #425a46;
+  margin: 0;
+}
+.crp-day-events,
+.crp-history-list {
+  display: grid;
+  gap: 12px;
+}
+.crp-day-event {
+  padding: 14px;
+  border: 1px solid #dde6d5;
+  border-radius: 8px;
+  background: #f9fbf6;
+  min-width: 0;
+}
+.crp-day-event.crp-maintenance-event {
+  background: #fffaf0;
+  border-color: #e8dcc5;
+}
+.crp-event-heading {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.crp-event-time {
+  font-size: 12px;
+  color: #36533f;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.crp-day-event h3,
+.crp-day-event h4 {
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 11px 0 5px;
+  overflow-wrap: anywhere;
+}
+.crp-day-event .button {
+  margin-top: 12px;
+}
+.crp-resource-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 22px;
+}
+.crp-resource-summary dl,
+.crp-snapshot dl {
+  margin: 0;
+  display: grid;
+  gap: 15px;
+}
+.crp-resource-summary dt,
+.crp-snapshot dt {
+  color: #586c50;
+  font-size: 10px;
+  line-height: 1.6;
+  margin-bottom: 5px;
+}
+.crp-resource-summary dd,
+.crp-snapshot dd {
+  margin: 0;
+  color: #36583d;
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.crp-maintenance-list {
+  display: grid;
+  gap: 15px;
+}
+.crp-maintenance-card,
+.crp-history-entry,
+.crp-snapshot {
+  border: 1px solid #dce6d5;
+  padding: 18px;
+  border-radius: 10px;
+  background: #fff;
+  min-width: 0;
+}
+.crp-history-entry h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.crp-history-entry small,
+.crp-maintenance-card small {
+  display: block;
+  color: #586b51;
+  font-size: 10px;
+  line-height: 1.8;
+  margin-top: 11px;
+}
+.crp-history-entry details {
+  margin-top: 12px;
+}
+.crp-history-entry summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #315b40;
+  font-weight: 600;
+  padding: 8px 0;
+}
+.crp-snapshot {
+  background: #f7faf3;
+  margin-top: 12px;
+}
+.crp-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.crp-section-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.5;
+}
+.crp-pending {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.crp-pending p {
+  margin-bottom: 0;
+}
+.crp-retry,
+.crp-conflict {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.crp-conflict .crp-snapshot {
+  margin: 15px 0;
+}
+.crp-entry-form,
+.crp-entry-form .field,
+.crp-entry-form input,
+.crp-entry-form textarea,
+.crp-entry-form select {
+  min-width: 0;
+  max-width: 100%;
+}
+.crp-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+@media (max-width: 850px) {
+  .crp-grid,
+  .crp-diary,
+  .crp-resource-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 540px) {
+  .crp-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .crp-toolbar .field,
+  .crp-date-nav .field {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+  }
+  .crp-date-nav .field {
+    flex-basis: 100%;
+  }
+  .crp-switcher .button {
+    flex: 1;
+  }
+  .crp-resource-card,
+  .crp-day-card {
+    padding: 18px;
+  }
+  .crp-entry-form .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .crp-form-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .crp-form-actions .button {
+    width: 100%;
+  }
+  .crp-maintenance-card,
+  .crp-history-entry,
+  .crp-snapshot {
+    padding: 14px;
+  }
+}
