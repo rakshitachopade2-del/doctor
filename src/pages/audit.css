@@ -1,0 +1,137 @@
+.audit-filter-card {
+  margin-bottom: 24px;
+}
+.audit-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+.audit-filter-grid > *,
+.audit-date-range > * {
+  min-width: 0;
+}
+.audit-filter-form input {
+  min-width: 0;
+  width: 100%;
+}
+.audit-date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.audit-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+.audit-scope-note {
+  color: #59665f;
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 18px 0 0;
+}
+.audit-result-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.audit-result-heading h2,
+.audit-result-count {
+  margin: 0;
+}
+.audit-result-count {
+  font-size: 13px;
+  color: #59665f;
+}
+.audit-table-region {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.audit-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+.audit-table th:nth-child(1) {
+  width: 29%;
+}
+.audit-table th:nth-child(2) {
+  width: 19%;
+}
+.audit-table th:nth-child(3) {
+  width: 30%;
+}
+.audit-table th:nth-child(4) {
+  width: 22%;
+}
+.audit-table td,
+.audit-table th {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.audit-record {
+  display: grid;
+  gap: 7px;
+  justify-items: start;
+}
+.audit-record code {
+  font-size: 11px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+.audit-mobile-label {
+  display: none;
+}
+@media (max-width: 1000px) {
+  .audit-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .audit-filter-grid,
+  .audit-date-range {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .audit-filter-actions > .button {
+    width: 100%;
+  }
+  .audit-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .audit-table,
+  .audit-table tbody {
+    display: block;
+  }
+  .audit-table .audit-row {
+    display: block;
+    border-top: 1px solid #e1e6de;
+    padding: 12px 0;
+  }
+  .audit-table .audit-row td {
+    display: grid;
+    grid-template-columns: 78px minmax(0, 1fr);
+    gap: 10px;
+    border: 0;
+    padding: 8px 0;
+  }
+  .audit-mobile-label {
+    display: block;
+    font-size: 11px;
+    color: #59665f;
+    font-weight: 600;
+  }
+  .audit-table .table-subtitle {
+    white-space: normal;
+  }
+}

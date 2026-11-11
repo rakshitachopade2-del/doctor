@@ -154,6 +154,28 @@ try {
   const accounts = await fetch(`${base}/api/accounts`, { headers: apiHeaders });
   assert.equal(accounts.status, 200);
   assert.equal((await accounts.json()).length, 1);
+  for (const category of ['patients', 'appointments']) {
+    const search = await fetch(`${base}/api/search/${category}`, { headers: apiHeaders });
+    assert.equal(search.status, 200);
+    assert.match(search.headers.get('cache-control'), /no-store/);
+    assert.deepEqual(await search.json(), {
+      items: [],
+      page: 1,
+      pageSize: 25,
+      total: 0,
+      totalPages: 1,
+    });
+    assert.equal((await fetch(`${base}/api/search/${category}`)).status, 401);
+  }
+  const auditSearch = await fetch(`${base}/api/search/audit?action=signed%20in&pageSize=1`, {
+    headers: apiHeaders,
+  });
+  assert.equal(auditSearch.status, 200);
+  const auditPage = await auditSearch.json();
+  assert.equal(auditPage.items.length, 1);
+  assert.equal(auditPage.items[0].action, 'signed in');
+  assert.equal(auditPage.items[0].actorName, 'Smoke Administrator');
+  assert.equal((await fetch(`${base}/api/search/audit`)).status, 401);
   const schedules = await fetch(`${base}/api/scheduling`, { headers: apiHeaders });
   assert.deepEqual((await schedules.json()).schedules, []);
   const activity = await fetch(`${base}/api/activity`, { headers: apiHeaders });
@@ -277,6 +299,14 @@ try {
   });
   assert.equal(createdPatient.status, 201);
   const patient = await createdPatient.json();
+  const foundPatient = await fetch(`${base}/api/search/patients?q=Synthetic%20Smoke`, {
+    headers: apiHeaders,
+  });
+  assert.equal(foundPatient.status, 200);
+  const patientPage = await foundPatient.json();
+  assert.equal(patientPage.total, 1);
+  assert.equal(patientPage.items[0].id, patient.id);
+  assert.equal('allergies' in patientPage.items[0], false);
   const profileUrl = `${base}/api/patients/${patient.id}/profile`;
   const profileResponse = await fetch(profileUrl, { headers: apiHeaders });
   assert.equal(profileResponse.status, 200);
@@ -392,6 +422,7 @@ try {
   assert.equal((await fetch(summaryUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/inventory/items`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/clinic-resources`, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(`${base}/api/search/patients`, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,

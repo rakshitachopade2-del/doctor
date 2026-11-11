@@ -46,6 +46,9 @@ flowchart LR
 | `server/db.ts`                                 | Schema, database utilities, synthetic demo seed                                           |
 | `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                        |
 | `server/scheduling.ts`                         | Schedule/closure storage, duration-aware slot generation, booking validation              |
+| `server/record-search.ts`                      | SQL-filtered staff directories and appointment/audit pages with bounded results           |
+| `src/record-search.ts`                         | Query-scoped page loading, pagination validation and obsolete-response suppression        |
+| `src/pages/AuditPage.tsx`                      | Administrator history search with actor/action/record/date filters                        |
 | `server/clinic-resources.ts`                   | Single-unit rooms/equipment, maintenance, atomic visit reservations and immutable history |
 | `src/pages/ClinicResourcesPage.tsx`            | Staff reservations diary and administrator catalogue/maintenance controls                 |
 | `src/components/AppointmentResourcesModal.tsx` | Full-set allocation, source review, safe retries and visit resource history               |
@@ -236,3 +239,11 @@ Resource allocation contexts contain operational appointment identities and inde
 A source hash spans the investigation projection and immutable assignment IDs. `investigationCommands` binds a UUID to the actor, operation, investigation, normalized payload and saved event. Review forms submit the hash and UUID together. Replay occurs before source/ownership checks, while current account and patient authorization still apply. New events, replay receipt, audits and notifications use one immediate transaction. Legacy review callers may omit both tokens, retaining their original latest-result check. New publication on cancelled investigations is denied while already published retries preserve the source timestamp.
 
 The queue and dashboard use private clinical worklist endpoints. Shared review dialogs load current result notes, safe authenticated report links and earlier reviews; controlled drafts survive context conflicts, and uncertain writes retain an exact retry. Handover drafts likewise require explicit refreshed-context review. Internal handover data never enters patient workflows or care summaries. Exact workup links reveal and focus their target, including earlier results and cancelled records, without changing review completion or activity read state.
+
+## Bounded staff record search
+
+`server/record-search.ts` registers additive staff-only directory and appointment search, and administrator-only audit search. Built-in JSON expression indexes and existing relational columns support common sort/filter paths without application-defined SQLite functions. Parameterized `instr` performs literal substring matches; it uses SQLite ASCII case folding and can still scan candidate rows. Search does not decode whole collections into Node memory.
+
+Count and page selection share one read transaction, return at most 100 rows (25 in the UI), and clamp out-of-range pages after data changes. Separate requests intentionally show current records: offset pagination is not a frozen snapshot. Patient directory fields are selected explicitly in SQL, so allergies and private notes neither appear nor affect result counts. Appointment searches may join current demographics while preserving the original appointment projection. Audit reads preserve historical actor names and do not write recursive audit events.
+
+`useSearchPage` associates data/loading/error with the exact request path, rejects malformed pagination metadata and ignores late responses for older filters. Shared pagination and URL-backed views support refresh, page changes and browser navigation. Existing booking patient selectors and patient record routes remain on their compatible APIs; this release does not claim to paginate every record or report endpoint.

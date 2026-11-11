@@ -34,6 +34,7 @@ These are intentionally public **development-only credentials**. Production star
 - **Waitlist:** patient and reception requests with a preferred clinician, mode and date window; explicit confirmation before booking; atomic appointment linkage, withdrawal and retained history. Requests do not reserve slots.
 - **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute appointments, doctor leave, and clinic-wide closures. Schedule changes protect existing bookings.
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
+- **Record search:** paginated patient and appointment lists, historical appointment filters, and administrator audit search beyond the latest 500 entries. Staff views load 25 matching records per page.
 - **Patient preparation:** a structured four-step history intake, reviewable summary, explicit sharing agreement, and clinician access to submitted history.
 - **Longitudinal records:** original consultation notes with dated, attributed amendments, shared history, private images, treatment plans, and side-by-side image comparison. Original notes and amendments remain clinician-only.
 - **Patient details:** attributed demographic corrections by staff, separate clinician-authored allergy updates, retained history, independent revision checks, and exact retries. Contact corrections leave login credentials and historical names intact; patients can read their current details and shared allergy history.
@@ -94,6 +95,16 @@ Patients can join the waitlist from **My care** or booking. Reception can add re
 After the patient confirms a specific slot, staff can book directly from the request. The appointment and booked state save together; a conflict leaves the request waiting. Patients can also choose and confirm their own available slot. Withdrawn, booked and expired requests remain in history. Cancelling the resulting appointment does not automatically reopen the old request.
 
 For procedure charges, open **Procedure billing** from the clinical record or choose a procedure when creating an invoice. Reception sees the procedure title, estimate and billing status without clinical discussion or outcomes. Enter agreed amounts explicitly. Each procedure links to one invoice, and reopening the action displays that invoice. Cancelling a procedure preserves an already issued invoice; refunds and adjustments are not automated.
+
+## Find patients, appointments and older activity
+
+The **Patients** directory searches current names, email addresses and phone numbers and shows 25 matches per page, with new registrations first. Directory results contain demographics only. Use the existing record and patient-details actions to open authorized information.
+
+In **Appointments**, search by a patient's recorded name or current contact details, and filter the doctor, status and consultation mode. The daily view remains the default; choose **All dates** to search historical and future visits. Appointment rows preserve their booked names and durations. Paging, filters and browser navigation retain the selected view, and changing filters starts at the first page.
+
+Administrators can use **Activity log** to search the complete stored audit history, including entries older than the previous 500-entry view. Filter recorded actor names and action text, exact record type or ID, and inclusive dates in Asia/Kolkata. Apply filters explicitly; reset them to return to all activity. Names in audit records remain the names captured when the event occurred.
+
+Results show current records. New entries or edits can change page positions between requests; refresh to check the latest view. Search treats punctuation such as `%` and `_` literally. Matching ignores ASCII letter case; non-ASCII text is matched literally. These changes cover the staff directory, appointment list and audit screen; existing booking selectors and patient records retain their current workflows.
 
 ## Reserve rooms and shared equipment
 

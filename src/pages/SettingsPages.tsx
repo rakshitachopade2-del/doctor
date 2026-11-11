@@ -10,19 +10,18 @@ import {
   Stethoscope,
   Users,
 } from 'lucide-react';
-import { api, formatDate, useResource, useToast } from '../lib';
+import { api, useResource, useToast } from '../lib';
 import {
   Avatar,
   Badge,
   Card,
-  EmptyState,
   ErrorState,
   Field,
   Loading,
   Modal,
   PageHeader,
 } from '../components/ui';
-import type { AuditEntry, ClinicSettings, Doctor, User, Patient } from '../../shared/types';
+import type { ClinicSettings, Doctor, User, Patient } from '../../shared/types';
 export function SettingsPage() {
   const settings = useResource<ClinicSettings>('/api/settings');
   const doctors = useResource<Doctor[]>('/api/doctors');
@@ -549,68 +548,6 @@ export function SettingsPage() {
     </>
   );
 }
-export function AuditPage() {
-  const { data, loading, error, reload } = useResource<AuditEntry[]>('/api/audit');
-  return (
-    <>
-      <PageHeader
-        eyebrow="A CLEARER RECORD"
-        title="Clinic activity"
-        description="A traceable history of access and changes across your workspace."
-      />
-      {loading ? (
-        <Loading />
-      ) : error ? (
-        <ErrorState message={error} retry={reload} />
-      ) : (
-        <Card>
-          {data?.length ? (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Activity</th>
-                    <th>Performed by</th>
-                    <th>Record</th>
-                    <th>Date & time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((a) => (
-                    <tr key={a.id}>
-                      <td>
-                        <strong>{a.action.replaceAll('_', ' ').replaceAll('.', ' ')}</strong>
-                      </td>
-                      <td>{a.actorName}</td>
-                      <td>
-                        <Badge>{a.entityType}</Badge>
-                        <small className="table-subtitle">{a.entityId.slice(0, 12)}</small>
-                      </td>
-                      <td>
-                        {formatDate(a.createdAt)}
-                        <small className="table-subtitle">
-                          {new Date(a.createdAt).toLocaleTimeString('en-IN', {
-                            timeZone: 'Asia/Kolkata',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}{' '}
-                          IST
-                        </small>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EmptyState title="A fresh start" description="Workspace activity will appear here." />
-          )}
-        </Card>
-      )}
-    </>
-  );
-}
-
 function PortalAccessCard() {
   const patients = useResource<Patient[]>('/api/patients');
   const users = useResource<User[]>('/api/users');

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,6 +11,7 @@ import {
   ImagePlus,
   MessageSquare,
   Plus,
+  RefreshCw,
   Search,
   Send,
   UserPlus,
@@ -30,6 +31,9 @@ import type {
 } from '../../shared/types';
 import type { PatientClinicalWorkflows } from '../../shared/clinical';
 import type { WaitlistEntry } from '../../shared/waitlist';
+import type { PatientDirectoryItem } from '../../shared/record-search';
+import { useSearchPage } from '../record-search';
+import { Pagination } from '../components/Pagination';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import { AppointmentResourcesModal } from '../components/AppointmentResourcesModal';
@@ -48,6 +52,7 @@ import {
   PageHeader,
 } from '../components/ui';
 import './clinic.css';
+import './clinic-search.css';
 
 const statusLabels: Record<AppointmentStatus, string> = {
   scheduled: 'Scheduled',
@@ -96,25 +101,157 @@ function Status({ status }: { status: AppointmentStatus }) {
   return <Badge tone={statusTones[status]}>{statusLabels[status]}</Badge>;
 }
 
+function queryPage(value: string | null) {
+  const parsed = Number(value);
+  return value &&
+    /^\d+$/.test(value) &&
+    Number.isInteger(parsed) &&
+    parsed >= 1 &&
+    parsed <= 1_000_000
+    ? parsed
+    : 1;
+}
+function validDirectoryRow(value: unknown): value is PatientDirectoryItem {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as PatientDirectoryItem;
+  return (
+    ['id', 'name', 'phone', 'email', 'gender', 'dob', 'createdAt'].every(
+      (key) => typeof row[key as keyof PatientDirectoryItem] === 'string',
+    ) &&
+    !!row.id &&
+    !!row.name.trim() &&
+    Number.isFinite(Date.parse(row.createdAt)) &&
+    (!row.dob ||
+      (/^\d{4}-\d{2}-\d{2}$/.test(row.dob) && Number.isFinite(Date.parse(`${row.dob}T12:00:00Z`))))
+  );
+}
+function validAppointmentRow(value: unknown): value is Appointment {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Appointment;
+  return (
+    [
+      'id',
+      'patientId',
+      'patientName',
+      'doctorId',
+      'doctorName',
+      'reason',
+      'date',
+      'time',
+      'createdAt',
+    ].every((key) => typeof row[key as keyof Appointment] === 'string') &&
+    !!row.id &&
+    !!row.patientId &&
+    !!row.doctorId &&
+    !!row.patientName.trim() &&
+    !!row.doctorName.trim() &&
+    /^\d{4}-\d{2}-\d{2}$/.test(row.date) &&
+    Number.isFinite(Date.parse(`${row.date}T12:00:00Z`)) &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(row.time) &&
+    typeof row.status === 'string' &&
+    Object.hasOwn(statusLabels, row.status) &&
+    ['in-person', 'online'].includes(row.mode) &&
+    typeof row.fee === 'number' &&
+    Number.isFinite(row.fee) &&
+    row.fee >= 0 &&
+    (row.durationMinutes === undefined ||
+      (Number.isInteger(row.durationMinutes) && row.durationMinutes > 0))
+  );
+}
+
 export function AppointmentsPage() {
   const { session } = useSession();
   const clinician = session.user?.role === 'doctor' || session.user?.role === 'admin';
   const [params, setParams] = useSearchParams();
-  const [date, setDate] = useState(safeQueryDate(params.get('date')));
-  const [doctorId, setDoctorId] = useState('');
-  const [filter, setFilter] = useState('all');
+  const location = useLocation();
+  const date = safeQueryDate(params.get('date'));
+  const allDates = params.get('allDates') === '1';
+  // Keep the native control responsive while the router commits its transition.
+  // A different history entry immediately restores that entry's URL value.
+  const [allDatesDraft, setAllDatesDraft] = useState<{
+    locationKey: string;
+    value: boolean;
+  } | null>(null);
+  const allDatesChecked =
+    allDatesDraft?.locationKey === location.key ? allDatesDraft.value : allDates;
+  useEffect(() => {
+    setAllDatesDraft(null);
+  }, [location.key]);
+  const doctorId = params.get('doctorId') || '';
+  const patientId = params.get('patientId') || '';
+  const requestedStatus = params.get('status') || 'all';
+  const filter =
+    requestedStatus === 'waiting' || Object.hasOwn(statusLabels, requestedStatus)
+      ? requestedStatus
+      : 'all';
+  const requestedMode = params.get('mode');
+  const mode = requestedMode === 'in-person' || requestedMode === 'online' ? requestedMode : 'all';
+  const page = queryPage(params.get('page'));
+  const query = params.get('search') || '';
+  const [search, setSearch] = useState(query);
   const [booking, setBooking] = useState<Appointment | 'new' | null>(
     params.get('new') === '1' ? 'new' : null,
   );
   const [busy, setBusy] = useState('');
   const [moreActions, setMoreActions] = useState<Appointment | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focusResults = useRef(false);
   const resourceAppointmentId = params.get('resources');
+  function changeFilters(values: Record<string, string | null>) {
+    focusResults.current = false;
+    setParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('page');
+      // Applying another filter also applies text entered before its debounce.
+      if (search) next.set('search', search);
+      else next.delete('search');
+      for (const [key, value] of Object.entries(values)) {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      }
+      return next;
+    });
+  }
+  function setDate(value: string) {
+    changeFilters({ date: value, allDates: null });
+  }
+  function goToPage(nextPage: number) {
+    focusResults.current = true;
+    setParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (nextPage === 1) next.delete('page');
+      else next.set('page', String(nextPage));
+      return next;
+    });
+  }
   const openResources = (appointmentId: string | null) => {
-    const next = new URLSearchParams(params);
-    if (appointmentId) next.set('resources', appointmentId);
-    else next.delete('resources');
-    setParams(next, { replace: true });
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (appointmentId) next.set('resources', appointmentId);
+        else next.delete('resources');
+        return next;
+      },
+      { replace: true },
+    );
   };
+  useEffect(() => {
+    setSearch(query);
+  }, [query, location.key]);
+  useEffect(() => {
+    if (search === query) return;
+    const timer = window.setTimeout(() => {
+      focusResults.current = false;
+      setParams((previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete('page');
+        if (search) next.set('search', search);
+        else next.delete('search');
+        return next;
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [search, query, setParams, location.key]);
   useEffect(() => {
     if (params.get('new') === '1') {
       setBooking('new');
@@ -123,23 +260,56 @@ export function AppointmentsPage() {
       setParams(next, { replace: true });
     }
   }, [params, setParams]);
-  const { data, loading, error, reload } = useResource<Appointment[]>(
-    `/api/appointments?date=${encodeURIComponent(date)}&doctorId=${encodeURIComponent(doctorId)}`,
-  );
+  const request = new URLSearchParams({ page: String(page), pageSize: '25' });
+  if (!allDates) {
+    request.set('from', date);
+    request.set('to', date);
+  }
+  if (doctorId) request.set('doctorId', doctorId);
+  if (patientId) request.set('patientId', patientId);
+  if (filter !== 'all') request.set('status', filter);
+  if (mode !== 'all') request.set('mode', mode);
+  if (query) request.set('q', query);
+  const result = useSearchPage<Appointment>(`/api/search/appointments?${request.toString()}`);
+  const { data, reload } = result;
+  const error =
+    result.error ||
+    (data &&
+    (!data.items.every(validAppointmentRow) ||
+      new Set(data.items.map((item) => item.id)).size !== data.items.length)
+      ? 'The appointment records could not be confirmed. Refresh to try again.'
+      : '');
+  const loading = result.loading || search !== query;
+  const latestReload = useRef(reload);
+  latestReload.current = reload;
   const doctors = useResource<Doctor[]>('/api/doctors');
   const toast = useToast();
-  const appointments = (data || []).filter(
-    (a) =>
-      filter === 'all' ||
-      (filter === 'waiting' ? ['scheduled', 'checked-in'].includes(a.status) : a.status === filter),
-  );
+  const appointments = !loading && !error ? (data?.items ?? []) : [];
+  useEffect(() => {
+    if (!loading && !error && data) {
+      if (data.page !== page)
+        setParams(
+          (previous) => {
+            const next = new URLSearchParams(previous);
+            if (data.page === 1) next.delete('page');
+            else next.set('page', String(data.page));
+            return next;
+          },
+          { replace: true },
+        );
+      if (focusResults.current) {
+        focusResults.current = false;
+        heading.current?.focus({ preventScroll: true });
+      }
+    }
+  }, [loading, error, data, page, setParams]);
   async function update(appointment: Appointment, status: AppointmentStatus) {
     setBusy(appointment.id);
     try {
       await api(`/api/appointments/${appointment.id}`, { method: 'PATCH', body: { status } });
       toast(`Appointment ${statusLabels[status].toLowerCase()}.`);
       setMoreActions(null);
-      reload();
+      void latestReload.current();
     } catch (e) {
       toast(errorText(e), 'error');
     } finally {
@@ -158,7 +328,7 @@ export function AppointmentsPage() {
           </button>
         }
       />
-      <div className="clinic-toolbar">
+      <div className="clinic-toolbar clinic-search-toolbar">
         <div className="row date-navigator">
           <button
             className="button button-ghost button-small"
@@ -187,9 +357,12 @@ export function AppointmentsPage() {
         <select
           aria-label="Filter by doctor"
           value={doctorId}
-          onChange={(e) => setDoctorId(e.target.value)}
+          onChange={(e) => changeFilters({ doctorId: e.target.value || null })}
         >
           <option value="">All doctors</option>
+          {doctorId && doctors.data && !doctors.data.some((doctor) => doctor.id === doctorId) && (
+            <option value={doctorId}>Selected doctor is unavailable</option>
+          )}
           {doctors.data?.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
@@ -197,23 +370,122 @@ export function AppointmentsPage() {
           ))}
         </select>
       </div>
+      <div className="clinic-search-controls">
+        <Field
+          label="Search appointments"
+          hint="Find appointments by patient name, email, phone or patient ID."
+        >
+          <input
+            type="search"
+            maxLength={200}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Patient name, email or phone"
+          />
+        </Field>
+        <Field label="Appointment status">
+          <select
+            value={filter}
+            onChange={(event) =>
+              changeFilters({ status: event.target.value === 'all' ? null : event.target.value })
+            }
+          >
+            <option value="all">All statuses</option>
+            <option value="waiting">Waiting</option>
+            {Object.entries(statusLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Consultation mode">
+          <select
+            value={mode}
+            onChange={(event) =>
+              changeFilters({ mode: event.target.value === 'all' ? null : event.target.value })
+            }
+          >
+            <option value="all">All modes</option>
+            <option value="in-person">In clinic</option>
+            <option value="online">Online</option>
+          </select>
+        </Field>
+      </div>
+      <div className="clinic-search-options">
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={allDatesChecked}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setAllDatesDraft({ locationKey: location.key, value: checked });
+              changeFilters({ allDates: checked ? '1' : null });
+            }}
+          />
+          All dates
+        </label>
+        <p className="muted small">
+          {allDates
+            ? 'Searching across appointment dates. Choose a day to return to its schedule.'
+            : 'Showing the selected day. Enable All dates to search earlier or future appointments.'}
+        </p>
+        <button
+          className="button button-secondary button-small"
+          disabled={loading}
+          onClick={reload}
+        >
+          <RefreshCw size={14} />
+          Refresh appointments
+        </button>
+      </div>
+      {patientId && (
+        <div className="notice clinic-patient-filter">
+          <span>Showing appointments for one patient.</span>
+          <button
+            className="button button-secondary button-small"
+            onClick={() => changeFilters({ patientId: null })}
+          >
+            Clear patient filter
+          </button>
+        </div>
+      )}
+      {doctors.error && <ErrorState message={doctors.error} retry={doctors.reload} />}
       <Card className="appointments-panel">
         <div className="clinic-panel-heading">
           <div>
-            <h2 className="section-title">
-              {date === today() ? 'Today’s schedule' : formatDate(date)}
+            <h2 className="section-title" tabIndex={-1} ref={heading}>
+              {allDates
+                ? 'Appointments across all dates'
+                : date === today()
+                  ? 'Today’s schedule'
+                  : formatDate(date)}
             </h2>
             <p className="muted">
-              {data?.length || 0} appointments · All times in India Standard Time
+              {loading
+                ? 'Loading appointments…'
+                : error
+                  ? 'Appointment count unavailable'
+                  : `${data?.total ?? 0} matching ${(data?.total ?? 0) === 1 ? 'appointment' : 'appointments'}`}{' '}
+              · All times in India Standard Time
             </p>
           </div>
-          <div className="segmented">
+          <div
+            className="segmented clinic-search-shortcuts"
+            role="group"
+            aria-label="Quick appointment status filters"
+          >
             {[
               ['all', 'All'],
               ['waiting', 'Waiting'],
               ['completed', 'Completed'],
             ].map(([v, label]) => (
-              <button key={v} className={filter === v ? 'active' : ''} onClick={() => setFilter(v)}>
+              <button
+                key={v}
+                className={filter === v ? 'active' : ''}
+                aria-pressed={filter === v}
+                onClick={() => changeFilters({ status: v === 'all' ? null : v })}
+              >
                 {label}
               </button>
             ))}
@@ -225,7 +497,11 @@ export function AppointmentsPage() {
           <ErrorState message={error} retry={reload} />
         ) : appointments.length === 0 ? (
           <EmptyState
-            title="Your schedule is clear"
+            title={
+              search || filter !== 'all' || doctorId || mode !== 'all' || allDates || patientId
+                ? 'No matching appointments'
+                : 'Your schedule is clear'
+            }
             description="There are no appointments matching this view."
             action={
               <button className="button button-secondary" onClick={() => setBooking('new')}>
@@ -234,11 +510,16 @@ export function AppointmentsPage() {
             }
           />
         ) : (
-          <div className="table-wrap">
+          <div
+            className="table-wrap clinic-search-table"
+            role="region"
+            aria-label="Appointments; scroll horizontally for all columns"
+            tabIndex={0}
+          >
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Time</th>
+                  <th scope="col">{allDates ? 'Date & time' : 'Time'}</th>
                   <th>Patient</th>
                   <th>Consultation</th>
                   <th>Status</th>
@@ -249,6 +530,9 @@ export function AppointmentsPage() {
                 {appointments.map((a) => (
                   <tr key={a.id}>
                     <td>
+                      {allDates && (
+                        <span className="table-sub clinic-result-date">{formatDate(a.date)}</span>
+                      )}
                       <strong className="time-text">{timeLabel(a.time)}</strong>
                       <span className="table-sub">{a.durationMinutes ?? 30} min</span>
                     </td>
@@ -338,6 +622,16 @@ export function AppointmentsPage() {
             </table>
           </div>
         )}
+        {!loading && !error && data && (
+          <Pagination
+            page={data.page}
+            pageSize={data.pageSize}
+            total={data.total}
+            totalPages={data.totalPages}
+            onPageChange={goToPage}
+            label="Appointment pagination"
+          />
+        )}
       </Card>
       {resourceAppointmentId && (
         <AppointmentResourcesModal
@@ -403,8 +697,17 @@ export function AppointmentsPage() {
           onClose={() => setBooking(null)}
           onSaved={(savedDate) => {
             setBooking(null);
-            setDate(savedDate);
-            reload();
+            setSearch('');
+            changeFilters({
+              date: savedDate,
+              allDates: null,
+              search: null,
+              doctorId: null,
+              status: null,
+              mode: null,
+              patientId: null,
+            });
+            void latestReload.current();
           }}
         />
       )}
@@ -694,22 +997,70 @@ export function ClinicBookingModal({
 export function PatientsPage() {
   const { session } = useSession();
   const clinical = session.user?.role !== 'receptionist';
-  const [params] = useSearchParams();
-  const [search, setSearch] = useState(params.get('search') || '');
-  const [query, setQuery] = useState(params.get('search') || '');
-  useEffect(() => {
-    const value = params.get('search') || '';
-    setSearch(value);
-    setQuery(value);
-  }, [params]);
+  const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const query = params.get('search') || '';
+  const page = queryPage(params.get('page'));
+  const [search, setSearch] = useState(query);
   const [adding, setAdding] = useState(false);
-  const { data, error, loading, reload } = useResource<Patient[]>(
-    `/api/patients?search=${encodeURIComponent(query)}`,
-  );
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focusResults = useRef(false);
   useEffect(() => {
-    const timer = setTimeout(() => setQuery(search), 200);
-    return () => clearTimeout(timer);
-  }, [search]);
+    setSearch(query);
+  }, [query, location.key]);
+  useEffect(() => {
+    if (search === query) return;
+    const timer = window.setTimeout(() => {
+      focusResults.current = false;
+      setParams((previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete('page');
+        if (search) next.set('search', search);
+        else next.delete('search');
+        return next;
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [search, query, setParams, location.key]);
+  const request = new URLSearchParams({ page: String(page), pageSize: '25' });
+  if (query) request.set('q', query);
+  const result = useSearchPage<PatientDirectoryItem>(`/api/search/patients?${request.toString()}`);
+  const { data, reload } = result;
+  const loading = result.loading || search !== query;
+  const error =
+    result.error ||
+    (data &&
+    (!data.items.every(validDirectoryRow) ||
+      new Set(data.items.map((item) => item.id)).size !== data.items.length)
+      ? 'The patient directory records could not be confirmed. Refresh to try again.'
+      : '');
+  useEffect(() => {
+    if (!loading && !error && data) {
+      if (data.page !== page)
+        setParams(
+          (previous) => {
+            const next = new URLSearchParams(previous);
+            if (data.page === 1) next.delete('page');
+            else next.set('page', String(data.page));
+            return next;
+          },
+          { replace: true },
+        );
+      if (focusResults.current) {
+        focusResults.current = false;
+        heading.current?.focus({ preventScroll: true });
+      }
+    }
+  }, [loading, error, data, page, setParams]);
+  function goToPage(nextPage: number) {
+    focusResults.current = true;
+    setParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (nextPage === 1) next.delete('page');
+      else next.set('page', String(nextPage));
+      return next;
+    });
+  }
   return (
     <>
       <PageHeader
@@ -718,33 +1069,50 @@ export function PatientsPage() {
         description="Every patient. One continuous care journey."
         actions={
           <button className="button button-primary" onClick={() => setAdding(true)}>
-            <UserPlus size={17} /> Add patient
+            <UserPlus size={17} />
+            Add patient
           </button>
         }
       />
       <Card>
-        <div className="clinic-panel-heading">
+        <div className="clinic-panel-heading clinic-directory-heading">
           <div>
-            <h2 className="section-title">Patient directory</h2>
+            <h2 className="section-title" tabIndex={-1} ref={heading}>
+              Patient directory
+            </h2>
             <p className="muted">
-              {data?.length || 0} {query ? 'matching' : 'registered'} patients
+              {loading
+                ? 'Loading patients…'
+                : error
+                  ? 'Patient count unavailable'
+                  : `${data?.total ?? 0} ${query ? 'matching' : 'registered'} ${(data?.total ?? 0) === 1 ? 'patient' : 'patients'}`}
             </p>
           </div>
           <div className="clinic-search-field">
             <Search size={17} />
             <input
+              type="search"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              maxLength={200}
+              onChange={(event) => setSearch(event.target.value)}
               placeholder="Search name, email or phone"
               aria-label="Search patient directory"
             />
           </div>
+          <button
+            className="button button-secondary button-small"
+            disabled={loading}
+            onClick={reload}
+          >
+            <RefreshCw size={14} />
+            Refresh patients
+          </button>
         </div>
         {loading ? (
           <Loading />
         ) : error ? (
           <ErrorState message={error} retry={reload} />
-        ) : !data?.length ? (
+        ) : !data?.items.length ? (
           <EmptyState
             title={query ? 'No matching patients' : 'A fresh start for your practice'}
             description={
@@ -754,7 +1122,12 @@ export function PatientsPage() {
             }
           />
         ) : (
-          <div className="table-wrap">
+          <div
+            className="table-wrap clinic-search-table"
+            role="region"
+            aria-label="Patient directory; scroll horizontally for all columns"
+            tabIndex={0}
+          >
             <table className="data-table">
               <thead>
                 <tr>
@@ -762,11 +1135,11 @@ export function PatientsPage() {
                   <th>Contact</th>
                   <th>Date of birth</th>
                   <th>Registered</th>
-                  <th></th>
+                  <th scope="col">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {data.map((p) => (
+                {data.items.map((p) => (
                   <tr key={p.id}>
                     <td>
                       <div className="row">
@@ -813,6 +1186,16 @@ export function PatientsPage() {
             </table>
           </div>
         )}
+        {!loading && !error && data && (
+          <Pagination
+            page={data.page}
+            pageSize={data.pageSize}
+            total={data.total}
+            totalPages={data.totalPages}
+            onPageChange={goToPage}
+            label="Patient directory pagination"
+          />
+        )}
       </Card>
       {adding && (
         <PatientModal
@@ -820,8 +1203,14 @@ export function PatientsPage() {
           onSaved={() => {
             setAdding(false);
             setSearch('');
-            setQuery('');
-            reload();
+            focusResults.current = false;
+            setParams((previous) => {
+              const next = new URLSearchParams(previous);
+              next.delete('search');
+              next.delete('page');
+              return next;
+            });
+            void reload();
           }}
         />
       )}

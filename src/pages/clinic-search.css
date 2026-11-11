@@ -1,0 +1,131 @@
+.clinic-search-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 18px;
+  align-items: start;
+}
+
+.clinic-search-controls > *,
+.clinic-search-controls input,
+.clinic-search-controls select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.clinic-search-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-bottom: 24px;
+}
+
+.clinic-search-options .checkbox-field {
+  flex-shrink: 0;
+  align-items: center;
+  font-weight: 600;
+}
+
+.clinic-search-options .checkbox-field input {
+  margin-top: 0;
+}
+
+.clinic-search-options > p {
+  flex: 1 1 250px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.clinic-search-options > .button {
+  flex-shrink: 0;
+}
+
+.clinic-directory-heading {
+  flex-wrap: wrap;
+}
+
+.clinic-directory-heading > div:first-child {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.clinic-directory-heading .clinic-search-field {
+  flex: 1 1 260px;
+  min-width: 0;
+  max-width: 430px;
+}
+
+.clinic-directory-heading .clinic-search-field input {
+  min-width: 0;
+  width: 100%;
+}
+
+.clinic-search-table {
+  min-width: 0;
+}
+
+.clinic-search-table .data-table {
+  min-width: 740px;
+}
+
+.clinic-result-date {
+  color: #405944;
+  font-weight: 600;
+  margin: 0 0 5px;
+  white-space: nowrap;
+}
+
+.clinic-search-shortcuts {
+  max-width: 100%;
+  margin-bottom: 0;
+}
+
+.clinic-search-shortcuts button {
+  transition: none;
+}
+
+.clinic-patient-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 680px) {
+  .clinic-search-controls {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .clinic-search-toolbar .date-navigator {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .clinic-search-toolbar .date-navigator input {
+    min-width: 135px;
+    max-width: 100%;
+    flex: 1 1 135px;
+  }
+
+  .clinic-search-options {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .clinic-search-options > p {
+    flex-basis: 100%;
+  }
+
+  .clinic-directory-heading .clinic-search-field {
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .clinic-search-shortcuts button {
+    padding: 11px 12px;
+  }
+}

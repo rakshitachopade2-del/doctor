@@ -68,7 +68,7 @@ const SettingsPage = lazy(() =>
   import('./pages/SettingsPages').then((module) => ({ default: module.SettingsPage })),
 );
 const AuditPage = lazy(() =>
-  import('./pages/SettingsPages').then((module) => ({ default: module.AuditPage })),
+  import('./pages/AuditPage').then((module) => ({ default: module.AuditPage })),
 );
 const BillingPage = lazy(() =>
   import('./pages/OperationsPages').then((module) => ({ default: module.BillingPage })),
