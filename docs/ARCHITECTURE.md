@@ -49,6 +49,8 @@ flowchart LR
 | `server/documents.ts`                 | Immutable PDF originals, upload provenance, patient-scoped attachment downloads        |
 | `server/clinical.ts`                  | Investigation review/publication, procedure agreement/completion, encounter amendments |
 | `server/follow-up.ts`                 | Review snapshots, owner assignments, optimistic revisions, plan state and worklist     |
+| `server/patient-profile.ts`           | Attributed demographic/allergy corrections, role projections and independent revisions |
+| `src/pages/PatientProfilePage.tsx`    | Current patient details, staff corrections and shared allergy history                  |
 | `server/inventory.ts`                 | Whole-unit catalogue, immutable stock events, revisions and idempotent operations      |
 | `src/pages/InventoryPage.tsx`         | Stock catalogue, lots, histories and guarded administrator forms                       |
 | `server/insights.ts`                  | Immutable expenses and voids, administrator aggregates and private CSV exports         |
@@ -181,6 +183,12 @@ Original image rows now reject updates and deletion. New uploads store SHA-256, 
 Annotation geometry is typed data rendered as a controlled SVG overlay, not uploaded SVG or modified raster content. Text legends and numeric percentage controls provide the same operations without pointer dragging. Patient history and the published-summary helper use explicit projections and omit private revision state and internal account provenance. Generic patient activity is created only on publication.
 
 `server/care-summary.ts` composes a patient-facing snapshot for both clinical staff and owning patients. It reuses the clinical workflow's patient projection and follow-up's safe review projection, selects shared care-plan fields explicitly, and includes only published annotations. Messages, internal notes/amendments, private assessment/snapshot/assignment fields and file bytes never enter the response. Each read/download runs with patient authorization and audit in one transaction. A hash of visible content excludes generation time and private revisions; JSON downloads require that hash to remain current. Private-only updates and paused modules therefore preserve export access, while changed shared results or payment balances require a refresh. The UI validates the returned patient, audience and revision before saving JSON and cancels stale downloads when its displayed snapshot changes.
+
+## Current patient details and correction evidence
+
+`patientProfileChanges` retains demographic before/after snapshots, reasons and staff attribution; `patientAllergyChanges` separately retains clinical status/text changes, patient-visible reasons and clinician attribution. `patientProfileCommands` reserves actor-bound request UUIDs across these correction operations. All three source tables reject updates/deletion. Each mutation updates the current Patient row and appends evidence, command receipt and audit in one immediate transaction. Historical clinical/billing/appointment originals and account credentials are unaffected.
+
+Demographic revisions depend only on current demographic fields and the latest demographic change. Allergy revisions depend only on the clinical stream. Reception receives explicit operational projections without allergy status, text or editing tokens. Owning patients receive current demographics without internal correction history, plus a safe allergy history. Care summaries reuse that safe history and include it in their visible-content revision. Legacy status is derived without fabricated reviews. Browser drafts retain the attempted payload through uncertain responses, require explicit stale-context review, and suppress late completion feedback after leaving the page.
 
 ## Consumable stock and retained evidence
 

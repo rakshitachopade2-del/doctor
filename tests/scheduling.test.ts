@@ -573,3 +573,66 @@ test('temporary-password patients can see public availability but not personaliz
   );
   assert.ok(!(await call(publicPath, { client: temporary })).data.includes('12:00'));
 });
+
+test('status changes preserve the booked fee and clinician name while explicit rescheduling adopts current profile terms', async () => {
+  const doctorId = await newDoctor();
+  await configure(doctorId);
+  const booked = await book(doctorId, futureDate(150), '10:00');
+  assert.equal(booked.status, 201);
+  assert.equal(booked.data.fee, 600);
+  const originalName = booked.data.doctorName;
+  const profile = (await call('/doctors')).data.find(
+    (value: { id: string }) => value.id === doctorId,
+  );
+  const revised = await call(`/doctors/${doctorId}`, {
+    method: 'PATCH',
+    client: admin,
+    body: { ...profile, fee: 875, name: 'Dr. Revised Synthetic Profile' },
+  });
+  assert.equal(revised.status, 200);
+  // Place this synthetic visit on today's queue without depending on clock time.
+  const queued = { ...booked.data, date: clinicToday() };
+  app.locals.db
+    .prepare('UPDATE appointments SET date=?,data=? WHERE id=?')
+    .run(queued.date, JSON.stringify(queued), queued.id);
+  for (const [status, client] of [
+    ['checked-in', reception],
+    ['in-consultation', doctor],
+    ['completed', doctor],
+  ] as const) {
+    const changed = await call(`/appointments/${queued.id}`, {
+      method: 'PATCH',
+      client,
+      body: { status },
+    });
+    assert.equal(changed.status, 200);
+    assert.equal(changed.data.fee, 600);
+    assert.equal(changed.data.doctorName, originalName);
+  }
+  const another = await book(doctorId, futureDate(151), '10:00');
+  assert.equal(another.status, 201);
+  assert.equal(another.data.fee, 875);
+  assert.equal(
+    (
+      await call(`/doctors/${doctorId}`, {
+        method: 'PATCH',
+        client: admin,
+        body: { ...revised.data, fee: 950 },
+      })
+    ).status,
+    200,
+  );
+  const moved = await call(`/appointments/${another.data.id}`, {
+    method: 'PATCH',
+    client: reception,
+    body: { date: futureDate(152), time: '11:00' },
+  });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.data.fee, 950);
+  const cancelled = await call(`/appointments/${moved.data.id}`, {
+    method: 'PATCH',
+    client: reception,
+    body: { status: 'cancelled' },
+  });
+  assert.equal(cancelled.data.fee, 950);
+});

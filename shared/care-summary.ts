@@ -12,6 +12,7 @@ import type { Investigation, ProcedureRecord } from './clinical';
 import type { PatientDocument } from './documents';
 import type { Invoice } from './operations';
 import type { ImageAnnotationVersion } from './image-annotations';
+import type { PatientAllergyChange } from './patient-profile';
 
 export interface SummaryCarePlan extends Omit<CarePlan, 'followUpRevision' | 'latestReview'> {
   reviews: PatientFollowUpReview[];
@@ -27,6 +28,7 @@ export interface CareSummary {
   revision: string;
   clinic: Pick<ClinicSettings, 'name' | 'address' | 'phone' | 'email'>;
   patient: Patient;
+  allergyHistory: PatientAllergyChange[];
   appointments: Appointment[];
   intakes: Intake[];
   carePlans: SummaryCarePlan[];

@@ -1393,6 +1393,9 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           <Link to="/my-care/record" className="button button-secondary">
             <FileText size={17} /> View your full record
           </Link>
+          <Link to="/my-care/details" className="button button-secondary">
+            <ShieldCheck size={17} /> View patient details
+          </Link>
           <Link to="/my-care/summary" className="button button-secondary">
             <FileText size={17} /> View care summary
           </Link>
@@ -1805,10 +1808,19 @@ function PatientRecordView({ patientId }: { patientId: string }) {
           <p className="muted">
             {data.patient.email} · {data.patient.phone}
           </p>
+          <Link to="/my-care/details" className="text-link">
+            Review patient details & allergy history
+          </Link>
         </div>
         <div className="patient-allergies">
-          <span className="small muted">Recorded allergies</span>
-          <strong>{data.patient.allergies || 'Not recorded'}</strong>
+          <span className="small muted">Current allergy record</span>
+          <strong>
+            {data.patient.allergyStatus === 'none-known'
+              ? 'No known allergies recorded'
+              : data.patient.allergyStatus === 'not-recorded'
+                ? 'Not recorded'
+                : data.patient.allergies || 'Not recorded'}
+          </strong>
         </div>
       </Card>
       <div className="record-mobile-section">

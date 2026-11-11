@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { ArrowDownToLine, ArrowLeft, FileText, Printer, RefreshCw } from 'lucide-react';
 import type { CareSummary } from '../../shared/care-summary';
+import type { AllergyStatus } from '../../shared/patient-profile';
 import { formatDate, money, useResource, useSession } from '../lib';
 import { Badge, EmptyState, ErrorState, Loading, PageHeader } from '../components/ui';
 import './care-summary.css';
@@ -24,6 +25,14 @@ const snapshotDate = (value: string) =>
     day: '2-digit',
   }).format(new Date(value));
 const safeValue = (value?: string | null) => value?.trim() || 'Not recorded';
+const allergyValue = (status: AllergyStatus | undefined, text: string) =>
+  status === 'none-known'
+    ? 'No known allergies recorded'
+    : status === 'not-recorded'
+      ? 'Not recorded'
+      : text.trim()
+        ? `Recorded allergies: ${text}`
+        : 'Not recorded';
 const fileSize = (bytes?: number) =>
   bytes === undefined
     ? 'Size not recorded'
@@ -142,10 +151,20 @@ function SummaryWorkspace({ patientId, patient }: { patientId: string; patient: 
   const ready = !!summary.data && !summary.loading && !summary.error;
   return (
     <div className="care-summary-page">
-      <div className="care-summary-controls">
+      <div className="care-summary-controls row">
         <Link className="text-link" to={recordPath}>
           <ArrowLeft size={15} />
           Back to health record
+        </Link>
+        <Link
+          className="text-link"
+          to={
+            patient
+              ? '/my-care/details'
+              : `/clinic/patients/${encodeURIComponent(patientId)}/details`
+          }
+        >
+          Patient details & allergy history
         </Link>
       </div>
       <PageHeader
@@ -271,6 +290,7 @@ function Detail({ label, value }: { label: string; value?: string | null }) {
 }
 function SummaryDocument({ data, recordPath }: { data: CareSummary; recordPath: string }) {
   const sections = [
+    ['allergies', 'Allergy record history', data.allergyHistory.length],
     ['history', 'Shared history', data.intakes.length],
     ['appointments', 'Appointments', data.appointments.length],
     ['plans', 'Care plans & reviews', data.carePlans.length],
@@ -312,8 +332,8 @@ function SummaryDocument({ data, recordPath }: { data: CareSummary; recordPath: 
             <dd>{safeValue(data.patient.email)}</dd>
           </div>
           <div className="care-summary-allergies">
-            <dt>Recorded allergies</dt>
-            <dd>{safeValue(data.patient.allergies)}</dd>
+            <dt>Current allergy record</dt>
+            <dd>{allergyValue(data.patient.allergyStatus, data.patient.allergies)}</dd>
           </div>
         </dl>
         <p className="care-summary-clinic-contact">
@@ -339,6 +359,27 @@ function SummaryDocument({ data, recordPath }: { data: CareSummary; recordPath: 
           </a>
         ))}
       </nav>
+
+      <SummarySection
+        id="allergies"
+        title="Allergy record history"
+        count={data.allergyHistory.length}
+      >
+        {data.allergyHistory.map((entry) => (
+          <SummaryEntry
+            key={entry.id}
+            title={allergyValue(entry.after.status, entry.after.text)}
+            source={`Allergy record updated · ${entry.doctorName}`}
+            date={entry.createdAt}
+          >
+            <Detail
+              label="Previous allergy record"
+              value={allergyValue(entry.before.status, entry.before.text)}
+            />
+            <Detail label="Reason shared with patient" value={entry.reason} />
+          </SummaryEntry>
+        ))}
+      </SummarySection>
 
       <SummarySection id="history" title="Shared history" count={data.intakes.length}>
         {data.intakes.map((entry) => (

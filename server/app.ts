@@ -4,6 +4,12 @@ import { createFollowUp } from './follow-up.ts';
 import { createWaitlist } from './waitlist.ts';
 import { registerInsights } from './insights.ts';
 import { registerInventory } from './inventory.ts';
+import {
+  registerPatientProfile,
+  patientWithAllergyStatus,
+  receptionPatient,
+  safeAllergyHistory,
+} from './patient-profile.ts';
 import { registerCareSummary } from './care-summary.ts';
 import {
   registerImageAnnotations,
@@ -258,7 +264,7 @@ export function createApp(options: AppOptions = {}) {
       fail(403, 'You can only access your own care record.');
     const p = get<Patient>(db, 'patients', patientId);
     if (!p) fail(404, 'Patient not found.');
-    return p!;
+    return user.role === 'receptionist' ? receptionPatient(p!) : patientWithAllergyStatus(p!);
   };
   const ownPatient = (req: AuthRequest, input?: string) => {
     const user = actor(req);
@@ -539,7 +545,7 @@ export function createApp(options: AppOptions = {}) {
       `${p.name} ${p.email} ${p.phone}`.toLowerCase().includes(search),
     );
     res.json(
-      user.role === 'receptionist' ? patients.map((p) => ({ ...p, allergies: '' })) : patients,
+      patients.map(user.role === 'receptionist' ? receptionPatient : patientWithAllergyStatus),
     );
   });
   app.post('/api/patients', (req: AuthRequest, res) => {
@@ -558,7 +564,13 @@ export function createApp(options: AppOptions = {}) {
     const patient = { ...input, id: id(), createdAt: nowISO() };
     insert(db, 'patients', patient);
     audit(req, 'created patient', 'patient', patient.id);
-    res.status(201).json(patient);
+    res
+      .status(201)
+      .json(
+        user.role === 'receptionist'
+          ? receptionPatient(patient)
+          : patientWithAllergyStatus(patient),
+      );
   });
   app.get('/api/patients/:id', (req: AuthRequest, res) => {
     const key = String(req.params.id),
@@ -711,8 +723,8 @@ export function createApp(options: AppOptions = {}) {
         ...a,
         ...input,
         durationMinutes,
-        doctorName: d.name,
-        fee: d.fee,
+        doctorName: rescheduling ? d.name : a.doctorName,
+        fee: rescheduling ? d.fee : a.fee,
       };
       db.prepare('UPDATE appointments SET doctorId=?,date=?,time=?,status=?,data=? WHERE id=?').run(
         value.doctorId,
@@ -1118,7 +1130,7 @@ export function createApp(options: AppOptions = {}) {
       followUps: user.role === 'receptionist' ? [] : followUps,
       recentPatients: patients
         .slice(0, 5)
-        .map((p) => (user.role === 'receptionist' ? { ...p, allergies: '' } : p)),
+        .map(user.role === 'receptionist' ? receptionPatient : patientWithAllergyStatus),
     });
   });
   scheduling.register(app);
@@ -1126,6 +1138,7 @@ export function createApp(options: AppOptions = {}) {
   registerActivity(app, { db, actor, audit, fail });
   registerDocuments(app, { db, actor, patientAccess, audit, fail });
   registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });
+  registerPatientProfile(app, { db, actor, patientAccess, clinicianId, audit, fail });
   const clinicalWorkflows = registerClinical(app, {
     db,
     actor,
@@ -1153,6 +1166,7 @@ export function createApp(options: AppOptions = {}) {
     patientReviews: followUp.patientReviews,
     patientWorkflows: clinicalWorkflows.patientView,
     publishedAnnotations: (patientId) => publishedImageAnnotationsForPatient(db, patientId),
+    allergyHistory: (patientId) => safeAllergyHistory(db, patientId).changes,
   });
   registerInsights(app, { db, actor, audit, fail });
   registerInventory(app, { db, actor, audit, fail });

@@ -228,12 +228,32 @@ try {
   });
   assert.equal(createdPatient.status, 201);
   const patient = await createdPatient.json();
+  const profileUrl = `${base}/api/patients/${patient.id}/profile`;
+  const profileResponse = await fetch(profileUrl, { headers: apiHeaders });
+  assert.equal(profileResponse.status, 200);
+  const profile = await profileResponse.json();
+  const correction = await fetch(profileUrl, {
+    method: 'PATCH',
+    headers: apiHeaders,
+    body: JSON.stringify({
+      ...profile.demographics,
+      phone: '9000000088',
+      reason: 'Synthetic contact correction',
+      expectedRevision: profile.revision,
+      requestId: randomUUID(),
+    }),
+  });
+  assert.equal(correction.status, 200);
+  assert.equal((await correction.json()).changes.length, 1);
   const summaryUrl = `${base}/api/patients/${patient.id}/care-summary`;
   const summaryResponse = await fetch(summaryUrl, { headers: apiHeaders });
   assert.equal(summaryResponse.status, 200);
   const summary = await summaryResponse.json();
   assert.equal(summary.audience, 'patient');
   assert.equal(summary.patient.id, patient.id);
+  assert.equal(summary.patient.phone, '9000000088');
+  assert.equal(summary.patient.allergyStatus, 'not-recorded');
+  assert.deepEqual(summary.allergyHistory, []);
   assert.deepEqual(summary.imageAnnotations, []);
   assert.deepEqual(summary.carePlans, []);
   const summaryDownload = await fetch(`${summaryUrl}/download?revision=${summary.revision}`, {

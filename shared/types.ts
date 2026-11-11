@@ -37,6 +37,7 @@ export interface Patient {
   dob: string;
   gender: string;
   allergies: string;
+  allergyStatus?: 'not-recorded' | 'none-known' | 'recorded';
   createdAt: string;
 }
 export type AppointmentStatus =

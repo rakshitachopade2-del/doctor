@@ -3,6 +3,7 @@
 }
 .care-summary-controls {
   margin: 0 0 21px;
+  flex-wrap: wrap;
 }
 .care-summary-page .page-actions {
   flex-wrap: wrap;

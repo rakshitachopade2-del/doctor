@@ -34,7 +34,7 @@ import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPa
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import { ImageAnnotationModal } from '../components/ImageAnnotations';
 import { FollowUpPlanSection } from './FollowUpPages';
-import { api, formatDate, today, useResource, useSession, useToast } from '../lib';
+import { api, formatDate, money, today, useResource, useSession, useToast } from '../lib';
 import {
   Avatar,
   Badge,
@@ -482,6 +482,16 @@ export function ClinicBookingModal({
             {error}
           </div>
         )}
+        <p className="notice">
+          Consultation fee:{' '}
+          {doctors.find((doctor) => doctor.id === doctorId)
+            ? money(doctors.find((doctor) => doctor.id === doctorId)!.fee)
+            : 'Not available'}
+          .
+          {appointment
+            ? ' Rescheduling uses the selected clinician’s current fee.'
+            : ' Payment is recorded separately.'}
+        </p>
         {waitlist && (
           <div className="notice">
             <span>
@@ -750,6 +760,12 @@ export function PatientsPage() {
                     <td>{p.dob ? formatDate(p.dob) : 'Not recorded'}</td>
                     <td>{formatDate(p.createdAt)}</td>
                     <td>
+                      <Link
+                        className="button button-secondary button-small"
+                        to={`/clinic/patients/${p.id}/details`}
+                      >
+                        Patient details
+                      </Link>
                       {clinical ? (
                         <Link
                           className="button button-ghost button-small"
@@ -956,6 +972,9 @@ export function PatientDetailPage() {
         description="Longitudinal patient record"
         actions={
           <>
+            <Link className="button button-secondary" to={`/clinic/patients/${patient.id}/details`}>
+              Patient details
+            </Link>
             <Link className="button button-secondary" to={`/clinic/patients/${patient.id}/summary`}>
               Care summary
             </Link>
@@ -987,7 +1006,9 @@ export function PatientDetailPage() {
         <div>
           <span className="table-sub">Known allergies</span>
           <strong className={patient.allergies ? 'allergy-text' : ''}>
-            {patient.allergies || 'Not recorded — confirm with patient'}
+            {patient.allergyStatus === 'none-known'
+              ? 'No known allergies recorded'
+              : patient.allergies || 'Not recorded — confirm with patient'}
           </strong>
         </div>
         <div className="patient-summary-end">

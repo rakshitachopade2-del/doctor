@@ -35,6 +35,7 @@ These are intentionally public **development-only credentials**. Production star
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
 - **Patient preparation:** a structured four-step history intake, reviewable summary, explicit sharing agreement, and clinician access to submitted history.
 - **Longitudinal records:** original consultation notes with dated, attributed amendments, shared history, private images, treatment plans, and side-by-side image comparison. Original notes and amendments remain clinician-only.
+- **Patient details:** attributed demographic corrections by staff, separate clinician-authored allergy updates, retained history, independent revision checks, and exact retries. Contact corrections leave login credentials and historical names intact; patients can read their current details and shared allergy history.
 - **Image annotations:** clinician-authored rectangle, ellipse and arrow overlays with text notes, preserved originals, private revision history, and explicit sharing of a saved revision. Keyboard controls use image-relative positions; no measurements or diagnoses are inferred.
 - **Care summary:** a printable patient-facing snapshot and revision-checked JSON download for patients and clinicians, with shared history, treatment, results, procedures, attachment metadata and invoices. Internal notes, private annotations, private messages and file bytes are excluded.
 - **Investigations:** structured test requests, due dates and instructions, patient/clinician result submissions, PDF attachments, and clinician reviews that are shared with the patient only after explicit publication. Supplemental results require review of the newest submission.
@@ -90,6 +91,16 @@ Patients can join the waitlist from **My care** or booking. Reception can add re
 After the patient confirms a specific slot, staff can book directly from the request. The appointment and booked state save together; a conflict leaves the request waiting. Patients can also choose and confirm their own available slot. Withdrawn, booked and expired requests remain in history. Cancelling the resulting appointment does not automatically reopen the old request.
 
 For procedure charges, open **Procedure billing** from the clinical record or choose a procedure when creating an invoice. Reception sees the procedure title, estimate and billing status without clinical discussion or outcomes. Enter agreed amounts explicitly. Each procedure links to one invoice, and reopening the action displays that invoice. Cancelling a procedure preserves an already issued invoice; refunds and adjustments are not automated.
+
+## Correct patient details
+
+Open **Patient details** from the directory or health record. Staff can correct the current name, care-record email, phone, date of birth and gender with a reason. Previous values and staff attribution remain in the correction history. The account's login email and patient linkage stay unchanged, as do names captured in earlier appointments, notes, care plans and invoices.
+
+A linked clinician can separately update the allergy record: **Not recorded**, **No known allergies recorded**, or **Allergies recorded** with details. The reason and dated clinician attribution are shared with the patient. Reception cannot view or edit this clinical record. Earlier free-text allergy notes remain readable without inventing verification or authorship. Patient-reported intake answers stay separate from this current clinician-maintained record.
+
+Patients can use **My details** to review current information and shared allergy history, and ask the clinic for a correction. Demographic correction reasons stay staff-only. Updates that conflict with a newer change require reviewing the latest values; a lost response can retry the exact request. Unfinished browser drafts remain available while the details page stays open.
+
+Appointment status changes retain the booked fee and clinician name. An explicit reschedule adopts the selected clinician's current fee and appointment duration shown during booking; it does not issue or change an invoice.
 
 ## Track clinic consumables
 

@@ -33,7 +33,8 @@ export default defineConfig({
     },
     {
       name: 'records',
-      testMatch: /(?:^|\/)(?:image-annotations|patient-image-annotations|care-summary)\.spec\.ts/,
+      testMatch:
+        /(?:^|\/)(?:image-annotations|patient-image-annotations|care-summary|patient-profile)\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5186' },
     },
   ],

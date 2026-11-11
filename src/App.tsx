@@ -119,6 +119,9 @@ const CareSummaryPage = lazy(() =>
 const InventoryPage = lazy(() =>
   import('./pages/InventoryPage').then((module) => ({ default: module.InventoryPage })),
 );
+const PatientProfilePage = lazy(() =>
+  import('./pages/PatientProfilePage').then((module) => ({ default: module.PatientProfilePage })),
+);
 import type { Role } from '../shared/types';
 
 export function Brand({ small = false }: { small?: boolean }) {
@@ -238,6 +241,7 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
     ? [
         { to: '/my-care', label: 'My care', icon: HeartHandshake, end: true },
         { to: '/my-care/record', label: 'My health record', icon: ClipboardList },
+        { to: '/my-care/details', label: 'My details', icon: Users },
         { to: '/my-care/summary', label: 'Care summary', icon: FileText },
         { to: '/my-care/messages', label: 'Clinic messages', icon: MessageSquare },
         { to: '/my-care/activity', label: 'Activity', icon: Bell },
@@ -537,6 +541,7 @@ export function App() {
           />
           <Route path="clinic/appointments" element={<AppointmentsPage />} />
           <Route path="clinic/patients" element={<PatientsPage />} />
+          <Route path="clinic/patients/:id/details" element={<PatientProfilePage />} />
           <Route
             path="clinic/patients/:id"
             element={
@@ -589,6 +594,7 @@ export function App() {
           <Route path="my-care/invoices" element={<BillingPage />} />
           <Route path="my-care/library" element={<LibraryPage />} />
           <Route path="my-care/record" element={<MyRecordPage />} />
+          <Route path="my-care/details" element={<PatientProfilePage />} />
           <Route path="my-care/summary" element={<CareSummaryPage />} />
           <Route path="my-care/messages" element={<MessagesPage />} />
           <Route path="my-care/activity" element={<ActivityPage />} />

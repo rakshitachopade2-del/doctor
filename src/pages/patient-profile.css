@@ -1,0 +1,216 @@
+.patient-profile-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  min-width: 0;
+  max-width: 1120px;
+}
+.patient-profile-page > .page-header {
+  margin-bottom: 0;
+}
+.patient-profile-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.patient-profile-section-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 18px;
+  color: #35593f;
+  margin: 0 0 8px;
+}
+.patient-profile-section-heading p,
+.patient-profile-help {
+  color: #52684c;
+  font-size: 12px;
+  line-height: 1.85;
+  margin: 9px 0;
+  overflow-wrap: anywhere;
+}
+.patient-profile-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  margin: 0 0 26px;
+}
+.patient-profile-facts dt {
+  color: #5b6e53;
+  font-size: 11px;
+  margin-bottom: 7px;
+}
+.patient-profile-facts dd {
+  margin: 0;
+  font-size: 14px;
+  color: #35583d;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.patient-profile-change-list {
+  display: grid;
+  gap: 18px;
+}
+.patient-profile-change,
+.patient-allergy-change {
+  border: 1px solid #dfe7d8;
+  border-radius: 10px;
+  padding: 22px;
+  min-width: 0;
+}
+.patient-profile-change h3,
+.patient-allergy-change h3 {
+  font-size: 14px;
+  color: #375a3e;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.patient-profile-stamp {
+  color: #5b6e53;
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 7px 0 14px;
+}
+.patient-profile-reason,
+.patient-profile-shared-reason p,
+.patient-allergy-snapshot > p {
+  font-size: 13px;
+  color: #425c3d;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.patient-profile-shared-reason {
+  border-left: 3px solid #a8be98;
+  padding-left: 16px;
+  margin: 18px 0;
+}
+.patient-profile-shared-reason strong {
+  font-size: 11px;
+  color: #4e6846;
+}
+.patient-profile-shared-reason p {
+  margin: 7px 0;
+}
+.patient-profile-change summary,
+.patient-allergy-change summary {
+  color: #345f47;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 10px 0;
+}
+.patient-profile-comparison {
+  position: relative;
+  overflow: auto;
+  width: 100%;
+  border: 1px solid #dfe7d8;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+.patient-profile-comparison table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 520px;
+  text-align: left;
+  font-size: 12px;
+  table-layout: fixed;
+}
+.patient-profile-comparison caption {
+  text-align: left;
+  background: #f1f6eb;
+  padding: 13px;
+  color: #4d6843;
+}
+.patient-profile-comparison th,
+.patient-profile-comparison td {
+  padding: 13px;
+  border-bottom: 1px solid #e4eadf;
+  color: #455f3c;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  vertical-align: top;
+}
+.patient-profile-comparison th {
+  font-weight: 600;
+}
+.patient-allergy-comparison,
+.patient-profile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+.patient-profile-form-grid .field {
+  min-width: 0;
+}
+.patient-profile-form-grid input {
+  min-width: 0;
+  max-width: 100%;
+}
+.patient-allergy-comparison section {
+  min-width: 0;
+}
+.patient-allergy-comparison h4 {
+  color: #45603e;
+  font-size: 12px;
+  margin: 15px 0;
+}
+.patient-allergy-snapshot .badge {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.7;
+}
+.patient-profile-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.patient-profile-conflict h3 {
+  font-size: 14px;
+}
+.patient-profile-conflict,
+.patient-profile-retry {
+  display: block;
+}
+.patient-profile-conflict > p,
+.patient-profile-retry p {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.patient-profile-pending {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.patient-profile-pending p {
+  margin: 7px 0;
+}
+@media (max-width: 700px) {
+  .patient-profile-facts,
+  .patient-profile-form-grid,
+  .patient-allergy-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .patient-profile-section-heading h2 {
+    font-size: 16px;
+  }
+  .patient-profile-change,
+  .patient-allergy-change {
+    padding: 17px;
+  }
+  .patient-profile-modal-actions > .button {
+    white-space: normal;
+    flex: 1 1 125px;
+  }
+  .patient-profile-conflict > .button {
+    white-space: normal;
+  }
+  .patient-profile-page .notice {
+    overflow-wrap: anywhere;
+  }
+}

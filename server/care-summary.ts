@@ -17,6 +17,7 @@ import type { PatientDocument } from '../shared/documents.ts';
 import type { Invoice } from '../shared/operations.ts';
 import type { ImageAnnotationVersion } from '../shared/image-annotations.ts';
 import type { CareSummary, SummaryCarePlan } from '../shared/care-summary.ts';
+import type { PatientAllergyChange } from '../shared/patient-profile.ts';
 import { list, nowISO, settings, type DB } from './db.ts';
 
 interface SummaryContext {
@@ -29,6 +30,7 @@ interface SummaryContext {
   patientReviews: (carePlanId: string) => PatientFollowUpReview[];
   patientWorkflows: (patientId: string) => PatientClinicalWorkflows;
   publishedAnnotations: (patientId: string) => ImageAnnotationVersion[];
+  allergyHistory: (patientId: string) => PatientAllergyChange[];
 }
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -80,8 +82,10 @@ export function registerCareSummary(app: Express, context: SummaryContext) {
         dob: patient.dob,
         gender: patient.gender,
         allergies: patient.allergies,
+        allergyStatus: patient.allergyStatus,
         createdAt: patient.createdAt,
       },
+      allergyHistory: context.allergyHistory(patient.id),
       appointments: list<Appointment>(db, 'appointments', patient.id).sort((a, b) =>
         `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`),
       ),
