@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ClipboardCheck,
@@ -26,6 +26,7 @@ import type { PatientDocument } from '../../shared/documents';
 import { api, formatDate, today, useResource, useSession, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
 import { DocumentUploadModal } from '../components/DocumentsPanel';
+import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
 import './clinical-workflows.css';
 
 type ClinicalResource = {
@@ -88,10 +89,14 @@ export function ClinicalWorkflowPanel({
   patientId,
   appointments,
   resource,
+  selectedInvestigationId,
+  selectedResultId,
 }: {
   patientId: string;
   appointments: Appointment[];
   resource: ClinicalResource;
+  selectedInvestigationId?: string | null;
+  selectedResultId?: string | null;
 }) {
   const { session } = useSession();
   const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
@@ -103,21 +108,96 @@ export function ClinicalWorkflowPanel({
   const [filter, setFilter] = useState('active');
   const toast = useToast();
   const data = resource.data;
+  const mounted = useRef(false);
+  const publishing = useRef(false);
+  const focusedTarget = useRef('');
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const selectedInvestigation = data?.investigations.find(
+    (entry) => entry.id === selectedInvestigationId,
+  );
+  const selectedResult = selectedInvestigation?.results.find(
+    (entry) => entry.id === selectedResultId,
+  );
+  useEffect(() => {
+    if (!selectedInvestigationId) {
+      focusedTarget.current = '';
+      return;
+    }
+    if (resource.loading || resource.error || !selectedInvestigation) return;
+    const key = `${patientId}:${selectedInvestigationId}:${selectedResultId ?? ''}`;
+    if (focusedTarget.current === key) return;
+    const frame = requestAnimationFrame(() => {
+      const element = document.getElementById(
+        selectedResult
+          ? `investigation-result-${selectedResult.id}`
+          : `investigation-${selectedInvestigationId}`,
+      );
+      if (!element) return;
+      element.focus({ preventScroll: true });
+      element.scrollIntoView({ block: 'start' });
+      focusedTarget.current = key;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    patientId,
+    selectedInvestigationId,
+    selectedResultId,
+    selectedInvestigation,
+    selectedResult,
+    resource.loading,
+    resource.error,
+  ]);
   async function publish(investigationId: string, reviewId: string) {
+    if (publishing.current) return;
+    const originalReview = data?.investigations
+      .find((entry) => entry.id === investigationId)
+      ?.reviews.find((review) => review.id === reviewId);
+    if (!originalReview) return;
+    publishing.current = true;
     setBusy(reviewId);
     try {
-      await api(`/api/investigations/${investigationId}/reviews/${reviewId}/publish`, {
-        method: 'POST',
-      });
+      const saved = await api<Investigation>(
+        `/api/investigations/${investigationId}/reviews/${reviewId}/publish`,
+        {
+          method: 'POST',
+        },
+      );
+      if (
+        saved?.id !== investigationId ||
+        saved.patientId !== patientId ||
+        !Array.isArray(saved.reviews) ||
+        !saved.reviews.some(
+          (review) =>
+            review?.id === reviewId &&
+            review.resultId === originalReview.resultId &&
+            review.summary === originalReview.summary &&
+            review.followUp === originalReview.followUp &&
+            typeof review.publishedAt === 'string' &&
+            review.publishedAt.trim().length > 0 &&
+            Number.isFinite(Date.parse(review.publishedAt)),
+        )
+      ) {
+        throw new Error(
+          'Publication could not be confirmed. Retry sharing this same review to check its status.',
+        );
+      }
+      if (!mounted.current) return;
       await resource.reload();
-      toast('Reviewed findings shared with the patient.');
+      if (mounted.current) toast('Reviewed findings shared with the patient.');
     } catch (e) {
-      toast(failure(e), 'error');
+      if (mounted.current) toast(failure(e), 'error');
     } finally {
-      setBusy('');
+      publishing.current = false;
+      if (mounted.current) setBusy('');
     }
   }
   const afterSave = async () => {
+    if (!mounted.current) return;
     setAction(null);
     await Promise.all([resource.reload(), documents.reload()]);
   };
@@ -125,7 +205,7 @@ export function ClinicalWorkflowPanel({
   if (resource.error) return <ErrorState message={resource.error} retry={resource.reload} />;
   if (!data) return null;
   const investigations = data.investigations.filter(
-    (i) => filter === 'all' || i.status !== 'cancelled',
+    (i) => filter === 'all' || i.status !== 'cancelled' || i.id === selectedInvestigationId,
   );
   const procedures = data.procedures.filter((p) => filter === 'all' || p.status !== 'cancelled');
   return (
@@ -165,6 +245,23 @@ export function ClinicalWorkflowPanel({
           </span>
         </div>
       )}
+      {selectedInvestigationId && !selectedInvestigation && (
+        <div className="notice" role="status">
+          The linked investigation is not available in this patient's record.
+        </div>
+      )}
+      {selectedResultId && selectedInvestigation && !selectedResult && (
+        <div className="notice" role="status">
+          The linked result is not available on this investigation. The order and its available
+          history are shown below.
+        </div>
+      )}
+      {selectedResult && selectedResult.id !== selectedInvestigation?.results.at(-1)?.id && (
+        <div className="notice" role="status">
+          This link opens an earlier result. A newer submission is available; clinical reviews use
+          the latest submission.
+        </div>
+      )}
       <section className="cw-section">
         <div className="cw-section-heading">
           <div>
@@ -174,164 +271,196 @@ export function ClinicalWorkflowPanel({
               <span className="cw-count">{investigations.length}</span>
             </h2>
           </div>
-          {canDocument && (
-            <button className="button button-primary" onClick={() => setAction({ kind: 'order' })}>
-              <Plus size={16} /> Order investigation
-            </button>
-          )}
+          <div className="cw-record-actions">
+            <Link className="button button-secondary" to="/clinic/investigations">
+              Investigation review queue
+            </Link>
+            {canDocument && (
+              <button
+                className="button button-primary"
+                onClick={() => setAction({ kind: 'order' })}
+              >
+                <Plus size={16} /> Order investigation
+              </button>
+            )}
+          </div>
         </div>
         {investigations.length ? (
           <div className="cw-records">
             {investigations.map((investigation) => (
-              <Card key={investigation.id} className="cw-investigation">
-                <div className="cw-record-heading">
-                  <span className="cw-record-icon">
-                    <FileCheck2 size={21} />
-                  </span>
-                  <div>
-                    <h3>{investigation.title}</h3>
-                    <p>
-                      {investigation.kind} · {investigation.doctorName} ·{' '}
-                      {formatDate(investigation.createdAt)}
-                    </p>
-                  </div>
-                  <Badge
-                    tone={
-                      investigation.status === 'reviewed'
-                        ? 'green'
-                        : investigation.status === 'cancelled'
-                          ? 'neutral'
-                          : investigation.status === 'result-received'
-                            ? 'blue'
-                            : 'amber'
-                    }
-                  >
-                    {statusText[investigation.status]}
-                  </Badge>
-                </div>
-                <div className="grid-2">
-                  <Detail label="Clinical question / reason" value={investigation.reason} />
-                  <Detail
-                    label="Instructions shared with patient"
-                    value={investigation.instructions}
-                  />
-                </div>
-                {investigation.dueDate && (
-                  <p className="cw-due">Requested by {formatDate(investigation.dueDate)}</p>
-                )}
-                {investigation.cancellationReason && (
-                  <div className="notice cw-block-notice">
-                    <strong>Order cancelled</strong>
-                    <p>{investigation.cancellationReason}</p>
-                  </div>
-                )}
-                {investigation.results.length > 0 && (
-                  <div className="cw-results">
-                    <h4>Result history</h4>
-                    {[...investigation.results]
-                      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-                      .map((result) => {
-                        const reviews = investigation.reviews.filter(
-                          (review) => review.resultId === result.id,
-                        );
-                        return (
-                          <article className="cw-result" key={result.id}>
-                            <div className="cw-history-meta">
-                              <strong>Result submitted</strong>
-                              <span>
-                                {result.submittedByName} · {timestamp(result.createdAt)} IST
-                              </span>
-                            </div>
-                            <p className="cw-prose">{result.note}</p>
-                            {result.documentIds.length > 0 && (
-                              <div className="cw-attachments">
-                                {result.documentIds.map((documentId) => {
-                                  const document = documents.data?.find((d) => d.id === documentId);
-                                  return document ? (
-                                    <a
-                                      key={documentId}
-                                      href={document.url}
-                                      className="cw-document-link"
-                                      download
-                                    >
-                                      <FileText size={15} />
-                                      {document.title}
-                                    </a>
-                                  ) : (
-                                    <span key={documentId} className="muted small">
-                                      Linked report · {documentId.slice(0, 8)}
-                                      {documents.error ? ' · Report list unavailable' : ''}
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            )}
-                            {reviews.map((review) => (
-                              <div className="cw-review" key={review.id}>
-                                <div className="cw-history-meta">
-                                  <strong>
-                                    <ClipboardCheck size={14} /> Clinician review
-                                  </strong>
-                                  <Badge tone={review.publishedAt ? 'green' : 'neutral'}>
-                                    {review.publishedAt ? 'Shared with patient' : 'Clinic only'}
-                                  </Badge>
-                                </div>
-                                <Detail label="Reviewed findings" value={review.summary} />
-                                <Detail label="Follow-up / next steps" value={review.followUp} />
-                                <p className="cw-attribution">
-                                  {review.doctorName} · {timestamp(review.createdAt)} IST
-                                </p>
-                                {canDocument &&
-                                  !review.publishedAt &&
-                                  investigation.status !== 'cancelled' && (
-                                    <button
-                                      className="button button-secondary button-small"
-                                      disabled={busy === review.id}
-                                      onClick={() => publish(investigation.id, review.id)}
-                                    >
-                                      <Send size={13} />
-                                      {busy === review.id ? 'Sharing…' : 'Share reviewed findings'}
-                                    </button>
-                                  )}
-                              </div>
-                            ))}
-                            {canDocument &&
-                              investigation.status !== 'cancelled' &&
-                              result.id === investigation.results.at(-1)?.id && (
-                                <button
-                                  className="button button-ghost button-small"
-                                  onClick={() =>
-                                    setAction({ kind: 'review', investigation, result })
-                                  }
-                                >
-                                  <ClipboardCheck size={14} />
-                                  {reviews.length ? 'Add another review' : 'Review this result'}
-                                </button>
-                              )}
-                          </article>
-                        );
-                      })}
-                  </div>
-                )}
-                {canDocument && investigation.status !== 'cancelled' && (
-                  <div className="cw-record-actions">
-                    <button
-                      className="button button-secondary button-small"
-                      onClick={() => setAction({ kind: 'result', investigation })}
+              <div
+                key={investigation.id}
+                id={`investigation-${investigation.id}`}
+                tabIndex={-1}
+                role="region"
+                aria-labelledby={`investigation-title-${investigation.id}`}
+                className={`cw-investigation-target ${investigation.id === selectedInvestigationId ? 'cw-selected-target' : ''}`}
+              >
+                <Card key={investigation.id} className="cw-investigation">
+                  <div className="cw-record-heading">
+                    <span className="cw-record-icon">
+                      <FileCheck2 size={21} />
+                    </span>
+                    <div>
+                      <h3 id={`investigation-title-${investigation.id}`}>{investigation.title}</h3>
+                      <p>
+                        {investigation.kind} · {investigation.doctorName} ·{' '}
+                        {formatDate(investigation.createdAt)}
+                      </p>
+                    </div>
+                    <Badge
+                      tone={
+                        investigation.status === 'reviewed'
+                          ? 'green'
+                          : investigation.status === 'cancelled'
+                            ? 'neutral'
+                            : investigation.status === 'result-received'
+                              ? 'blue'
+                              : 'amber'
+                      }
                     >
-                      <FilePlus2 size={15} /> Add result
-                    </button>
-                    {investigation.status !== 'reviewed' && (
-                      <button
-                        className="button button-ghost button-small"
-                        onClick={() => setAction({ kind: 'cancel-investigation', investigation })}
-                      >
-                        Cancel order
-                      </button>
-                    )}
+                      {statusText[investigation.status]}
+                    </Badge>
                   </div>
-                )}
-              </Card>
+                  <Link
+                    className="text-link"
+                    to={`/clinic/investigations?investigation=${encodeURIComponent(investigation.id)}`}
+                  >
+                    Review responsibility and handover history
+                  </Link>
+                  <div className="grid-2">
+                    <Detail label="Clinical question / reason" value={investigation.reason} />
+                    <Detail
+                      label="Instructions shared with patient"
+                      value={investigation.instructions}
+                    />
+                  </div>
+                  {investigation.dueDate && (
+                    <p className="cw-due">Requested by {formatDate(investigation.dueDate)}</p>
+                  )}
+                  {investigation.cancellationReason && (
+                    <div className="notice cw-block-notice">
+                      <strong>Order cancelled</strong>
+                      <p>{investigation.cancellationReason}</p>
+                    </div>
+                  )}
+                  {investigation.results.length > 0 && (
+                    <div className="cw-results">
+                      <h4>Result history</h4>
+                      {[...investigation.results]
+                        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                        .map((result) => {
+                          const reviews = investigation.reviews.filter(
+                            (review) => review.resultId === result.id,
+                          );
+                          return (
+                            <article
+                              className={`cw-result ${result.id === selectedResultId ? 'cw-selected-target' : ''}`}
+                              key={result.id}
+                              id={`investigation-result-${result.id}`}
+                              tabIndex={-1}
+                            >
+                              <div className="cw-history-meta">
+                                <strong>Result submitted</strong>
+                                <span>
+                                  {result.submittedByName} · {timestamp(result.createdAt)} IST
+                                </span>
+                              </div>
+                              <p className="cw-prose">{result.note}</p>
+                              {result.documentIds.length > 0 && (
+                                <div className="cw-attachments">
+                                  {result.documentIds.map((documentId) => {
+                                    const document = documents.data?.find(
+                                      (d) => d.id === documentId,
+                                    );
+                                    return document ? (
+                                      <a
+                                        key={documentId}
+                                        href={document.url}
+                                        className="cw-document-link"
+                                        download
+                                      >
+                                        <FileText size={15} />
+                                        {document.title}
+                                      </a>
+                                    ) : (
+                                      <span key={documentId} className="muted small">
+                                        Linked report · {documentId.slice(0, 8)}
+                                        {documents.error ? ' · Report list unavailable' : ''}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {reviews.map((review) => (
+                                <div className="cw-review" key={review.id}>
+                                  <div className="cw-history-meta">
+                                    <strong>
+                                      <ClipboardCheck size={14} /> Clinician review
+                                    </strong>
+                                    <Badge tone={review.publishedAt ? 'green' : 'neutral'}>
+                                      {review.publishedAt ? 'Shared with patient' : 'Clinic only'}
+                                    </Badge>
+                                  </div>
+                                  <Detail label="Reviewed findings" value={review.summary} />
+                                  <Detail label="Follow-up / next steps" value={review.followUp} />
+                                  <p className="cw-attribution">
+                                    {review.doctorName} · {timestamp(review.createdAt)} IST
+                                  </p>
+                                  {canDocument &&
+                                    !review.publishedAt &&
+                                    investigation.status !== 'cancelled' && (
+                                      <button
+                                        className="button button-secondary button-small"
+                                        disabled={!!busy}
+                                        onClick={() => publish(investigation.id, review.id)}
+                                      >
+                                        <Send size={13} />
+                                        {busy === review.id
+                                          ? 'Sharing…'
+                                          : 'Share reviewed findings'}
+                                      </button>
+                                    )}
+                                </div>
+                              ))}
+                              {canDocument &&
+                                investigation.status !== 'cancelled' &&
+                                result.id === investigation.results.at(-1)?.id && (
+                                  <button
+                                    className="button button-ghost button-small"
+                                    onClick={() =>
+                                      setAction({ kind: 'review', investigation, result })
+                                    }
+                                  >
+                                    <ClipboardCheck size={14} />
+                                    {reviews.length ? 'Add another review' : 'Review this result'}
+                                  </button>
+                                )}
+                            </article>
+                          );
+                        })}
+                    </div>
+                  )}
+                  {canDocument && investigation.status !== 'cancelled' && (
+                    <div className="cw-record-actions">
+                      <button
+                        className="button button-secondary button-small"
+                        onClick={() => setAction({ kind: 'result', investigation })}
+                      >
+                        <FilePlus2 size={15} /> Add result
+                      </button>
+                      {investigation.status !== 'reviewed' && (
+                        <button
+                          className="button button-ghost button-small"
+                          onClick={() => setAction({ kind: 'cancel-investigation', investigation })}
+                        >
+                          Cancel order
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              </div>
             ))}
           </div>
         ) : (
@@ -526,9 +655,8 @@ export function ClinicalWorkflowPanel({
         />
       )}
       {action?.kind === 'review' && (
-        <ReviewModal
-          investigation={action.investigation}
-          result={action.result}
+        <InvestigationReviewModal
+          investigationId={action.investigation.id}
           onClose={() => setAction(null)}
           onSaved={afterSave}
         />
@@ -775,55 +903,6 @@ function ResultModal({
         Result entries are preserved in the record. Sharing clinician findings requires a separate
         review and publication step.
       </div>
-    </ClinicalForm>
-  );
-}
-
-function ReviewModal({
-  investigation,
-  result,
-  ...callbacks
-}: ModalCallbacks & { investigation: Investigation; result: InvestigationResult }) {
-  return (
-    <ClinicalForm
-      title="Review investigation findings"
-      endpoint={`/api/investigations/${investigation.id}/reviews`}
-      payload={(form) => ({
-        resultId: result.id,
-        summary: form.get('summary'),
-        followUp: form.get('followUp'),
-        publishToPatient: form.get('publishToPatient') === 'on',
-      })}
-      label="Save clinical review"
-      {...callbacks}
-    >
-      <div className="cw-source-note">
-        <strong>{investigation.title}</strong>
-        <p>{result.note}</p>
-        <small>
-          Submitted by {result.submittedByName} · {timestamp(result.createdAt)} IST
-        </small>
-      </div>
-      <Field label="Reviewed findings">
-        <textarea
-          name="summary"
-          required
-          rows={4}
-          maxLength={8000}
-          placeholder="Your interpretation and any uncertainty, in clear language"
-        />
-      </Field>
-      <Field label="Follow-up and next steps">
-        <textarea name="followUp" required rows={3} maxLength={8000} />
-      </Field>
-      <label className="checkbox-field">
-        <input type="checkbox" name="publishToPatient" />
-        <span>Share this clinician-reviewed summary and next steps with the patient now.</span>
-      </label>
-      <p className="muted small">
-        Leave unchecked to keep this review in the clinic workspace. You can explicitly share it
-        later. The original result remains unchanged.
-      </p>
     </ClinicalForm>
   );
 }

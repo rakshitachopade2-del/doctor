@@ -162,6 +162,16 @@ try {
   const followUps = await fetch(`${base}/api/follow-up-worklist`, { headers: apiHeaders });
   assert.equal(followUps.status, 200);
   assert.deepEqual(await followUps.json(), []);
+  const investigations = await fetch(`${base}/api/investigation-worklist`, { headers: apiHeaders });
+  assert.equal(investigations.status, 200);
+  assert.match(investigations.headers.get('cache-control'), /no-store/);
+  assert.deepEqual(await investigations.json(), []);
+  const investigationOwners = await fetch(`${base}/api/investigation-owners`, {
+    headers: apiHeaders,
+  });
+  assert.equal(investigationOwners.status, 200);
+  assert.deepEqual(await investigationOwners.json(), []);
+  assert.equal((await fetch(`${base}/api/investigation-worklist`)).status, 401);
   const range = 'from=2026-01-01&to=2026-01-01';
   const expenses = await fetch(`${base}/api/expenses?${range}`, { headers: apiHeaders });
   assert.equal(expenses.status, 200);

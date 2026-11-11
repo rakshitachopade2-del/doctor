@@ -20,6 +20,7 @@ import {
   CircleHelp,
   ClipboardList,
   FileText,
+  FileCheck2,
   HeartHandshake,
   LayoutDashboard,
   LogOut,
@@ -100,6 +101,11 @@ const PatientDetailPage = lazy(() =>
 );
 const FollowUpsPage = lazy(() =>
   import('./pages/FollowUpPages').then((module) => ({ default: module.FollowUpsPage })),
+);
+const InvestigationWorklistPage = lazy(() =>
+  import('./pages/InvestigationWorklistPage').then((module) => ({
+    default: module.InvestigationWorklistPage,
+  })),
 );
 const ActivityPage = lazy(() =>
   import('./pages/ActivityPage').then((module) => ({ default: module.ActivityPage })),
@@ -200,6 +206,12 @@ const staffNav = [
   { to: '/clinic/scheduling', label: 'Schedules & closures', icon: Clock3 },
   { to: '/clinic/patients', label: 'Patients', icon: Users },
   { to: '/clinic/follow-ups', label: 'Follow-up care', icon: HeartHandshake, clinical: true },
+  {
+    to: '/clinic/investigations',
+    label: 'Investigation reviews',
+    icon: FileCheck2,
+    clinical: true,
+  },
   { to: '/clinic/activity', label: 'Activity', icon: Bell, clinical: true },
   { to: '/clinic/billing', label: 'Billing', icon: Receipt },
   { to: '/clinic/inventory', label: 'Inventory', icon: Package },
@@ -555,6 +567,14 @@ export function App() {
             element={
               <Guard roles={['admin', 'doctor']}>
                 <CareSummaryPage />
+              </Guard>
+            }
+          />
+          <Route
+            path="clinic/investigations"
+            element={
+              <Guard roles={['admin', 'doctor']}>
+                <InvestigationWorklistPage />
               </Guard>
             }
           />

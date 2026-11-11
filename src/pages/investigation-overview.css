@@ -1,0 +1,34 @@
+.investigation-overview {
+  margin: 24px 0;
+}
+.investigation-overview .section-heading {
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.investigation-overview h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.investigation-overview-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 24px 0;
+}
+.investigation-overview-counts strong {
+  display: block;
+  color: #284f39;
+  font-size: 28px;
+  margin-bottom: 6px;
+}
+.investigation-overview-counts span {
+  font-size: 13px;
+  color: #536650;
+}
+@media (max-width: 540px) {
+  .investigation-overview-counts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+}

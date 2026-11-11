@@ -1,0 +1,91 @@
+.investigation-review-dialog,
+.investigation-review-dialog > *,
+.irm-context,
+.irm-review-form {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.irm-context {
+  background: #f3f6f1;
+  border: 1px solid #dbe4da;
+  border-radius: 14px;
+  padding: 18px;
+}
+.irm-context > h3 {
+  margin: 0 0 10px;
+}
+.irm-context > h4 {
+  margin-top: 22px;
+}
+.irm-context > p {
+  margin: 8px 0;
+}
+.irm-attribution {
+  color: #56645d;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.irm-result-source {
+  min-width: 0;
+}
+.irm-documents,
+.irm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.irm-documents .button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.irm-documents > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.irm-prior-reviews {
+  margin-top: 18px;
+}
+.irm-prior-review {
+  margin-top: 10px;
+  padding: 14px;
+  background: #fffefb;
+  border: 1px solid #dbe4da;
+  border-radius: 10px;
+}
+.irm-prior-review .row {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.irm-earlier-results {
+  margin-top: 18px;
+  border-top: 1px solid #dbe4da;
+  padding-top: 14px;
+}
+.irm-earlier-results > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #286455;
+}
+.irm-earlier-results > article {
+  margin-top: 16px;
+  border-bottom: 1px solid #dbe4da;
+  padding-bottom: 12px;
+}
+.irm-conflict,
+.irm-uncertain {
+  display: block;
+}
+.irm-conflict .button,
+.irm-actions .button {
+  white-space: normal;
+}
+@media (max-width: 480px) {
+  .irm-context {
+    padding: 13px;
+  }
+  .irm-actions > .button {
+    width: 100%;
+  }
+}

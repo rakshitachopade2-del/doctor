@@ -912,6 +912,10 @@ export function PatientDetailPage() {
         next.set('tab', value);
         if (value !== 'care') next.delete('plan');
         if (value !== 'images') next.delete('image');
+        if (value !== 'workup') {
+          next.delete('investigation');
+          next.delete('result');
+        }
         return next;
       },
       { replace: true },
@@ -1247,9 +1251,12 @@ export function PatientDetailPage() {
       )}
       {tab === 'workup' && (
         <ClinicalWorkflowPanel
+          key={patient.id}
           patientId={patient.id}
           appointments={data.appointments}
           resource={clinical}
+          selectedInvestigationId={recordParams.get('investigation')}
+          selectedResultId={recordParams.get('result')}
         />
       )}
       {tab === 'reports' && <DocumentsPanel patientId={patient.id} />}

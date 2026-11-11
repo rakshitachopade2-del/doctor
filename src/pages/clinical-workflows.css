@@ -473,3 +473,21 @@
     font-size: 11px;
   }
 }
+
+.cw-investigation-target,
+.cw-result {
+  scroll-margin-top: 100px;
+}
+.cw-investigation-target {
+  min-width: 0;
+  border-radius: 18px;
+}
+.cw-selected-target {
+  outline: 2px solid #587c60;
+  outline-offset: 3px;
+}
+.cw-investigation-target:focus-visible,
+.cw-result:focus-visible {
+  outline: 3px solid #285a46;
+  outline-offset: 4px;
+}

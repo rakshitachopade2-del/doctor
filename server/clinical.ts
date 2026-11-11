@@ -14,6 +14,11 @@ import type {
 } from '../shared/clinical.ts';
 import { clinicToday, get, id, insert, list, nowISO, type DB } from './db.ts';
 import { notifyPatient, notifyClinicians } from './activity.ts';
+import {
+  investigationRequestId,
+  investigationRevision,
+  registerInvestigationWorklist,
+} from './investigation-worklist.ts';
 
 interface ClinicalContext {
   db: DB;
@@ -137,6 +142,18 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     patientAccess(req, plan.patientId);
     return plan;
   }
+  const investigationWorklist = registerInvestigationWorklist(app, {
+    db,
+    actor,
+    patientAccess,
+    audit,
+    fail,
+    view: (investigationId) => {
+      const order = get<InvestigationOrder>(db, 'investigations', investigationId);
+      if (!order) return fail(404, 'Investigation not found.');
+      return investigationView(order);
+    },
+  });
   function procedureView(plan: ProcedurePlan): ProcedureRecord {
     const agreements = events<ProcedureAgreement>('procedureAgreements', 'procedureId', plan.id);
     const completion = get<ProcedureCompletion>(db, 'procedureCompletions', plan.id) ?? null;
@@ -264,26 +281,42 @@ export function registerClinical(app: Express, context: ClinicalContext) {
           kind: 'investigation',
           title: 'An investigation result is ready for review',
           detail: `${get<Patient>(db, 'patients', order.patientId)!.name} · ${order.title}`,
-          href: `/clinic/patients/${order.patientId}?tab=workup`,
+          href: `/clinic/patients/${order.patientId}?tab=workup&investigation=${order.id}&result=${result.id}`,
         },
-        { doctorId: order.doctorId, excludeActorId: user.id },
+        { doctorId: investigationWorklist.ownerDoctorId(order.id), excludeActorId: user.id },
       );
     });
     res.status(201).json(investigationView(order, user.role === 'patient'));
   });
   app.post('/api/investigations/:id/reviews', (req: AuthRequest, res) => {
     const identity = doctorIdentity(req),
-      order = investigationAccess(req, String(req.params.id));
-    const input = z
+      order = investigationAccess(req, String(req.params.id)),
+      user = actor(req);
+    const { expectedRevision, requestId, ...input } = z
       .object({
         resultId: required,
         summary: text.min(1),
         followUp: text.default(''),
         publishToPatient: z.boolean().default(false),
+        expectedRevision: investigationRevision.optional(),
+        requestId: investigationRequestId.optional(),
       })
+      .refine(
+        (value) => (value.expectedRevision === undefined) === (value.requestId === undefined),
+        'Provide both the current investigation revision and request ID, or omit both for legacy requests.',
+      )
       .parse(req.body);
+    let duplicate = false;
     transaction(() => {
+      if (
+        requestId &&
+        investigationWorklist.commandReplay(user, 'review', order.id, requestId, input)
+      ) {
+        duplicate = true;
+        return;
+      }
       requireOpenInvestigation(order);
+      if (expectedRevision) investigationWorklist.assertRevision(order.id, expectedRevision);
       const latest = events<InvestigationResult>(
         'investigationResults',
         'investigationId',
@@ -307,6 +340,15 @@ export function registerClinical(app: Express, context: ClinicalContext) {
       db.prepare(
         'INSERT INTO investigationReviews(id,investigationId,resultId,data) VALUES (?,?,?,?)',
       ).run(review.id, order.id, latest!.id, JSON.stringify(review));
+      if (requestId)
+        investigationWorklist.rememberCommand(
+          user,
+          'review',
+          order.id,
+          requestId,
+          input,
+          review.id,
+        );
       if (input.publishToPatient) {
         db.prepare('INSERT INTO investigationPublications(id,publishedAt) VALUES (?,?)').run(
           review.id,
@@ -322,7 +364,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
       }
       audit(req, 'reviewed investigation result', 'investigation', order.id);
     });
-    res.status(201).json(investigationView(order));
+    res.status(duplicate ? 200 : 201).json(investigationView(order));
   });
   app.post('/api/investigations/:id/reviews/:reviewId/publish', (req: AuthRequest, res) => {
     doctorIdentity(req);
@@ -339,6 +381,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         .prepare('SELECT 1 FROM investigationPublications WHERE id=?')
         .get(review.id);
       if (!existing) {
+        requireOpenInvestigation(order);
         db.prepare('INSERT INTO investigationPublications(id,publishedAt) VALUES (?,?)').run(
           review.id,
           nowISO(),

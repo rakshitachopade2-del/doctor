@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowDownRight,
@@ -6,6 +7,7 @@ import {
   CalendarDays,
   Check,
   Clock3,
+  FileCheck2,
   HeartHandshake,
   Plus,
   Stethoscope,
@@ -14,6 +16,87 @@ import {
 import { Avatar, Badge, Card, EmptyState, ErrorState, Loading, PageHeader } from '../components/ui';
 import { formatDate, money, useResource, useSession } from '../lib';
 import type { Dashboard } from '../../shared/types';
+import type { InvestigationWorkItem } from '../../shared/investigation-worklist';
+import './investigation-overview.css';
+
+function InvestigationOverview() {
+  const { session } = useSession();
+  const scope = session.user?.role === 'doctor' ? 'mine' : 'all';
+  const resource = useResource<InvestigationWorkItem[]>(
+    `/api/investigation-worklist?scope=${scope}`,
+  );
+  useEffect(() => {
+    const refresh = () => {
+      void resource.reload();
+    };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [resource.reload]);
+  const rows = Array.isArray(resource.data) ? resource.data : null;
+  const unavailable =
+    rows?.filter((entry) => entry.status !== 'cancelled' && !entry.ownerAvailable).length ?? 0;
+  return (
+    <Card className="investigation-overview">
+      <div className="section-heading">
+        <div>
+          <h2>
+            <FileCheck2 size={20} /> Investigation reviews
+          </h2>
+          <p className="muted">
+            {scope === 'mine' ? 'Your assigned investigations' : 'All clinic investigations'} ·
+            Latest submitted results
+          </p>
+        </div>
+        <Link className="text-link" to="/clinic/investigations">
+          Open review queue <ArrowRight size={15} />
+        </Link>
+      </div>
+      {resource.loading ? (
+        <p role="status">Loading investigation review counts…</p>
+      ) : resource.error || !rows ? (
+        <ErrorState
+          message={resource.error || 'Investigation counts are unavailable.'}
+          retry={resource.reload}
+        />
+      ) : (
+        <>
+          <div className="investigation-overview-counts">
+            {[
+              {
+                label: 'Results awaiting review',
+                value: rows.filter((entry) => entry.needsReview).length,
+              },
+              {
+                label: 'Latest reviews not shared',
+                value: rows.filter((entry) => entry.awaitingPublication).length,
+              },
+              {
+                label: 'Missing results past requested date',
+                value: rows.filter((entry) => entry.pastRequestedDate).length,
+              },
+            ].map((metric) => (
+              <div role="group" aria-label={metric.label} key={metric.label}>
+                <strong>{metric.value}</strong>
+                <span>{metric.label}</span>
+              </div>
+            ))}
+          </div>
+          {unavailable > 0 && (
+            <p className="notice">
+              {unavailable} {unavailable === 1 ? 'investigation has' : 'investigations have'} no
+              active account linked to the responsible clinician. Open the queue to review
+              responsibility.
+            </p>
+          )}
+          <p className="muted small">
+            Requested dates track missing results. They do not indicate clinical urgency or a
+            deadline for reviewing a result.
+          </p>
+        </>
+      )}
+    </Card>
+  );
+}
 export function DashboardPage() {
   const { data, loading, error, reload } = useResource<Dashboard>('/api/dashboard');
   const { session } = useSession();
@@ -289,6 +372,7 @@ export function DashboardPage() {
           </Card>
         </div>
       </div>
+      {clinical && <InvestigationOverview />}
       <div className="dashboard-bottom">
         <Card>
           <div className="section-heading">
