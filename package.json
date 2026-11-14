@@ -1,6 +1,6 @@
 {
   "name": "derma-clinic-platform",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -18,7 +18,8 @@
     "create-admin": "node --env-file-if-exists=.env --import tsx server/create-admin.ts",
     "backup": "node --env-file-if-exists=.env --import tsx server/backup.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "mfa:reset": "node --env-file-if-exists=.env --import tsx server/reset-mfa.ts"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

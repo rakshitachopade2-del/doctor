@@ -1,0 +1,169 @@
+.mfa-security-card {
+  margin-top: 24px;
+}
+.mfa-security-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.mfa-security-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+.mfa-security-actions,
+.mfa-form-actions,
+.mfa-private-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.mfa-security-card p,
+.mfa-editor p {
+  line-height: 1.75;
+}
+.mfa-security-summary {
+  border: 1px solid #dce6d5;
+  background: #f3f8ee;
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin: 20px 0;
+}
+.mfa-security-summary p {
+  margin: 8px 0;
+  font-size: 13px;
+}
+.mfa-editor {
+  min-width: 0;
+}
+.mfa-editor .notice {
+  display: block;
+}
+.mfa-editor h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+.mfa-private-material {
+  border: 1px solid #dbe5d4;
+  background: #f7faf3;
+  padding: 18px;
+  border-radius: 10px;
+}
+.mfa-private-material input,
+.mfa-private-material textarea {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+}
+.mfa-private-material textarea {
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+.mfa-code-list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0;
+  margin: 16px 0;
+}
+.mfa-code-list li {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  padding: 10px;
+  border: 1px solid #dce5d7;
+  background: white;
+  border-radius: 7px;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  font-size: 13px;
+}
+.mfa-form-actions {
+  justify-content: flex-end;
+  border-top: 1px solid #e1e8da;
+  padding-top: 18px;
+}
+.mfa-expiry {
+  color: #665b36;
+  font-size: 12px;
+}
+.mfa-conflict {
+  padding: 16px;
+  border: 1px solid #e5d8bb;
+  border-radius: 10px;
+  background: #fbf7ed;
+}
+.mfa-operation-receipt {
+  padding: 16px;
+  border: 1px solid #c5d9c2;
+  border-radius: 10px;
+  background: #f2f8ed;
+}
+.mfa-private-material details {
+  margin: 15px 0 20px;
+}
+.mfa-private-material summary {
+  cursor: pointer;
+  color: #286455;
+  font-size: 13px;
+  padding: 6px 0;
+}
+.mfa-history {
+  margin-top: 24px;
+  border-top: 1px solid #e1e8da;
+  padding-top: 18px;
+}
+.mfa-history summary {
+  cursor: pointer;
+  color: #286455;
+  font-size: 13px;
+  line-height: 1.8;
+  font-weight: 600;
+}
+.mfa-history-event {
+  border-top: 1px solid #e1e8da;
+  padding: 14px 0;
+}
+.mfa-history-event strong {
+  font-size: 13px;
+}
+.mfa-history-event p {
+  color: #53684d;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+.mfa-factor-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.mfa-factor-choice label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.mfa-factor-choice input {
+  width: auto !important;
+  accent-color: #286455;
+}
+@media (max-width: 680px) {
+  .mfa-security-actions > .button,
+  .mfa-form-actions > .button,
+  .mfa-private-actions > .button {
+    flex: 1 1 145px;
+    white-space: normal;
+  }
+  .mfa-private-material {
+    padding: 14px;
+  }
+  .mfa-code-list {
+    grid-template-columns: 1fr;
+  }
+}
+@media print {
+  .mfa-private-material {
+    display: none !important;
+  }
+}

@@ -19,39 +19,73 @@ export class ApiError extends Error {
 }
 export async function api<T>(
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: {
+    method?: string;
+    body?: unknown;
+    signal?: AbortSignal;
+    mfaCsrfToken?: string;
+    isCurrent?: () => boolean;
+  } = {},
 ): Promise<T> {
   const method = options.method ?? 'GET';
   const mutating = !['GET', 'HEAD'].includes(method);
   const response = await fetch(path, {
     method,
     credentials: 'same-origin',
+    signal: options.signal,
     headers: {
       ...(mutating ? { 'Content-Type': 'application/json' } : {}),
       ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+      ...(options.mfaCsrfToken ? { 'X-MFA-CSRF-Token': options.mfaCsrfToken } : {}),
     },
     body: mutating ? JSON.stringify(options.body ?? {}) : undefined,
   });
   const data = await response
     .json()
     .catch(() => ({ error: 'The server returned an unexpected response. Please try again.' }));
+  if (options.signal?.aborted || options.isCurrent?.() === false)
+    throw new DOMException('The request was cancelled.', 'AbortError');
   if (!response.ok) {
     if (
       response.status === 401 &&
-      !['/api/auth/login', '/api/auth/register', '/api/auth/recover'].includes(path)
+      ![
+        '/api/auth/login',
+        '/api/auth/register',
+        '/api/auth/recover',
+        '/api/auth/mfa/challenge',
+        '/api/auth/mfa/verify',
+        '/api/auth/mfa/challenge/cancel',
+      ].includes(path)
     ) {
       csrfToken = '';
       window.dispatchEvent(new Event('derma:session-expired'));
     }
     throw new ApiError(data.error || 'Something went wrong. Please try again.', response.status);
   }
-  if (path === '/api/session' || path.startsWith('/api/auth/'))
-    csrfToken = data.csrfToken || csrfToken;
+  if (
+    (path === '/api/auth/login' || path === '/api/auth/mfa/challenge') &&
+    data.mfaRequired === true
+  ) {
+    csrfToken = '';
+    window.dispatchEvent(new Event('derma:session-expired'));
+  } else if (path === '/api/auth/logout') {
+    csrfToken = '';
+    // Explicit sign-out changes the route and session together in its caller.
+    // Invalidate older reads now, before that transition can commit.
+    window.dispatchEvent(new Event('derma:session-invalidated'));
+  } else if (
+    ['/api/auth/login', '/api/auth/register', '/api/auth/mfa/verify'].includes(path) &&
+    data.user &&
+    typeof data.csrfToken === 'string'
+  ) {
+    csrfToken = data.csrfToken;
+  }
   return data as T;
 }
 type SessionContextType = {
   session: Session;
-  refresh: () => Promise<void>;
+  refresh: (signal?: AbortSignal, isCurrent?: () => boolean) => Promise<Session | null>;
+  clearSession: () => void;
   loading: boolean;
   error: string;
 };
@@ -62,31 +96,58 @@ export function AppProviders({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [toasts, setToasts] = useState<{ id: number; message: string; type: string }[]>([]);
-  const refresh = useCallback(async () => {
+  const sessionRequest = useRef(0);
+  const clearSession = useCallback(() => {
+    sessionRequest.current++;
+    csrfToken = '';
+    setSession((value) => ({ ...value, user: null, csrfToken: undefined }));
+    setError('');
+    setLoading(false);
+  }, []);
+  const refresh = useCallback(async (signal?: AbortSignal, isCurrent?: () => boolean) => {
+    const serial = ++sessionRequest.current;
+    const applicable = () =>
+      !signal?.aborted && serial === sessionRequest.current && isCurrent?.() !== false;
     try {
-      setSession(await api<Session>('/api/session'));
+      const value = await api<Session>('/api/session', { signal, isCurrent });
+      if (!applicable()) return null;
+      csrfToken = value.user && typeof value.csrfToken === 'string' ? value.csrfToken : '';
+      setSession(value);
       setError('');
+      return value;
     } catch (e) {
+      if (!applicable()) return null;
       setError((e as Error).message);
+      return null;
     } finally {
-      setLoading(false);
+      if (applicable()) setLoading(false);
     }
   }, []);
   useEffect(() => {
     void refresh();
+    return () => {
+      sessionRequest.current++;
+    };
   }, [refresh]);
   useEffect(() => {
-    const expire = () => setSession((value) => ({ ...value, user: null, csrfToken: undefined }));
-    window.addEventListener('derma:session-expired', expire);
-    return () => window.removeEventListener('derma:session-expired', expire);
-  }, []);
+    const invalidate = () => {
+      sessionRequest.current++;
+      csrfToken = '';
+    };
+    window.addEventListener('derma:session-expired', clearSession);
+    window.addEventListener('derma:session-invalidated', invalidate);
+    return () => {
+      window.removeEventListener('derma:session-expired', clearSession);
+      window.removeEventListener('derma:session-invalidated', invalidate);
+    };
+  }, [clearSession]);
   const toast = useCallback((message: string, type = 'success') => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t, { id, message, type }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5500);
   }, []);
   return (
-    <SessionContext.Provider value={{ session, refresh, loading, error }}>
+    <SessionContext.Provider value={{ session, refresh, clearSession, loading, error }}>
       <ToastContext.Provider value={toast}>
         {children}
         <div className="toast-container" aria-live="polite">

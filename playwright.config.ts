@@ -72,6 +72,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)follow-up-escalation\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5193' },
     },
+    {
+      name: 'mfa',
+      testMatch: /(?:^|\/)mfa\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5194' },
+    },
   ],
   webServer: [
     {
@@ -137,6 +142,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3021 E2E_VITE_PORT=5193 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5193',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3022 E2E_VITE_PORT=5194 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5194',
       reuseExistingServer: false,
       timeout: 60000,
     },

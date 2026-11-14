@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ const env = {
   NODE_ENV: 'test',
   DEMO_MODE: 'true',
   FOLLOW_UP_ESCALATION_AUTO: 'false',
+  MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
   DATABASE_PATH: join(directory, 'clinic.sqlite'),
   PORT: apiPort,
   API_PORT: apiPort,

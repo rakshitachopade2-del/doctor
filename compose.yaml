@@ -15,6 +15,7 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       FOLLOW_UP_ESCALATION_AUTO: ${FOLLOW_UP_ESCALATION_AUTO:-true}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
     volumes:
       - clinic-data:/app/data
     security_opt:

@@ -65,6 +65,28 @@ Escalation policy, command, run and notice tables are additive and begin empty o
 
 The server checks at startup and every 15 minutes. Set `FOLLOW_UP_ESCALATION_AUTO=false` for manual-only checks; this does not change the saved policy. A process shutdown stops its timer. Startup catches up from current plan state and retained dedupe history. Each run creates notices for at most 200 plans, oldest first; the preview shows the remaining eligible backlog. Pausing the follow-up module or disabling the policy prevents new notices. Plans without eligible clinician recipients remain eligible for future checks. The policy view reports whether this process runs automatic checks and the last check/error time. A recorded notice is in-app activity, not proof of clinical review or delivery to an external device.
 
+## Authenticator sign-in and key management
+
+Authenticator MFA is optional. Without `MFA_ENCRYPTION_KEY`, ordinary accounts keep their existing sign-in behavior and new enrollment is unavailable. Configure a unique cryptographically random 32-byte key encoded as 64 hexadecimal characters. Keep it in the application's protected environment or `.env`, never in source control, command history or shared logs. The Compose configuration passes this setting through to the container.
+
+Retain the same key across restarts and protect a separate backup of it. The database contains encrypted authenticator material and hashed active recovery codes; restoring enrolled accounts requires both the database backup and its original key. A missing or incorrect key for existing enrolled credentials causes startup to fail closed. Changing the environment value is not a key-rotation procedure. Do not delete or replace it to work around a startup error. Pending setup material expires and does not activate MFA by itself.
+
+Account holders enroll in **Account & security**. They must keep their authenticator device or a saved recovery code to finish sign-in. The server clock must be accurate: authenticator codes use 30-second time steps with a bounded adjacent-step allowance, and a successfully used step cannot be reused. Authentication attempts are limited per account across server restarts. Password-recovery links retain MFA; administrator web access cannot remove another account's factor.
+
+If all factors are lost, use the local operator reset command described below only after verifying the account holder's identity. Reset records an operator reason and ends existing sessions and pending challenges; it does not issue a session or replace the account password. This operational procedure cannot automatically establish the person's identity.
+
+For a verified lost-factor reset, set the exact existing database and account, and pipe the recorded reason:
+
+```sh
+printf '%s\n' 'Identity verified using the clinic recovery procedure; authenticator and recovery codes lost.' | \
+  DATABASE_PATH=data/production.sqlite \
+  MFA_RESET_EMAIL=account@example.com \
+  MFA_RESET_IDENTITY_VERIFIED=true \
+  npm run mfa:reset
+```
+
+The command also invalidates outstanding password-recovery grants and requires password rotation at the next sign-in. It works without a lost MFA key. If other enrolled accounts remain, their original encryption key is still required to start the application; resetting one account does not make their data decryptable under another key. Operator reasons are retained in the audit log. This command does not prove identity by itself or recover a forgotten password.
+
 ## Account access and password recovery
 
 Use **Accounts & access** to suspend a departing staff member, restore access, change a staff role, or set the linked doctor profile. Suspension and role/profile changes immediately end the affected account’s sessions while retaining patient records and past authorship. An administrator cannot suspend their own account or demote the last active administrator. Keep individual administrator accounts rather than sharing one credential.
@@ -129,17 +151,17 @@ mkdir -p backups
 docker compose cp app:/app/data/backups/clinic-2026-11-10.sqlite ./backups/
 ```
 
-Move a copy to separately protected storage. A backup includes private patient records, image and PDF bytes, messages, immutable clinical workflow events follow-up reviews and assignments, waitlist requests, invoice/procedure links, expense entries and void history, image annotation/publication records, activity contents and read status, password hashes, account access flags, sessions, hashed recovery grants, schedules, and closures. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
+Move a copy to separately protected storage. A backup includes private patient records, image and PDF bytes, messages, immutable clinical workflow events follow-up reviews and assignments, waitlist requests, invoice/procedure links, expense entries and void history, image annotation/publication records, activity contents and read status, password hashes, account access flags, sessions, hashed recovery grants, encrypted MFA credentials, recovery-code state, MFA evidence/attempts, schedules, and closures. The MFA encryption key must be backed up separately. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
 
 To restore:
 
 1. Stop the application, including every process using the database (`docker compose stop app` for Docker).
 2. Preserve the existing database **and** any `-wal` / `-shm` sidecars together in a recovery directory.
 3. Copy the selected completed backup to the configured `DATABASE_PATH`. Do not leave old sidecars next to the restored file. In Docker, perform this inside the mounted `clinic-data` volume while the app is stopped.
-4. Before reopening access, remove restored sessions and outstanding recovery grants through trusted database maintenance tooling. For a current-release snapshot, use a transaction containing `DELETE FROM sessions;` and `DELETE FROM recoveryGrants;`. A snapshot from before recovery support has no `recoveryGrants` table; omit that statement for such a snapshot.
-5. Ensure the runtime user owns the restored file, restrict its access, then start the application. Check `/api/health`, sign in and verify expected records, administrator access, staff suspensions, and doctor availability.
+4. Before reopening access, remove restored sessions and outstanding recovery grants through trusted database maintenance tooling. For a current-release snapshot, use a transaction containing `DELETE FROM sessions;` and `DELETE FROM recoveryGrants;`. For a snapshot with MFA tables, also delete `mfaChallenges`, `mfaPending` and `mfaRecoveryCodes` in that transaction. This retires restored one-use codes rather than making codes consumed after the backup reusable. Preserve `mfaCredentials` so authenticator verification remains enabled. Omit statements for tables absent from older snapshots.
+5. Ensure the runtime user owns the restored file, restrict its access, then start the application. Check `/api/health`, sign in and verify expected records, administrator access, staff suspensions, enrolled MFA state and doctor availability. Enrolled accounts can authenticate with their authenticator and prepare replacement recovery codes; accounts without that factor need the verified local reset procedure.
 
-Restoring also restores account access, passwords, scheduling changes, and recovery state to the snapshot time. Removing restored sessions and grants prevents old sign-ins or previously consumed links from becoming usable again. Reapply later staff-access changes and rotate credentials if a snapshot may have been exposed. Regularly rehearse restoration into a separate isolated database.
+Restoring also restores account access, passwords, MFA enrollment, scheduling changes, and recovery state to the snapshot time. Reapply factor enrollments/removals that occurred after the snapshot before reopening access. Removing restored sessions and grants prevents old sign-ins or previously consumed links from becoming usable again. Reapply later staff-access changes and rotate credentials if a snapshot may have been exposed. Regularly rehearse restoration into a separate isolated database.
 
 ## Integration boundaries
 

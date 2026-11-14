@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, startTransition, useEffect, useState, type ReactNode } from 'react';
 import {
   Link,
   Navigate,
@@ -240,7 +240,7 @@ const adminPageLabels: Record<string, string> = {
   '/clinic/audit': 'Activity log',
 };
 function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
-  const { session, refresh } = useSession();
+  const { session, clearSession } = useSession();
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -280,8 +280,10 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
   async function logout() {
     try {
       await api('/api/auth/logout', { method: 'POST' });
-      navigate('/login', { replace: true });
-      await refresh();
+      startTransition(() => {
+        navigate('/login', { replace: true });
+        clearSession();
+      });
     } catch (e) {
       toast((e as Error).message, 'error');
     }

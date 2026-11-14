@@ -178,6 +178,20 @@ Estimates are descriptive text and never parsed into invoice amounts. Staff ente
 
 All new clinical tables have update/delete rejection triggers. Status, publication and completion are represented by additional rows instead of edits to earlier explanations or decisions. The database-level guards complement endpoint permissions and preserve application history; administrative database access remains a separate trust boundary.
 
+## Authenticator verification and staged recovery codes
+
+MFA credential storage is separate from account JSON so account/profile/password updates cannot accidentally remove the factor. AES-256-GCM protects the authenticator secret with a random nonce and account/purpose/version context; the 32-byte encryption key is supplied separately from the database. Active credentials require a valid key on startup. Active recovery codes retain only hashes bound to their credential. Preparation payloads are encrypted, session-bound and expire after ten minutes.
+
+The authenticator uses six digits and a 30-second step, with one adjacent step in either direction. A stored accepted-step counter and atomic recovery-code consumption prevent concurrent reuse. Durable account failure budgets survive challenge replacement and restarts. A failed proof updates its failure budget without rolling back that evidence; successful proof consumption, security events, audit and session mutations commit together.
+
+Password verification for an enrolled account creates a separate five-minute challenge, not a full session. Its HTTP-only cookie and independent CSRF token authorize only challenge operations. Verification checks current account activity, security fingerprint and credential identity again. A full session cookie is emitted only after the transaction commits. Sessions also bind the enrolled credential, so older or mismatched sessions cannot bypass activation. Full-session state and challenge metadata remain separate in the frontend.
+
+Enrollment and recovery-code replacement are prepared before confirmation. Setup requires password verification; replacement also consumes an existing factor proof. The UI holds returned keys/codes only in memory and requires explicit saved-code acknowledgment. Replacement leaves old codes active until confirmation. Immutable sanitized events and actor/session-bound UUID receipts preserve exact operations; receipt payloads are HMAC-bound without retaining raw passwords or proofs. Pending encrypted material supports short-lived exact preparation retries and is destroyed on confirmation, expiry or supersession.
+
+Password recovery retains the enrolled factor. Password/account changes invalidate challenges and staged material; factor changes revoke other sessions. The local operator reset is separate from the web API, requires a recorded identity-verification acknowledgment/reason, and provides no session or password. MFA uses no external delivery provider, passkey, remembered-device exception or automatic factor-recovery decision.
+
+Protocol and implementation references: [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238), [OWASP factor-change guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html#changing-mfa-factors), and [Node.js 24 authenticated encryption](https://nodejs.org/docs/latest-v24.x/api/crypto.html#cryptocreatecipherivalgorithm-key-iv-options). These references guide the implementation; this release makes no compliance or security-certification claim.
+
 ## Follow-up review and preserved evidence
 
 `followUpReviews` stores immutable clinician reviews and explicitly identified status-only events. Each clinical review includes an internal assessment, patient-facing instructions, the linked doctor, disposition and next review date. Patient responses strip internal assessments and check-in snapshots at every entry point, including plan lists, patient records and review history. Reception has no access. The worklist defaults to the clinician's currently assigned care plans; authorized clinicians can inspect the whole clinic. Completed plans remain available for history and filtering.

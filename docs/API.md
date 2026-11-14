@@ -2,7 +2,7 @@
 
 All paths below start with `/api`. JSON errors use `{error: string}` and an appropriate HTTP status. List endpoints return arrays unless an object shape is stated. Calendar dates use `YYYY-MM-DD`; schedule times use `HH:mm` in `Asia/Kolkata`. Event timestamps and session expiry values are ISO timestamps.
 
-Requests that change state use JSON. Except for login, registration and recovery-token redemption, they require an authenticated session and the session’s `X-CSRF-Token` header. Browser-origin checks also apply. The session cookie is HTTP-only, uses `SameSite=Lax`, and is secure in production. Roles, account status and patient ownership are enforced by the server, not only the interface.
+Requests that change state use JSON. Except for login, registration, recovery-token redemption and the separate MFA challenge flow, they require an authenticated session and the session’s `X-CSRF-Token` header. MFA verification/cancellation instead requires its short-lived challenge cookie and `X-MFA-CSRF-Token`. Browser-origin checks also apply. The session cookie is HTTP-only, uses `SameSite=Lax`, and is secure in production. Roles, account status and patient ownership are enforced by the server, not only the interface.
 
 Core models are in `shared/types.ts`; scheduling, waitlist, identity, operations, clinical workflows, PDF reports, follow-up reviews/assignments and activity models are in `shared/scheduling.ts`, `shared/waitlist.ts`, `shared/identity.ts`, `shared/operations.ts`, `shared/clinical.ts`, `shared/documents.ts`, `shared/follow-up.ts` and `shared/activity.ts`.
 
@@ -11,7 +11,7 @@ Demo accounts use `DemoClinic2026!` with `doctor@derma.demo`, `reception@derma.d
 ## Authentication and account lifecycle
 
 - `GET /session` → `Session` (`user`, optional `csrfToken`, `demoMode`). Account data includes normalized `active` and `mustChangePassword` flags.
-- `POST /auth/login {email,password}` → `Session`. Inactive accounts cannot sign in. A temporary-password account receives a restricted session until its password is changed.
+- `POST /auth/login {email,password}` → `Session` with `200`, or `MfaChallenge` with `202` when a second factor is enrolled. A challenge grants no signed-in session. Inactive accounts cannot sign in. A temporary-password account receives a restricted session until its password is changed.
 - `POST /auth/register {name,email,password,phone,dob,gender}` → `Session`; creates a new patient and patient account. Email and date of birth are required.
 - `POST /auth/logout` → `{ok:true}`; ends the current session.
 - `POST /auth/password {currentPassword,newPassword}` → `{ok:true}`. Passwords require 12–128 characters, and the new password must differ from the current one. Clears the initial-password requirement, ends other sessions and invalidates outstanding recovery grants.
@@ -26,6 +26,29 @@ Demo accounts use `DemoClinic2026!` with `doctor@derma.demo`, `reception@derma.d
 Recovery links are shared manually after the clinic verifies identity. The frontend reads the token from `/recover#token=...` and removes it from the address bar. The server does not send recovery email or SMS. Authentication, password changes and recovery actions are rate-limited.
 
 Restricted temporary-password sessions can change their password, sign out or manage their own sessions. They cannot read private clinic/patient data or perform workspace operations. Public discovery/settings/availability/knowledge reads remain available.
+
+## Optional authenticator MFA
+
+Types are in `shared/mfa.ts`. MFA requires a configured `MFA_ENCRYPTION_KEY` (64 hexadecimal characters); accounts remain unenrolled until explicit setup. Ordinary password login remains available for unenrolled accounts. All MFA responses are private/no-store, and routes reject unknown query/body fields. Own-account management is unavailable to temporary-password sessions until password rotation completes.
+
+- `GET /auth/mfa` → `MfaStatus`: key availability, enabled state/date, remaining recovery-code count, revision, pending metadata and the latest 100 sanitized security events. No secrets or proof values are returned.
+- `POST /auth/mfa/enrollment/prepare {currentPassword,expectedRevision,requestId}` → `MfaPreparation`. Verifies the password and stages a secret, authenticator URI and ten recovery codes for ten minutes. A preparation does not activate MFA. New preparation replaces prior pending material.
+- `POST /auth/mfa/enrollment/confirm {pendingId,code,savedRecoveryCodes:true,expectedRevision,requestId}` → `MfaMutation`. Requires the staged authenticator's code and explicit saved-code acknowledgment. Activates the factor and recovery hashes, consumes the accepted time step and destroys pending secret material.
+- `POST /auth/mfa/recovery-codes/prepare {currentPassword,proof,expectedRevision,requestId}` → `MfaPreparation`. Password and existing factor are required. Stages replacement codes while the previous set remains active, except any old recovery code consumed as proof. The confirmation uses the returned `status.revision`, which can differ from the preparation's original source revision.
+- `POST /auth/mfa/recovery-codes/confirm {pendingId,savedRecoveryCodes:true,expectedRevision,requestId}` → `MfaMutation`. Checks the current revision and same session/security context before replacing the entire active recovery-code batch.
+- `POST /auth/mfa/disable {currentPassword,proof,expectedRevision,requestId}` → `MfaMutation`. Verifies both factors and removes enrolled material. It does not change the password.
+
+`proof` is `{method:'totp'|'recovery-code',code:string}`. Canonical request UUIDs bind actor, session, operation and an HMAC of the normalized payload. Exact completed-command replay returns the original sanitized event plus current safe status before stale/consumed-proof checks. Preparation replay additionally verifies the current password and only returns the same encrypted pending material while unexpired and unsuperseded. Changed command intent is `409`; stale revision is `409`; expired/superseded preparation is `410`. All successful security mutations and audit records commit atomically. Factor changes end other sessions and challenges; the currently proven session remains valid.
+
+For enrolled accounts, correct password login returns a five-minute `MfaChallenge` containing `mfaRequired:true`, intended `accountId`, a separate CSRF token and expiry. Its random token is in an HTTP-only `derma_mfa_challenge` cookie, scoped to `/api/auth/mfa`; only its digest is stored. The presented prior full session is ended/cleared.
+
+- `GET /auth/mfa/challenge` restores valid challenge metadata without authenticating the account.
+- `POST /auth/mfa/verify {proof}` with challenge cookie and `X-MFA-CSRF-Token` → full `Session` only after a valid one-use proof. Session creation, challenge/code consumption and audit commit together; the full session cookie is emitted after commit.
+- `POST /auth/mfa/challenge/cancel {}` with the challenge credentials → `{ok:true}` and clears the challenge.
+
+Invalid/expired challenges return `401`; invalid proof returns `400`; exhausted attempts return `429`. A durable account budget limits failures to ten per fifteen-minute window across challenges and restarts. Accepted authenticator steps and recovery codes cannot be reused. Lost verification responses can be reconciled through `/session` only when its user matches the challenge's intended account; otherwise restart password authentication with a fresh proof. Challenge metadata must never replace full-session state or CSRF credentials.
+
+Password change, recovery and account access changes invalidate pending MFA preparations/challenges. Password recovery preserves enrolled MFA and does not log the user in. There is no administrator HTTP reset endpoint. The local operator reset requires explicit identity-verification acknowledgment and a reason, removes factors, ends sessions and requires password rotation. Key and reset procedures are documented in `DEPLOYMENT.md`.
 
 ## Administration and public configuration
 

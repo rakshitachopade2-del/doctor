@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.16.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.17.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 319 passed                                              |
-| Browser and accessibility tests | 56 passed                                               |
+| API and online-backup tests     | 341 passed                                              |
+| Browser and accessibility tests | 59 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -48,6 +48,12 @@ Follow-up escalation browser journeys cover disabled defaults, editable owner/cl
 
 Fresh local and container production checks additionally verify the disabled initial escalation policy, actual startup worker/heartbeat, a synthetic overdue care plan, enable/preview/run/exact replay, one retained notice per stage, private history/activity and exclusion from patient-facing summaries. No external notice provider is used.
 
+The 22 MFA API checks cover RFC 6238 vectors, bounded clock tolerance, malformed/replayed codes, ordinary login without a configured key, strict management schemas, temporary-password restrictions and session ownership. Staged enrollment and recovery-code replacement preserve exact encrypted retries while exposing no secret in status/history; expiry, supersession, old-code retirement and globally consumed time steps are tested. Challenge checks cover separate cookies/CSRF, expiry/cancellation, preauthentication isolation and single-use recovery proofs. Atomicity tests roll back proofs, sessions, factor changes and audit together without emitting successful session cookies. Durable account attempt limits survive restart and retain the write lock while recording failure. Tests also verify password recovery preserves MFA, access/password changes invalidate transient state, missing/wrong keys fail closed, mixed-key instances cannot write conflicting material, and the local lost-key reset requires explicit identity acknowledgment and revokes outstanding access. External SQLite writers exercise revoked-session replay, password-verification races, startup verifier cleanup and password changes that must preserve current account metadata.
+
+MFA browser journeys cover authenticator enrollment, private recovery-code download, password challenges, same-account session confirmation, single-use recovery login, staged code replacement, stale source review, lost/malformed management responses and exact UUID retry. They exercise password recovery with MFA retained, other-account isolation, mobile challenge/security/history layouts and accessibility. A held session response exposed a navigation race before React cleanup; the fix binds login requests to their initiating URL/history entry and abort/generation state before changing session, CSRF or navigation. The regression proves a late sign-in response cannot return the user from registration to the previous account. Explicit sign-out changes the route and account state together, invalidates older session reads and returns to the plain login page; a delayed authenticated response cannot restore the signed-out account.
+
+Production verification uses a randomly generated test-only encryption key, synthetic enrollment and a saved recovery code. It checks private status, exact activation replay, no session from password-only authentication, the scoped Secure/HttpOnly challenge cookie, rejection of private API access before proof, one-use challenge consumption, decremented recovery count and logout. The key and test database are discarded with the local process or disposable container; no real account is enrolled or reset.
+
 Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout is also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
 
 Screenshots use only synthetic demonstration records:
@@ -60,4 +66,4 @@ Screenshots use only synthetic demonstration records:
 
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
-CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling and follow-up-escalation workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling, follow-up-escalation and MFA workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.

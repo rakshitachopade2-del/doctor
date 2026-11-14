@@ -37,6 +37,8 @@ import { createScheduling } from './scheduling.ts';
 import { createClinicResources } from './clinic-resources.ts';
 import { registerRecordSearch } from './record-search.ts';
 import { registerAttendance } from './attendance.ts';
+import { initializeMfa, invalidateMfaTransient, mfaSessionAllowed, registerMfa } from './mfa.ts';
+import { mfaEncryptionKey } from './mfa-crypto.ts';
 import { registerVisitDuration } from './visit-duration.ts';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
@@ -151,6 +153,7 @@ export interface AppOptions {
   databasePath?: string;
   demoMode?: boolean;
   production?: boolean;
+  mfaEncryptionKey?: string;
 }
 export function createApp(options: AppOptions = {}) {
   const production = options.production ?? process.env.NODE_ENV === 'production';
@@ -169,6 +172,14 @@ export function createApp(options: AppOptions = {}) {
   }
   if (demoMode) seedDemo(db);
   initializeIdentity(db);
+  let mfaKey: Buffer | null;
+  try {
+    mfaKey = mfaEncryptionKey(options.mfaEncryptionKey ?? process.env.MFA_ENCRYPTION_KEY);
+    initializeMfa(db, mfaKey);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   initializeActivity(db);
   const app = express();
   app.disable('x-powered-by');
@@ -203,13 +214,20 @@ export function createApp(options: AppOptions = {}) {
       const tokenHash = digest(cookie);
       const session = db
         .prepare('SELECT * FROM sessions WHERE tokenHash=? AND expiresAt>?')
-        .get(tokenHash, Date.now()) as { userId: string; csrfToken: string } | undefined;
+        .get(tokenHash, Date.now()) as
+        { userId: string; csrfToken: string; mfaCredentialId?: string } | undefined;
       if (session) {
         const user = get<User>(db, 'users', session.userId);
-        if (user && user.active !== false) {
+        if (
+          user &&
+          user.active !== false &&
+          mfaSessionAllowed(db, user.id, session.mfaCredentialId)
+        ) {
           req.user = managedAccount(user);
           req.sessionToken = tokenHash;
           req.csrfToken = session.csrfToken;
+        } else if (user && user.active !== false) {
+          db.prepare('DELETE FROM sessions WHERE tokenHash=?').run(tokenHash);
         } else {
           db.prepare('DELETE FROM sessions WHERE userId=?').run(session.userId);
         }
@@ -229,7 +247,15 @@ export function createApp(options: AppOptions = {}) {
       }
       if (origin === 'null') return next(new HttpError(403, 'This request origin is not allowed.'));
       if (!req.is('application/json')) return next(new HttpError(415, 'Use application/json.'));
-      if (!['/auth/login', '/auth/register', '/auth/recover'].includes(req.path)) {
+      if (
+        ![
+          '/auth/login',
+          '/auth/register',
+          '/auth/recover',
+          '/auth/mfa/verify',
+          '/auth/mfa/challenge/cancel',
+        ].includes(req.path)
+      ) {
         if (!req.user) return next(new HttpError(401, 'Please sign in to continue.'));
         if (!req.csrfToken || req.headers['x-csrf-token'] !== req.csrfToken)
           return next(
@@ -290,13 +316,15 @@ export function createApp(options: AppOptions = {}) {
       return fail(400, 'Sign in with a linked doctor account to document clinical care.');
     return doctorId;
   };
-  const makeSession = (user: User, res: Response, req: Request) => {
+  const issueSession = (user: User, req: Request, mfaCredentialId?: string) => {
+    if (!mfaSessionAllowed(db, user.id, mfaCredentialId))
+      fail(409, 'MFA settings changed. Sign in again.');
     const token = randomBytes(32).toString('hex');
     const csrfToken = randomBytes(32).toString('hex');
     db.prepare('DELETE FROM sessions WHERE expiresAt<=?').run(Date.now());
     const createdAt = Date.now();
     db.prepare(
-      'INSERT INTO sessions(tokenHash,userId,csrfToken,expiresAt,createdAt,label) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO sessions(tokenHash,userId,csrfToken,expiresAt,createdAt,label,mfaCredentialId) VALUES (?,?,?,?,?,?,?)',
     ).run(
       digest(token),
       user.id,
@@ -304,15 +332,33 @@ export function createApp(options: AppOptions = {}) {
       createdAt + 12 * 3600000,
       createdAt,
       sessionLabel(req.headers['user-agent']),
+      mfaCredentialId ?? null,
     );
-    res.cookie('derma_session', token, {
+    return {
+      session: { user: managedAccount(user), csrfToken, demoMode },
+      apply: (res: Response) => {
+        res.cookie('derma_session', token, {
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: production,
+          maxAge: 12 * 3600000,
+          path: '/',
+        });
+      },
+    };
+  };
+  const makeSession = (user: User, res: Response, req: Request) => {
+    const issued = issueSession(user, req);
+    issued.apply(res);
+    return issued.session;
+  };
+  const clearSessionCookie = (res: Response) => {
+    res.clearCookie('derma_session', {
       httpOnly: true,
       sameSite: 'lax',
       secure: production,
-      maxAge: 12 * 3600000,
       path: '/',
     });
-    return { user: managedAccount(user), csrfToken, demoMode };
   };
   const dummyPasswordHash = hashPassword('dummy-password-for-unregistered-account');
   const limiters = new Map<string, { count: number; reset: number }>();
@@ -329,6 +375,16 @@ export function createApp(options: AppOptions = {}) {
     if (limiters.size > 10000) for (const [k, v] of limiters) if (v.reset < now) limiters.delete(k);
   };
   registerIdentity(app, { db, production, actor, audit, fail, rateLimit });
+  const mfa = registerMfa(app, {
+    db,
+    key: mfaKey,
+    production,
+    actor,
+    audit,
+    fail,
+    issueSession,
+    clearSessionCookie,
+  });
   const appointmentGet = (req: AuthRequest, key: string) => {
     const a = get<Appointment>(db, 'appointments', key);
     if (!a) return fail(404, 'Appointment not found.');
@@ -363,14 +419,34 @@ export function createApp(options: AppOptions = {}) {
     rateLimit(req, 'login');
     const input = z.object({ email, password: z.string().min(1).max(128) }).parse(req.body);
     const row = db
-      .prepare('SELECT data,password FROM users WHERE email=? COLLATE NOCASE')
-      .get(input.email) as { data: string; password: string } | undefined;
+      .prepare(
+        'SELECT data,password,COALESCE((SELECT version FROM mfaEpochs WHERE userId=users.id),0) AS securityVersion FROM users WHERE email=? COLLATE NOCASE',
+      )
+      .get(input.email) as { data: string; password: string; securityVersion: number } | undefined;
     if (!verifyPassword(input.password, row?.password ?? dummyPasswordHash) || !row)
       return fail(401, 'Email or password is incorrect.');
     const user = JSON.parse(row.data) as User;
     if (user.active === false) return fail(401, 'Email or password is incorrect.');
-    audit({ ...req, user } as AuthRequest, 'signed in', 'user', user.id);
-    res.json(makeSession(user, res, req));
+    const challenge = mfa.beginLogin(user, req, res, row.password, row.securityVersion);
+    if (challenge) return res.status(202).json(challenge);
+    const issued = scheduling.transaction(() => {
+      const current = get<User>(db, 'users', user.id);
+      if (
+        !current ||
+        current.active === false ||
+        db.prepare('SELECT password FROM users WHERE id=?').get(user.id)?.password !==
+          row.password ||
+        Number(
+          db.prepare('SELECT version FROM mfaEpochs WHERE userId=?').get(user.id)?.version ?? 0,
+        ) !== row.securityVersion
+      )
+        return fail(409, 'The account changed. Sign in again.');
+      audit({ ...req, user: current } as AuthRequest, 'signed in', 'user', user.id);
+      return issueSession(current, req);
+    });
+    issued.apply(res);
+    mfa.clearChallenge(res);
+    res.json(issued.session);
   });
   app.post('/api/auth/register', (req: AuthRequest, res) => {
     rateLimit(req, 'register', 10);
@@ -411,6 +487,9 @@ export function createApp(options: AppOptions = {}) {
   app.post('/api/auth/logout', (req: AuthRequest, res) => {
     if (req.sessionToken)
       db.prepare('DELETE FROM sessions WHERE tokenHash=?').run(req.sessionToken);
+    if (req.sessionToken)
+      db.prepare('DELETE FROM mfaPending WHERE sessionHash=?').run(req.sessionToken);
+    mfa.clearChallenge(res);
     res.clearCookie('derma_session', {
       httpOnly: true,
       sameSite: 'lax',
@@ -434,9 +513,29 @@ export function createApp(options: AppOptions = {}) {
       fail(400, 'Choose a new password different from your current password.');
     db.exec('BEGIN IMMEDIATE');
     try {
+      const current = get<User>(db, 'users', user.id);
+      const session = db
+        .prepare(
+          'SELECT userId,expiresAt,csrfToken,mfaCredentialId FROM sessions WHERE tokenHash=?',
+        )
+        .get(req.sessionToken!);
+      if (
+        !current ||
+        current.active === false ||
+        !session ||
+        session.userId !== user.id ||
+        Number(session.expiresAt) <= Date.now() ||
+        session.csrfToken !== req.csrfToken ||
+        !mfaSessionAllowed(db, user.id, session.mfaCredentialId)
+      )
+        fail(401, 'Your session changed. Sign in again.');
+      if (
+        db.prepare('SELECT password FROM users WHERE id=?').get(user.id)?.password !== row.password
+      )
+        fail(409, 'The account password changed. Sign in again.');
       db.prepare('UPDATE users SET password=?,data=? WHERE id=?').run(
         hashPassword(input.newPassword),
-        JSON.stringify({ ...managedAccount(user), mustChangePassword: false }),
+        JSON.stringify({ ...managedAccount(current!), mustChangePassword: false }),
         user.id,
       );
       db.prepare('DELETE FROM sessions WHERE userId=? AND tokenHash!=?').run(
@@ -444,6 +543,7 @@ export function createApp(options: AppOptions = {}) {
         req.sessionToken!,
       );
       db.prepare('DELETE FROM recoveryGrants WHERE userId=?').run(user.id);
+      invalidateMfaTransient(db, user.id);
       audit(req, 'changed password', 'user', user.id);
       db.exec('COMMIT');
     } catch (error) {

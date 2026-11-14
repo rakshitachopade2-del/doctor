@@ -5,6 +5,7 @@ import type { AuthRequest } from './app.ts';
 import { get, hashPassword, list, type DB } from './db.ts';
 import type { Doctor, Patient, User } from '../shared/types.ts';
 import type { AccountSession, ManagedAccount, RecoveryGrant } from '../shared/identity.ts';
+import { invalidateMfaTransient } from './mfa.ts';
 
 interface IdentityContext {
   db: DB;
@@ -75,6 +76,7 @@ export function restrictedSessionAllows(method: string, path: string) {
       '/slots',
       '/knowledge',
       '/health',
+      '/auth/mfa/challenge',
     ].includes(path);
   if (method === 'POST')
     return [
@@ -84,6 +86,8 @@ export function restrictedSessionAllows(method: string, path: string) {
       '/auth/login',
       '/auth/register',
       '/auth/recover',
+      '/auth/mfa/verify',
+      '/auth/mfa/challenge/cancel',
     ].includes(path);
   return method === 'DELETE' && /^\/auth\/sessions\/[a-f0-9]{64}$/.test(path);
 }
@@ -179,6 +183,7 @@ export function registerIdentity(app: Express, context: IdentityContext) {
       ) {
         db.prepare('DELETE FROM sessions WHERE userId=?').run(accountId);
         db.prepare('DELETE FROM recoveryGrants WHERE userId=?').run(accountId);
+        invalidateMfaTransient(db, accountId);
       }
       audit(req, 'updated account access', 'user', accountId);
       db.exec('COMMIT');
@@ -287,6 +292,7 @@ export function registerIdentity(app: Express, context: IdentityContext) {
       );
       db.prepare('DELETE FROM recoveryGrants WHERE userId=?').run(updated.id);
       db.prepare('DELETE FROM sessions WHERE userId=?').run(updated.id);
+      invalidateMfaTransient(db, updated.id);
       audit(
         { ...req, user: updated } as AuthRequest,
         'recovered account password',

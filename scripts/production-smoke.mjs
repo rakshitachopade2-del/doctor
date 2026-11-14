@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -12,11 +12,25 @@ const image = imageIndex >= 0 ? process.argv[imageIndex + 1] : undefined;
 if (imageIndex >= 0 && !image) throw new Error('Pass a container image after --image.');
 const email = 'smoke-admin@example.test';
 const password = randomBytes(24).toString('base64url');
+const mfaKey = randomBytes(32).toString('hex');
 const directory = await mkdtemp(join(tmpdir(), 'derma-production-'));
 const container = `derma-smoke-${randomUUID()}`;
 let child;
 let containerStarted = false;
 let runtimeLog = '';
+
+// Independent authenticator calculation for this synthetic startup check.
+function authenticatorCode(secret) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const bits = [...secret]
+    .map((letter) => alphabet.indexOf(letter).toString(2).padStart(5, '0'))
+    .join('');
+  const bytes = Buffer.from(bits.match(/.{8}/g).map((byte) => parseInt(byte, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+  const mac = createHmac('sha1', bytes).update(counter).digest();
+  return String((mac.readUInt32BE(mac[19] & 15) & 0x7fffffff) % 1000000).padStart(6, '0');
+}
 
 function command(binary, args, env = process.env, input = '') {
   return new Promise((resolve, reject) => {
@@ -51,23 +65,29 @@ async function freePort() {
 try {
   let base;
   if (image) {
-    await command('docker', [
-      'run',
-      '--rm',
-      '-d',
-      '--name',
-      container,
-      '--init',
-      '--cap-drop',
-      'ALL',
-      '--security-opt',
-      'no-new-privileges:true',
-      '-e',
-      'FOLLOW_UP_ESCALATION_AUTO=true',
-      '-p',
-      '127.0.0.1::3001',
-      image,
-    ]);
+    await command(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '-d',
+        '--name',
+        container,
+        '--init',
+        '--cap-drop',
+        'ALL',
+        '--security-opt',
+        'no-new-privileges:true',
+        '-e',
+        'FOLLOW_UP_ESCALATION_AUTO=true',
+        '-e',
+        'MFA_ENCRYPTION_KEY',
+        '-p',
+        '127.0.0.1::3001',
+        image,
+      ],
+      { ...process.env, MFA_ENCRYPTION_KEY: mfaKey },
+    );
     containerStarted = true;
     const address = await command('docker', ['port', container, '3001/tcp']);
     base = `http://${address}`;
@@ -103,6 +123,7 @@ try {
       APP_ORIGIN: '',
       TRUST_PROXY: 'false',
       FOLLOW_UP_ESCALATION_AUTO: 'true',
+      MFA_ENCRYPTION_KEY: mfaKey,
     };
     await command(
       process.execPath,
@@ -141,7 +162,7 @@ try {
     body: JSON.stringify({ email, password }),
   });
   assert.equal(login.status, 200);
-  const cookie = login.headers.get('set-cookie');
+  const cookie = login.headers.getSetCookie().find((value) => value.startsWith('derma_session='));
   assert.match(cookie, /; Secure/i);
   assert.match(cookie, /; HttpOnly/i);
   assert.match(cookie, /; SameSite=Lax/i);
@@ -514,7 +535,10 @@ try {
     body: JSON.stringify({ email, password }),
   });
   assert.equal(clinicianLogin.status, 200);
-  apiHeaders.Cookie = clinicianLogin.headers.get('set-cookie').split(';')[0];
+  apiHeaders.Cookie = clinicianLogin.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('derma_session='))
+    .split(';')[0];
   apiHeaders['X-CSRF-Token'] = (await clinicianLogin.json()).csrfToken;
   const overdueDate = new Date(Date.parse(`${attendanceDay}T12:00:00Z`) - 10 * 86400000)
     .toISOString()
@@ -753,6 +777,36 @@ try {
   assert.match(spa.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal(spa.headers.get('x-content-type-options'), 'nosniff');
   assert.match(spa.headers.get('strict-transport-security'), /max-age=31536000/);
+  const mfaUrl = `${base}/api/auth/mfa`;
+  const mfaStatusResponse = await fetch(mfaUrl, { headers: apiHeaders });
+  assert.equal(mfaStatusResponse.status, 200);
+  assert.match(mfaStatusResponse.headers.get('cache-control'), /no-store/);
+  const mfaStatus = await mfaStatusResponse.json();
+  assert.equal(mfaStatus.available, true);
+  assert.equal(mfaStatus.enabled, false);
+  assert.deepEqual(mfaStatus.history, []);
+  const mfaPreparation = await visitWrite('/auth/mfa/enrollment/prepare', {
+    currentPassword: password,
+    expectedRevision: mfaStatus.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(mfaPreparation.setup.kind, 'enrollment');
+  assert.equal(mfaPreparation.setup.recoveryCodes.length, 10);
+  const enrollmentBody = {
+    pendingId: mfaPreparation.setup.id,
+    code: authenticatorCode(mfaPreparation.setup.secret),
+    savedRecoveryCodes: true,
+    expectedRevision: mfaPreparation.status.revision,
+    requestId: randomUUID(),
+  };
+  const mfaEnabled = await visitWrite('/auth/mfa/enrollment/confirm', enrollmentBody);
+  assert.equal(mfaEnabled.status.enabled, true);
+  assert.equal(mfaEnabled.status.recoveryCodesRemaining, 10);
+  assert.equal(mfaEnabled.event.operation, 'enabled');
+  const enrollmentReplay = await visitWrite('/auth/mfa/enrollment/confirm', enrollmentBody);
+  assert.equal(enrollmentReplay.event.id, mfaEnabled.event.id);
+  assert.equal(JSON.stringify(mfaEnabled).includes(mfaPreparation.setup.secret), false);
+  assert.equal(JSON.stringify(mfaEnabled).includes(mfaPreparation.setup.recoveryCodes[0]), false);
   const logout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: apiHeaders,
@@ -771,10 +825,72 @@ try {
   assert.equal((await fetch(escalationPolicyUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(escalationPreviewUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(escalationHistoryUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(mfaUrl, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,
   );
+  const challenged = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: base },
+    body: JSON.stringify({ email, password }),
+  });
+  assert.equal(challenged.status, 202);
+  const challenge = await challenged.json();
+  assert.equal(challenge.mfaRequired, true);
+  assert.equal(challenge.accountId, account.user.id);
+  assert.equal('user' in challenge, false);
+  const challengeCookie = challenged.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('derma_mfa_challenge='));
+  assert.match(challengeCookie, /; HttpOnly/i);
+  assert.match(challengeCookie, /; Secure/i);
+  const challengeHeaders = {
+    Cookie: challengeCookie.split(';')[0],
+    'X-MFA-CSRF-Token': challenge.csrfToken,
+    'Content-Type': 'application/json',
+    Origin: base,
+  };
+  assert.equal((await fetch(`${base}/api/accounts`, { headers: challengeHeaders })).status, 401);
+  const proofBody = {
+    proof: { method: 'recovery-code', code: mfaPreparation.setup.recoveryCodes[0] },
+  };
+  const proof = await fetch(`${base}/api/auth/mfa/verify`, {
+    method: 'POST',
+    headers: challengeHeaders,
+    body: JSON.stringify(proofBody),
+  });
+  assert.equal(proof.status, 200);
+  const verified = await proof.json();
+  assert.equal(verified.user.id, account.user.id);
+  const verifiedCookie = proof.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('derma_session='));
+  const verifiedHeaders = {
+    ...apiHeaders,
+    Cookie: verifiedCookie.split(';')[0],
+    'X-CSRF-Token': verified.csrfToken,
+  };
+  const remaining = await (await fetch(mfaUrl, { headers: verifiedHeaders })).json();
+  assert.equal(remaining.enabled, true);
+  assert.equal(remaining.recoveryCodesRemaining, 9);
+  const proofReplay = await fetch(`${base}/api/auth/mfa/verify`, {
+    method: 'POST',
+    headers: challengeHeaders,
+    body: JSON.stringify(proofBody),
+  });
+  assert.equal(proofReplay.status, 401);
+  assert.equal(
+    (
+      await fetch(`${base}/api/auth/logout`, {
+        method: 'POST',
+        headers: verifiedHeaders,
+        body: '{}',
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
   console.log(
     `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, security headers, logout.`,
   );

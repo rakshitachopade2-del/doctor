@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { startTransition, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Check,
@@ -27,6 +27,7 @@ import {
   PageHeader,
 } from '../components/ui';
 import './identity.css';
+import { MfaSecurityCard } from '../components/MfaSecurity';
 
 export function AccountsPage() {
   const { session } = useSession();
@@ -435,7 +436,7 @@ function RecoveryGrantModal({
 }
 
 export function SecurityPage() {
-  const { session, refresh } = useSession();
+  const { session, refresh, clearSession } = useSession();
   const toast = useToast();
   const navigate = useNavigate();
   const sessions = useResource<AccountSession[]>('/api/auth/sessions');
@@ -487,8 +488,10 @@ export function SecurityPage() {
   async function signOut() {
     try {
       await api('/api/auth/logout', { method: 'POST' });
-      navigate('/login', { replace: true });
-      await refresh();
+      startTransition(() => {
+        navigate('/login', { replace: true });
+        clearSession();
+      });
     } catch (e) {
       toast((e as Error).message, 'error');
     }
@@ -584,6 +587,13 @@ export function SecurityPage() {
           </form>
         </Card>
       </div>
+      {!required && (
+        <MfaSecurityCard
+          onChanged={async () => {
+            await Promise.all([refresh(), sessions.reload()]);
+          }}
+        />
+      )}
       <Card className="session-card">
         <div className="section-heading">
           <div>
