@@ -36,6 +36,7 @@ import { createScheduling } from './scheduling.ts';
 import { createClinicResources } from './clinic-resources.ts';
 import { registerRecordSearch } from './record-search.ts';
 import { registerAttendance } from './attendance.ts';
+import { registerVisitDuration } from './visit-duration.ts';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -528,17 +529,22 @@ export function createApp(options: AppOptions = {}) {
         mode: z.enum(['in-person', 'online']).optional(),
         excludeAppointmentId: required.optional(),
       })
+      .strict()
       .parse(req.query);
     let patientId =
       req.user?.role === 'patient' && !req.user.mustChangePassword ? req.user.patientId : undefined;
+    let customDurationMinutes: number | undefined;
     if (input.excludeAppointmentId) {
       if (req.user?.mustChangePassword)
         fail(403, 'Change your temporary password before accessing appointment details.');
       actor(req);
-      patientId = appointmentGet(req, input.excludeAppointmentId).patientId;
+      const appointment = appointmentGet(req, input.excludeAppointmentId);
+      patientId = appointment.patientId;
+      if (appointment.durationPolicy === 'custom')
+        customDurationMinutes = appointment.durationMinutes ?? 30;
     }
-    const slots = scheduling.availableSlots({ ...input, patientId });
-    const duration = scheduling.schedule(input.doctorId).durationMinutes;
+    const slots = scheduling.availableSlots({ ...input, patientId, customDurationMinutes });
+    const duration = customDurationMinutes ?? scheduling.schedule(input.doctorId).durationMinutes;
     res.json(
       input.excludeAppointmentId
         ? clinicResources.availableSlotsForAppointment(
@@ -635,6 +641,8 @@ export function createApp(options: AppOptions = {}) {
         reason: short.min(1),
         waitlistId: required.optional(),
         patientConfirmed: z.literal(true).optional(),
+        durationMinutes: z.never().optional(),
+        durationPolicy: z.never().optional(),
       })
       .parse(req.body);
     const { waitlistId, patientConfirmed, ...appointmentInput } = input;
@@ -732,6 +740,8 @@ export function createApp(options: AppOptions = {}) {
           mode: input.mode ?? a.mode,
           excludeAppointmentId: a.id,
           patientId: a.patientId,
+          customDurationMinutes:
+            a.durationPolicy === 'custom' ? (a.durationMinutes ?? 30) : undefined,
         });
       }
       const d = get<Doctor>(db, 'doctors', input.doctorId ?? a.doctorId)!;
@@ -758,15 +768,22 @@ export function createApp(options: AppOptions = {}) {
         a.id,
       );
       if (
-        JSON.stringify([a.date, a.time, a.mode, a.doctorId, a.status]) !==
-        JSON.stringify([value.date, value.time, value.mode, value.doctorId, value.status])
+        JSON.stringify([a.date, a.time, a.mode, a.doctorId, a.status, a.durationMinutes ?? 30]) !==
+        JSON.stringify([
+          value.date,
+          value.time,
+          value.mode,
+          value.doctorId,
+          value.status,
+          value.durationMinutes ?? 30,
+        ])
       ) {
         notifyPatient(db, value.patientId, `appointment-changed:${value.id}:${id()}`, {
           kind: 'appointment',
           title: rescheduling
             ? 'Your appointment was rescheduled'
             : `Appointment ${value.status.replaceAll('-', ' ')}`,
-          detail: `${value.date} at ${value.time} IST · ${value.doctorName}`,
+          detail: `${value.date} at ${value.time} IST · ${value.durationMinutes ?? 30} minutes · ${value.doctorName}`,
           href: rescheduling ? '/my-care' : '/my-care/record?tab=visits',
         });
       }
@@ -798,7 +815,7 @@ export function createApp(options: AppOptions = {}) {
           `DTSTAMP:${stamp(new Date())}`,
           `DTSTART:${stamp(start)}`,
           `DTEND:${stamp(end)}`,
-          `SUMMARY:${esc(`Consultation with ${a.doctorName}`)}`,
+          `SUMMARY:${esc(`${a.durationPolicy === 'custom' ? 'Clinic visit' : 'Consultation'} with ${a.doctorName}`)}`,
           `LOCATION:${esc(a.mode === 'online' ? 'Online — clinic will share joining details' : settings(db).address)}`,
           `STATUS:${a.status === 'cancelled' ? 'CANCELLED' : 'CONFIRMED'}`,
           'END:VEVENT',
@@ -1157,6 +1174,16 @@ export function createApp(options: AppOptions = {}) {
   });
   scheduling.register(app);
   clinicResources.register(app);
+  registerVisitDuration(app, {
+    db,
+    actor,
+    audit,
+    fail,
+    patientAccess,
+    appointmentGet,
+    scheduling,
+    clinicResources,
+  });
   registerRecordSearch(app, { db, actor, fail });
   registerAttendance(app, { db, actor, audit, fail });
   waitlist.register(app);

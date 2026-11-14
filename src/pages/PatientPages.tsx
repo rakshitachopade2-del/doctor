@@ -72,6 +72,11 @@ const dateAfter = (days: number) => {
   return date.toISOString().slice(0, 10);
 };
 const readableStatus = (status: string) => status.replaceAll('-', ' ');
+const visitInterval = (time: string, durationMinutes: number) => {
+  const [hour, minute] = time.split(':').map(Number);
+  const end = hour * 60 + minute + durationMinutes;
+  return `${time}–${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
+};
 
 export function DiscoverPage() {
   const doctors = useResource<Doctor[]>('/api/doctors');
@@ -387,6 +392,10 @@ function BookingForm() {
       setDoctorId(doctors.data[0].id);
   }, [doctors.data, doctorId, appointmentId, waitlistId]);
   const doctor = doctors.data?.find((value) => value.id === doctorId);
+  const customLength = existing?.durationPolicy === 'custom';
+  const durationMinutes = customLength
+    ? (existing.durationMinutes ?? 30)
+    : (doctor?.appointmentDurationMinutes ?? 30);
   const slots = useResource<string[]>(
     doctorId && date
       ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}&mode=${mode}${appointmentId ? `&excludeAppointmentId=${encodeURIComponent(appointmentId)}` : ''}`
@@ -531,17 +540,23 @@ function BookingForm() {
             </span>
             <span>
               <Clock3 size={18} />
-              {booked.time} · Asia/Kolkata
+              {visitInterval(booked.time, booked.durationMinutes ?? 30)} · Asia/Kolkata ·{' '}
+              {booked.durationMinutes ?? 30} minutes
             </span>
             <span>
               {booked.mode === 'online' ? <Video size={18} /> : <MapPin size={18} />}
-              {booked.mode === 'online'
-                ? 'Online consultation — the clinic will coordinate connection details'
-                : 'In-person consultation'}
+              {booked.durationPolicy === 'custom'
+                ? booked.mode === 'online'
+                  ? 'Online clinic visit — the clinic will coordinate connection details'
+                  : 'In-person clinic visit'
+                : booked.mode === 'online'
+                  ? 'Online consultation — the clinic will coordinate connection details'
+                  : 'In-person consultation'}
             </span>
           </div>
           <p className="muted">
-            Consultation fee: {money(booked.fee)} · Payment is coordinated by the clinic.
+            {booked.durationPolicy === 'custom' ? 'Visit fee' : 'Consultation fee'}:{' '}
+            {money(booked.fee)} · Payment is coordinated by the clinic.
           </p>
         </Card>
         <div className="row">
@@ -740,7 +755,7 @@ function BookingForm() {
               </div>
               <div>
                 <span>Time</span>
-                <strong>{time || 'Choose a time'}</strong>
+                <strong>{time ? visitInterval(time, durationMinutes) : 'Choose a time'}</strong>
               </div>
               <div>
                 <span>Visit</span>
@@ -748,13 +763,20 @@ function BookingForm() {
               </div>
               <div>
                 <span>Duration</span>
-                <strong>{doctor?.appointmentDurationMinutes || 30} minutes</strong>
+                <strong>{durationMinutes} minutes</strong>
               </div>
               <div className="summary-total">
-                <span>Consultation fee</span>
+                <span>{customLength ? 'Visit fee' : 'Consultation fee'}</span>
                 <strong>{doctor ? money(doctor.fee) : '—'}</strong>
               </div>
             </div>
+            {customLength && (
+              <p className="small muted">
+                This visit keeps its booked length when you choose another time or clinician.
+                Contact the clinic to change its length. Rescheduling uses the selected clinician’s
+                current visit fee.
+              </p>
+            )}
             <p className="small muted">
               Your slot is reserved when you confirm. Payment is arranged with the clinic.
             </p>
@@ -1332,12 +1354,18 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
                     <div>
                       <h3>{appointment.doctorName}</h3>
                       <p>
-                        {formatDate(appointment.date)} · {appointment.time} IST
+                        {formatDate(appointment.date)} ·{' '}
+                        {visitInterval(appointment.time, appointment.durationMinutes ?? 30)} IST
                       </p>
                       <p className="muted">
-                        {appointment.mode === 'online'
-                          ? 'Online consultation'
-                          : 'In-person consultation'}
+                        {appointment.durationPolicy === 'custom'
+                          ? appointment.mode === 'online'
+                            ? 'Online clinic visit'
+                            : 'In-person clinic visit'
+                          : appointment.mode === 'online'
+                            ? 'Online consultation'
+                            : 'In-person consultation'}{' '}
+                        · {appointment.durationMinutes ?? 30} minutes
                       </p>
                       <Badge>{readableStatus(appointment.status)}</Badge>
                       <div className="appointment-actions">
@@ -2020,7 +2048,12 @@ function PatientRecordView({ patientId }: { patientId: string }) {
         {tab === 'visits' && (
           <Card>
             {data.appointments.length ? (
-              <div className="table-wrap">
+              <div
+                className="table-wrap"
+                role="region"
+                aria-label="Your appointment history; scroll horizontally for all columns"
+                tabIndex={0}
+              >
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -2037,7 +2070,10 @@ function PatientRecordView({ patientId }: { patientId: string }) {
                         <tr key={appointment.id}>
                           <td>
                             {formatDate(appointment.date)}
-                            <span className="table-subline">{appointment.time} IST</span>
+                            <span className="table-subline">
+                              {visitInterval(appointment.time, appointment.durationMinutes ?? 30)}{' '}
+                              IST · {appointment.durationMinutes ?? 30} minutes
+                            </span>
                           </td>
                           <td>{appointment.doctorName}</td>
                           <td>

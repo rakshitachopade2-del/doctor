@@ -381,6 +381,101 @@ try {
   });
   assert.equal(correction.status, 200);
   assert.equal((await correction.json()).changes.length, 1);
+  async function visitWrite(path, body, expectedStatus = 200, method = 'POST') {
+    const response = await fetch(`${base}/api${path}`, {
+      method,
+      headers: apiHeaders,
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, expectedStatus);
+    return response.json();
+  }
+  const visitDoctor = await visitWrite(
+    '/doctors',
+    {
+      name: 'Synthetic Duration Doctor',
+      title: 'Dermatologist',
+      qualifications: 'Synthetic verification profile',
+      specialties: ['General dermatology'],
+      experience: 1,
+      fee: 600,
+      bio: 'Temporary production verification only.',
+      languages: ['English'],
+    },
+    201,
+  );
+  await visitWrite(
+    `/schedules/${visitDoctor.id}`,
+    {
+      durationMinutes: 20,
+      windows: Array.from({ length: 7 }, (_, day) => ({
+        day,
+        start: '09:00',
+        end: '18:00',
+        mode: 'both',
+      })),
+    },
+    200,
+    'PUT',
+  );
+  const visitDay = new Date(Date.parse(`${attendanceDay}T12:00:00Z`) + 7 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const customBookingBody = {
+    patientId: patient.id,
+    doctorId: visitDoctor.id,
+    date: visitDay,
+    time: '09:05',
+    mode: 'in-person',
+    reason: 'Synthetic extended visit',
+    durationMinutes: 90,
+    requestId: randomUUID(),
+  };
+  const customVisit = await visitWrite('/visit-duration/bookings', customBookingBody, 201);
+  assert.equal(customVisit.appointment.durationPolicy, 'custom');
+  assert.equal(customVisit.appointment.durationMinutes, 90);
+  const customReplay = await visitWrite('/visit-duration/bookings', customBookingBody);
+  assert.equal(customReplay.event.id, customVisit.event.id);
+  const movedVisit = await visitWrite(
+    `/appointments/${customVisit.appointment.id}`,
+    {
+      date: visitDay,
+      time: '09:10',
+    },
+    200,
+    'PATCH',
+  );
+  assert.equal(movedVisit.durationMinutes, 90);
+  const calendar = await fetch(`${base}/api/appointments/${movedVisit.id}/calendar`, {
+    headers: apiHeaders,
+  });
+  assert.equal(calendar.status, 200);
+  const calendarText = await calendar.text();
+  const calendarStamp = (value) =>
+    new Date(value)
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\.\d{3}Z$/, 'Z');
+  const visitStart = Date.parse(`${visitDay}T09:10:00+05:30`);
+  assert.ok(calendarText.includes(`DTSTART:${calendarStamp(visitStart)}`));
+  assert.ok(calendarText.includes(`DTEND:${calendarStamp(visitStart + 90 * 60000)}`));
+  const durationUrl = `${base}/api/appointments/${movedVisit.id}/duration`;
+  const durationResponse = await fetch(durationUrl, { headers: apiHeaders });
+  assert.equal(durationResponse.status, 200);
+  assert.match(durationResponse.headers.get('cache-control'), /no-store/);
+  const durationContext = await durationResponse.json();
+  const privateDurationReason = 'Synthetic private duration adjustment reason';
+  const restoredDuration = await visitWrite(`/appointments/${movedVisit.id}/duration`, {
+    durationPolicy: 'schedule',
+    date: visitDay,
+    time: '09:20',
+    reason: privateDurationReason,
+    expectedRevision: durationContext.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(restoredDuration.appointment.durationMinutes, 20);
+  assert.equal(restoredDuration.appointment.durationPolicy, 'schedule');
+  assert.equal((await fetch(durationUrl)).status, 401);
   async function billingWrite(path, body, status = 200) {
     const response = await fetch(`${base}/api${path}`, {
       method: 'POST',
@@ -450,6 +545,7 @@ try {
   assert.equal(summary.invoices[0].status, 'no-charge');
   assert.deepEqual(summary.imageAnnotations, []);
   assert.deepEqual(summary.carePlans, []);
+  assert.equal(JSON.stringify(summary).includes(privateDurationReason), false);
   const summaryDownload = await fetch(`${summaryUrl}/download?revision=${summary.revision}`, {
     headers: apiHeaders,
   });
@@ -481,6 +577,7 @@ try {
   assert.equal((await fetch(`${base}/api/clinic-resources`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/search/patients`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(attendanceUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(durationUrl, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,

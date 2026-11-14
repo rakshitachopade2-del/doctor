@@ -57,6 +57,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)attendance\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5190' },
     },
+    {
+      name: 'visit-duration',
+      testMatch: /(?:^|\/)visit-duration\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5191' },
+    },
   ],
   webServer: [
     {
@@ -104,6 +109,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3018 E2E_VITE_PORT=5190 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5190',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3019 E2E_VITE_PORT=5191 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5191',
       reuseExistingServer: false,
       timeout: 60000,
     },

@@ -18,6 +18,8 @@ interface SlotQuery {
   mode?: 'in-person' | 'online';
   excludeAppointmentId?: string;
   patientId?: string;
+  /** Internal, authorized override. Custom visits retain this length on rescheduling. */
+  customDurationMinutes?: number;
 }
 const timeSchema = z
   .string()
@@ -175,6 +177,8 @@ export function createScheduling(context: SchedulingContext) {
   }
   function availableSlots(query: SlotQuery): string[] {
     const value = schedule(query.doctorId);
+    const duration = query.customDurationMinutes ?? value.durationMinutes;
+    const cadence = query.customDurationMinutes === undefined ? value.durationMinutes : 5;
     const today = clinicToday();
     if (query.date < today || query.date > addDays(today, 180)) return [];
     const day = new Date(`${query.date}T12:00:00Z`).getUTCDay();
@@ -186,11 +190,11 @@ export function createScheduling(context: SchedulingContext) {
     )) {
       for (
         let start = minutes(window.start);
-        start + value.durationMinutes <= minutes(window.end);
-        start += value.durationMinutes
+        start + duration <= minutes(window.end);
+        start += cadence
       ) {
         const time = clockTime(start),
-          end = start + value.durationMinutes;
+          end = start + duration;
         if (Date.parse(`${query.date}T${time}:00+05:30`) <= Date.now()) continue;
         if (closed(query.doctorId, query.date, start, end, blocks)) continue;
         if (
@@ -214,13 +218,15 @@ export function createScheduling(context: SchedulingContext) {
   ): number {
     const value = schedule(query.doctorId),
       today = clinicToday();
+    const duration = query.customDurationMinutes ?? value.durationMinutes;
+    const cadence = query.customDurationMinutes === undefined ? value.durationMinutes : 5;
     if (query.date < today || query.date > addDays(today, 180))
       return fail(400, 'Choose a date within the next 180 days.');
     if (Date.parse(`${query.date}T${query.time}:00+05:30`) <= Date.now())
       return fail(400, 'This appointment time has already passed.');
     timeSchema.parse(query.time);
     const start = minutes(query.time),
-      end = start + value.durationMinutes;
+      end = start + duration;
     const day = new Date(`${query.date}T12:00:00Z`).getUTCDay();
     const withinWindow = value.windows.some(
       (window) =>
@@ -228,7 +234,7 @@ export function createScheduling(context: SchedulingContext) {
         modeMatches(window.mode, query.mode) &&
         start >= minutes(window.start) &&
         end <= minutes(window.end) &&
-        (start - minutes(window.start)) % value.durationMinutes === 0,
+        (start - minutes(window.start)) % cadence === 0,
     );
     if (!withinWindow)
       return fail(
@@ -251,7 +257,7 @@ export function createScheduling(context: SchedulingContext) {
         409,
         'This time overlaps an existing appointment. Choose another available slot.',
       );
-    return value.durationMinutes;
+    return duration;
   }
   function register(app: Express) {
     const { actor, audit } = context;

@@ -46,6 +46,7 @@ flowchart LR
 | `server/db.ts`                                 | Schema, database utilities, synthetic demo seed                                           |
 | `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                        |
 | `server/scheduling.ts`                         | Schedule/closure storage, duration-aware slot generation, booking validation              |
+| `server/visit-duration.ts`                     | Custom booking, explicit length changes, private immutable events and retry receipts      |
 | `server/record-search.ts`                      | SQL-filtered staff directories and appointment/audit pages with bounded results           |
 | `src/record-search.ts`                         | Query-scoped page loading, pagination validation and obsolete-response suppression        |
 | `src/pages/AuditPage.tsx`                      | Administrator history search with actor/action/record/date filters                        |
@@ -95,6 +96,16 @@ The permission model is clinic-wide for clinicians. A second organization must u
 Availability uses Asia/Kolkata and a 180-day booking horizon. Slot generation excludes elapsed times, blocked periods, the doctor’s occupied intervals, and a signed-in patient’s occupied intervals. Excluding an appointment during rescheduling requires access to that appointment. Every new or rescheduled appointment records its duration; older appointments without a duration are treated as 30 minutes. Calendar export uses the recorded duration.
 
 Schedule updates and closures run transactionally and reject changes that would invalidate active future bookings. Changing the default visit length does not rewrite existing appointments. Public clinic-hours text is separate from these bookable schedules.
+
+## Custom visit duration
+
+`Appointment.durationPolicy` separates schedule-based consultations from explicit custom lengths. An absent legacy policy means `schedule`; absent duration remains 30 minutes. Custom visits retain their saved minutes through generic staff and patient rescheduling. Ordinary visits still adopt the selected doctor's current schedule duration. Shared scheduling resolves one effective duration for slot generation and write validation, using five-minute starts for custom visits and the existing schedule cadence for ordinary visits.
+
+`server/visit-duration.ts` owns staff-only custom booking and explicit duration-change commands. Its context revision covers the current appointment and current doctor schedule, fee and name. Source events and actor-bound request receipts remain immutable; replay returns the original receipt together with the current appointment, even if the visit has since moved or closed. The private history records custom bookings and explicit length changes only, without inventing history for earlier ordinary edits.
+
+Duration-only changes preserve the booked fee/name; an actual date/time move follows the normal rescheduling fee rule. Appointment updates, retained resource moves/resizing, private events, audit and patient activity commit in the scheduling transaction. Complete interval validation protects sessions, closures, both patient/doctor occupancy and room/equipment claims. Resource slot filtering uses that same effective duration. Patients receive only the current duration/policy and ordinary appointment updates; staff duration reasons and source revisions never enter patient care summaries.
+
+The clinic booking dialog retains exact custom-booking attempts after uncertain responses. A separate duration editor fixes the patient/doctor/mode, allows date/time to move with the new length, and requires explicit source review after a conflict. Existing procedure records retain their immutable appointment associations; this feature neither schedules an unlinked procedure plan nor updates agreements, clinical completion or invoices.
 
 ## Waitlist requests and confirmed booking
 

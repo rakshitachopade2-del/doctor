@@ -30,9 +30,10 @@ These are intentionally public **development-only credentials**. Production star
 
 - **Discovery:** doctor profiles, focus areas, qualifications, languages, consultation fees, and clinic contact information.
 - **Booking:** in-person or online appointments, live availability, protection against overlapping doctor and patient bookings, rescheduling, cancellation, check-in, consultation progression, no-shows, and `.ics` calendar export with the recorded visit duration.
+- **Custom visit lengths:** staff can reserve 15–240 minutes for an extended visit, change its length with retained history, or restore the doctor's default. Custom lengths stay intact when patients or staff reschedule.
 - **Rooms and equipment:** optional staff reservations for existing visits, maintenance windows, an operational diary, conflict-safe rescheduling and retained allocation history. Each resource represents one physical room or unit.
 - **Waitlist:** patient and reception requests with a preferred clinician, mode and date window; explicit confirmation before booking; atomic appointment linkage, withdrawal and retained history. Requests do not reserve slots.
-- **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute appointments, doctor leave, and clinic-wide closures. Schedule changes protect existing bookings.
+- **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute consultation defaults, doctor leave, and clinic-wide closures. Schedule changes protect existing bookings.
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
 - **Record search:** paginated patient and appointment lists, historical appointment filters, and administrator audit search beyond the latest 500 entries. Staff views load 25 matching records per page.
 - **Staff attendance:** personal clock-in/out, private attendance history, administrator missed-entry corrections and voids, and filtered timesheets with CSV export. Original entries and reasons remain recorded.
@@ -107,6 +108,16 @@ Administrators can use **Activity log** to search the complete stored audit hist
 
 Results show current records. New entries or edits can change page positions between requests; refresh to check the latest view. Search treats punctuation such as `%` and `_` literally. Matching ignores ASCII letter case; non-ASCII text is matched literally. These changes cover the staff directory, appointment list and audit screen; existing booking selectors and patient records retain their current workflows.
 
+## Reserve time for longer visits
+
+In **New appointment**, staff can choose **Custom length** and reserve 15–240 minutes in five-minute increments. Available starts cover the full visit, checking the doctor, patient, weekly sessions and closures. Custom starts use five-minute steps within each session. Ordinary consultations and waitlist bookings continue to use the doctor's default length.
+
+For an existing future scheduled visit, open **Change visit length**. Choose a custom length or restore the current doctor default, enter an internal reason, and select a fitting time. The date and time can move in the same save. Retained room/equipment reservations move or resize together; a conflict leaves the original appointment and allocations intact. **Visit length history** preserves the original change, actor, reason and before/after details.
+
+Patients see the saved duration when viewing or rescheduling their visits and in calendar exports. They cannot set the length themselves. A custom visit keeps its length even if the doctor's default later changes; staff must explicitly restore the default policy. Ordinary consultation rescheduling still adopts the selected doctor's current default.
+
+Changing only the length preserves the booked fee and clinician name. Moving the date or time adopts the current clinician fee/name under the existing rescheduling rule. Minutes never automatically multiply a fee or change an invoice. Custom length does not record clinical consent, choose suitable equipment or create a procedure plan. Existing procedure plans keep their original appointment links; scheduling an already saved unlinked procedure remains a separate extension.
+
 ## Record staff attendance
 
 Open **Attendance** from the clinic workspace. Each staff member can clock themselves in or out using the server time and inspect their own history. An account can have one open entry; signing out or suspending the account does not close it.
@@ -121,11 +132,11 @@ Completed entries are limited to 36 hours as a data-entry constraint. An older o
 
 Open **Rooms & equipment** to inspect the daily reservation diary and catalogue. Administrators can create a physical room or equipment unit, correct its details with a reason, archive it, and record or cancel maintenance windows. Names are unique across active and archived resources. Each item has capacity for one visit at a time; use separate catalogue entries for separate physical units.
 
-Book an appointment first, then open **Resources** on its appointment row to reserve up to eight items together. Booking alone reserves no room or equipment. Both clinic and online visits can have reservations. Availability follows the full recorded appointment interval, and adjacent visits can share a resource. Rescheduling carries the entire selection to the new time and current clinician duration, or rejects the change without moving anything. Patient rescheduling follows the same constraints without exposing internal resource details.
+Book an appointment first, then open **Resources** on its appointment row to reserve up to eight items together. Booking alone reserves no room or equipment. Both clinic and online visits can have reservations. Availability follows the full recorded appointment interval, and adjacent visits can share a resource. Rescheduling carries the entire selection to the new time, using the retained custom length or the current doctor default, or rejects the change without moving anything. Patient rescheduling follows the same constraints without exposing internal resource details.
 
 Staff can add or replace allocations before a scheduled visit starts, or while a checked-in/in-consultation visit is still within its scheduled interval. Clear all allocations to release an open visit's resources, including a stale visit whose interval has passed. Cancellation and no-show release capacity automatically; a completed visit retains its recorded interval. Terminal visits keep read-only history. Archive or maintenance operations that conflict with retained reservations are rejected; resolve those allocations first.
 
-The diary records scheduled reservations, not live occupancy or overruns. Resource changes and reasons remain staff-only and do not affect billing, consumable stock or patient care summaries. No required-equipment rules, clinical compatibility checks, maintenance certification, cleaning buffers or separate procedure durations are inferred. After an uncertain response, retry the exact request while the form remains open; concurrent changes require reviewing refreshed context.
+The diary records scheduled reservations, not live occupancy or overruns. Resource changes and reasons remain staff-only and do not affect billing, consumable stock or patient care summaries. No required-equipment rules, clinical compatibility checks, maintenance certification or cleaning buffers are inferred. After an uncertain response, retry the exact request while the form remains open; concurrent changes require reviewing refreshed context.
 
 ## Coordinate investigation reviews
 

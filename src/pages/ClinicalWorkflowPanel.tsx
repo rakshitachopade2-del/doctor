@@ -497,6 +497,9 @@ export function ClinicalWorkflowPanel({
                 a.createdAt.localeCompare(b.createdAt),
               );
               const latest = agreements.at(-1);
+              const linkedAppointment = appointments.find(
+                (entry) => entry.id === procedure.appointmentId,
+              );
               return (
                 <Card key={procedure.id} className="cw-procedure">
                   <div className="cw-record-heading">
@@ -521,6 +524,22 @@ export function ClinicalWorkflowPanel({
                       {statusText[procedure.status]}
                     </Badge>
                   </div>
+                  {linkedAppointment && (
+                    <div className="cw-detail">
+                      <span>Linked appointment</span>
+                      <p>
+                        <Link
+                          to={`/clinic/appointments?date=${linkedAppointment.date}&patientId=${encodeURIComponent(patientId)}`}
+                        >
+                          {formatDate(linkedAppointment.date)} · {linkedAppointment.time} IST ·{' '}
+                          {linkedAppointment.durationMinutes ?? 30} minutes
+                        </Link>{' '}
+                        · {linkedAppointment.doctorName} ·{' '}
+                        {linkedAppointment.status.replaceAll('-', ' ')}
+                        {linkedAppointment.durationPolicy === 'custom' ? ' · Custom length' : ''}
+                      </p>
+                    </div>
+                  )}
                   <div className="grid-2">
                     <Detail label="Indication" value={procedure.indication} />
                     <Detail label="Expected benefits" value={procedure.benefits} />
@@ -934,7 +953,8 @@ function ProcedureModal({
             .filter((a) => !['cancelled', 'no-show'].includes(a.status))
             .map((a) => (
               <option key={a.id} value={a.id}>
-                {formatDate(a.date)} · {a.time} · {a.reason}
+                {formatDate(a.date)} · {a.time} IST · {a.durationMinutes ?? 30} minutes ·{' '}
+                {a.doctorName} · {a.reason}
               </option>
             ))}
         </select>

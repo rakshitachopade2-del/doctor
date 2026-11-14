@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.13.0**, verified locally on **11 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.14.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 259 passed                                              |
-| Browser and accessibility tests | 47 passed                                               |
+| API and online-backup tests     | 280 passed                                              |
+| Browser and accessibility tests | 50 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -34,6 +34,10 @@ The 18 attendance API checks cover staff ownership and administrator boundaries,
 
 Attendance browser journeys verify lost/malformed response retries without duplicate entries, duplicate clock-in prevention, administrator missed entries, explicit review of concurrent corrections, void confirmation and original-history preservation. Reports exercise overnight IST intervals, inactive staff, formula-safe CSV, stale export rejection, incorrect MIME/revision rejection, cancelled downloads after a report fails to refresh, and rapid view/reset/filter entry. Staff and patient access boundaries are exercised alongside keyboard dialogs and 320-pixel history/timesheet accessibility. The production smoke check verifies empty attendance on a fresh database, server clock-in/out, exact replay, retained two-event history, private reads and logout rejection.
 
+The 21 custom-duration API checks cover ordinary/legacy compatibility, custom five-minute starts relative to session boundaries, 15–240-minute limits, full-session fit, doctor/patient conflicts, breaks and closures, staff-only evidence, rejected patient overrides, retained custom length through doctor/mode/default changes, explicit restoration, fee/name preservation, stale source revisions, terminal-state restrictions and exact replay after later cancellation. Resource checks exercise full-interval overlap and adjacency, maintenance, retained allocation resizing/moving and transaction rollback across appointments, reservations, evidence, audit and notifications. Calendar and summary checks verify actual minutes and private-reason exclusion. Additional checks retain original procedure/agreement/invoice links, ordinary waitlist behavior, immutable events, additive restart and a coherent context/audit transaction under an external writer.
+
+Custom-duration browser journeys cover lost/malformed booking and length-change responses, exact retries without duplicate events or allocations, explicit review after concurrent doctor/resource changes, refreshed availability for the unchanged slot query, fee/name preservation, restoring the schedule default, patient rescheduling with the saved custom interval, and patient calendar/record displays. Mobile accessibility checks include booking, retained-length confirmation, visit history and the staff length editor at 320 pixels. The horizontally scrolling patient visit-history table has a named keyboard-focusable region. The production smoke check books a synthetic 90-minute visit on a 20-minute schedule, verifies replay and generic rescheduling retain 90 minutes, checks its calendar interval, restores the default explicitly, and verifies private reason and access boundaries; this passes locally and in the disposable production container.
+
 Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout is also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
 
 Screenshots use only synthetic demonstration records:
@@ -46,4 +50,4 @@ Screenshots use only synthetic demonstration records:
 
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
-CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search and attendance workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance and visit-duration workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.

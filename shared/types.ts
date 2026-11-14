@@ -55,6 +55,8 @@ export interface Appointment {
   doctorName: string;
   fee: number;
   durationMinutes?: number;
+  /** Omitted legacy values use the doctor's schedule policy when rescheduled. */
+  durationPolicy?: 'schedule' | 'custom';
   createdAt: string;
 }
 export interface Intake {

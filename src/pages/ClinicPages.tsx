@@ -37,9 +37,20 @@ import { Pagination } from '../components/Pagination';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import { AppointmentResourcesModal } from '../components/AppointmentResourcesModal';
+import { VisitDurationModal } from '../components/VisitDurationModal';
+import {
+  checkedCustomBooking,
+  checkedVisitSlots,
+  isVisitRequestCollision,
+  useVisitData,
+  validCustomMinutes,
+  visitInterval,
+  visitMinutes,
+  type CustomVisitAttempt,
+} from '../components/visit-duration-helpers';
 import { ImageAnnotationModal } from '../components/ImageAnnotations';
 import { FollowUpPlanSection } from './FollowUpPages';
-import { api, formatDate, money, today, useResource, useSession, useToast } from '../lib';
+import { api, ApiError, formatDate, money, today, useResource, useSession, useToast } from '../lib';
 import {
   Avatar,
   Badge,
@@ -193,10 +204,23 @@ export function AppointmentsPage() {
     params.get('new') === '1' ? 'new' : null,
   );
   const [busy, setBusy] = useState('');
+  const [pendingCustomBooking, setPendingCustomBooking] = useState<CustomVisitAttempt | null>(null);
   const [moreActions, setMoreActions] = useState<Appointment | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const focusResults = useRef(false);
   const resourceAppointmentId = params.get('resources');
+  const durationAppointmentId = params.get('duration');
+  function openDuration(appointmentId: string | null) {
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (appointmentId) next.set('duration', appointmentId);
+        else next.delete('duration');
+        return next;
+      },
+      { replace: true },
+    );
+  }
   function changeFilters(values: Record<string, string | null>) {
     focusResults.current = false;
     setParams((previous) => {
@@ -323,11 +347,29 @@ export function AppointmentsPage() {
         title="Appointments"
         description="A clear view of your day, from arrival to follow-up."
         actions={
-          <button className="button button-primary" onClick={() => setBooking('new')}>
+          <button
+            className="button button-primary"
+            disabled={!!pendingCustomBooking}
+            onClick={() => setBooking('new')}
+          >
             <Plus size={17} /> New appointment
           </button>
         }
       />
+      {pendingCustomBooking && !booking && (
+        <div className="notice visit-duration-pending">
+          <div>
+            <strong>A custom booking is awaiting confirmation.</strong>
+            <p>
+              The exact request is retained while this page stays open. Resume it before booking
+              another visit.
+            </p>
+          </div>
+          <button className="button button-secondary" onClick={() => setBooking('new')}>
+            Resume custom booking
+          </button>
+        </div>
+      )}
       <div className="clinic-toolbar clinic-search-toolbar">
         <div className="row date-navigator">
           <button
@@ -504,7 +546,11 @@ export function AppointmentsPage() {
             }
             description="There are no appointments matching this view."
             action={
-              <button className="button button-secondary" onClick={() => setBooking('new')}>
+              <button
+                className="button button-secondary"
+                disabled={!!pendingCustomBooking}
+                onClick={() => setBooking('new')}
+              >
                 <Plus size={16} /> Book an appointment
               </button>
             }
@@ -535,6 +581,9 @@ export function AppointmentsPage() {
                       )}
                       <strong className="time-text">{timeLabel(a.time)}</strong>
                       <span className="table-sub">{a.durationMinutes ?? 30} min</span>
+                      {a.durationPolicy === 'custom' && (
+                        <span className="table-sub">Custom length</span>
+                      )}
                     </td>
                     <td>
                       <div className="row">
@@ -563,6 +612,15 @@ export function AppointmentsPage() {
                     </td>
                     <td>
                       <div className="clinic-appointment-actions">
+                        <button
+                          className="button button-secondary button-small"
+                          onClick={() => openDuration(a.id)}
+                        >
+                          {a.status === 'scheduled' &&
+                          Date.parse(`${a.date}T${a.time}:00+05:30`) > Date.now()
+                            ? 'Change visit length'
+                            : 'Visit length history'}
+                        </button>
                         <button
                           className="button button-secondary button-small"
                           aria-label={`Resources for ${a.patientName}`}
@@ -633,6 +691,16 @@ export function AppointmentsPage() {
           />
         )}
       </Card>
+      {durationAppointmentId && (
+        <VisitDurationModal
+          key={durationAppointmentId}
+          appointmentId={durationAppointmentId}
+          onClose={() => openDuration(null)}
+          onSaved={async () => {
+            await latestReload.current();
+          }}
+        />
+      )}
       {resourceAppointmentId && (
         <AppointmentResourcesModal
           key={resourceAppointmentId}
@@ -656,6 +724,7 @@ export function AppointmentsPage() {
             </div>
             <button
               className="button button-secondary"
+              disabled={!!pendingCustomBooking}
               onClick={() => {
                 setBooking(moreActions);
                 setMoreActions(null);
@@ -694,6 +763,8 @@ export function AppointmentsPage() {
           initialDate={date}
           appointment={booking === 'new' ? undefined : booking}
           doctors={doctors.data || []}
+          pendingCustomBooking={pendingCustomBooking}
+          onPendingCustomBookingChange={setPendingCustomBooking}
           onClose={() => setBooking(null)}
           onSaved={(savedDate) => {
             setBooking(null);
@@ -722,6 +793,8 @@ export function ClinicBookingModal({
   doctors,
   onClose,
   onSaved,
+  pendingCustomBooking,
+  onPendingCustomBookingChange,
 }: {
   initialDate: string;
   appointment?: Appointment;
@@ -729,43 +802,136 @@ export function ClinicBookingModal({
   doctors: Doctor[];
   onClose: () => void;
   onSaved: (savedDate: string) => void;
+  pendingCustomBooking?: CustomVisitAttempt | null;
+  onPendingCustomBookingChange?: (attempt: CustomVisitAttempt | null) => void;
 }) {
-  const [patientId, setPatientId] = useState(waitlist?.patientId || appointment?.patientId || '');
+  const { session } = useSession();
+  const location = useLocation();
+  const mounted = useRef(false),
+    currentLocation = useRef(location.key);
+  currentLocation.current = location.key;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const [attempt, setAttempt] = useState<CustomVisitAttempt | null>(pendingCustomBooking ?? null);
+  const [uncertain, setUncertain] = useState(!!pendingCustomBooking);
+  const [lengthPolicy, setLengthPolicy] = useState<'schedule' | 'custom'>(
+    pendingCustomBooking ? 'custom' : 'schedule',
+  );
+  const [customMinutes, setCustomMinutes] = useState(
+    String(pendingCustomBooking?.body.durationMinutes ?? 60),
+  );
+  const customBooking = !appointment && !waitlist && lengthPolicy === 'custom';
+  const [patientId, setPatientId] = useState(
+    pendingCustomBooking?.body.patientId || waitlist?.patientId || appointment?.patientId || '',
+  );
   const [doctorId, setDoctorId] = useState(
-    waitlist?.doctorId || appointment?.doctorId || doctors[0]?.id || '',
+    pendingCustomBooking?.body.doctorId ||
+      waitlist?.doctorId ||
+      appointment?.doctorId ||
+      doctors[0]?.id ||
+      '',
   );
   const minimumDate = waitlist && waitlist.startDate > today() ? waitlist.startDate : today();
-  const [date, setDate] = useState(initialDate < minimumDate ? minimumDate : initialDate);
-  const [time, setTime] = useState('');
-  const [mode, setMode] = useState<'in-person' | 'online'>(
-    waitlist?.mode || appointment?.mode || 'in-person',
+  const [date, setDate] = useState(
+    pendingCustomBooking?.body.date || (initialDate < minimumDate ? minimumDate : initialDate),
   );
-  const [reason, setReason] = useState(waitlist?.reason || appointment?.reason || '');
+  const [time, setTime] = useState(pendingCustomBooking?.body.time ?? '');
+  const [mode, setMode] = useState<'in-person' | 'online'>(
+    pendingCustomBooking?.body.mode || waitlist?.mode || appointment?.mode || 'in-person',
+  );
+  const [reason, setReason] = useState(
+    pendingCustomBooking?.body.reason || waitlist?.reason || appointment?.reason || '',
+  );
   const [patientConfirmed, setPatientConfirmed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const locked = saving || uncertain;
   const patients = useResource<Patient[]>('/api/patients');
-  const slots = useResource<string[]>(
+  const customQuery = new URLSearchParams({
+    doctorId,
+    patientId,
+    date,
+    mode,
+    durationPolicy: 'custom',
+    durationMinutes: customMinutes,
+  });
+  const slots = useVisitData(
     doctorId && date && (!waitlist || (date >= minimumDate && date <= waitlist.endDate))
-      ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${date}&mode=${mode}${appointment ? `&excludeAppointmentId=${encodeURIComponent(appointment.id)}` : ''}`
+      ? customBooking
+        ? patientId && validCustomMinutes(Number(customMinutes))
+          ? `/api/visit-duration/slots?${customQuery}`
+          : null
+        : `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${date}&mode=${mode}${appointment ? `&excludeAppointmentId=${encodeURIComponent(appointment.id)}` : ''}`
       : null,
+    checkedVisitSlots,
   );
-  const duration = doctors.find((d) => d.id === doctorId)?.appointmentDurationMinutes ?? 30;
+  const duration =
+    appointment?.durationPolicy === 'custom'
+      ? visitMinutes(appointment)
+      : customBooking
+        ? Number(customMinutes)
+        : (doctors.find((d) => d.id === doctorId)?.appointmentDurationMinutes ?? 30);
   const toast = useToast();
   useEffect(() => {
-    setTime('');
-  }, [date, doctorId, mode]);
+    if (!attempt) setTime('');
+  }, [date, doctorId, mode, patientId, lengthPolicy, customMinutes]);
   useEffect(() => {
     setPatientConfirmed(false);
   }, [date, doctorId, mode, time]);
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
     if (!time) return setError('Choose an available appointment time.');
+    if (!attempt && (slots.loading || slots.error || !slots.data?.includes(time)))
+      return setError('Choose a currently available appointment time.');
     if (waitlist && !patientConfirmed)
       return setError('Confirm this specific appointment with the patient before booking.');
     setSaving(true);
     setError('');
+    const submittingLocation = location.key;
+    let sent = attempt;
     try {
+      if (customBooking) {
+        if (!session.user || !validCustomMinutes(duration))
+          throw new Error('Enter a custom length from 15 to 240 minutes in 5-minute steps.');
+        sent = sent ?? {
+          actorId: session.user.id,
+          body: {
+            patientId,
+            doctorId,
+            date,
+            time,
+            mode,
+            reason: reason.trim(),
+            durationMinutes: duration,
+            requestId: crypto.randomUUID(),
+          },
+        };
+        setAttempt(sent);
+        onPendingCustomBookingChange?.(sent);
+        const result = checkedCustomBooking(
+          await api<unknown>('/api/visit-duration/bookings', { method: 'POST', body: sent.body }),
+          sent,
+        );
+        if (!mounted.current) return;
+        if (currentLocation.current !== submittingLocation) {
+          setUncertain(true);
+          setError(
+            'The page changed before confirmation was displayed. Retry the same request to confirm the booking.',
+          );
+          return;
+        }
+        setAttempt(null);
+        setUncertain(false);
+        onPendingCustomBookingChange?.(null);
+        toast('Custom visit booking confirmed.');
+        onSaved(result.appointment.date);
+        return;
+      }
       await api(appointment ? `/api/appointments/${appointment.id}` : '/api/appointments', {
         method: appointment ? 'PATCH' : 'POST',
         body: appointment
@@ -780,15 +946,33 @@ export function ClinicBookingModal({
               ...(waitlist ? { waitlistId: waitlist.id, patientConfirmed } : {}),
             },
       });
+      if (!mounted.current || currentLocation.current !== submittingLocation) return;
       toast(appointment ? 'Appointment rescheduled.' : 'Appointment booked.');
       onSaved(date);
     } catch (e) {
+      if (!mounted.current) return;
       setError(errorText(e));
+      if (customBooking && sent) {
+        const known =
+          !uncertain &&
+          !isVisitRequestCollision(e) &&
+          e instanceof ApiError &&
+          [400, 401, 403, 404, 409].includes(e.status);
+        if (!known) {
+          setAttempt(sent);
+          setUncertain(true);
+          onPendingCustomBookingChange?.(sent);
+          return;
+        }
+        setAttempt(null);
+        setUncertain(false);
+        onPendingCustomBookingChange?.(null);
+      }
       setTime('');
       setPatientConfirmed(false);
       slots.reload();
     } finally {
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   }
   return (
@@ -805,6 +989,15 @@ export function ClinicBookingModal({
       }}
     >
       <form className="stack" onSubmit={submit}>
+        {uncertain && (
+          <div className="notice notice-warning">
+            <strong>The save outcome could not be confirmed.</strong>
+            <p>
+              The exact custom booking is retained and locked. Retry the same request before making
+              another booking. Closing for now retains it while the appointments page stays open.
+            </p>
+          </div>
+        )}
         {error && (
           <div className="notice notice-error" role="alert">
             {error}
@@ -839,7 +1032,7 @@ export function ClinicBookingModal({
         <Field label="Patient">
           <select
             required
-            disabled={!!appointment || !!waitlist || saving}
+            disabled={!!appointment || !!waitlist || locked}
             value={patientId}
             onChange={(e) => setPatientId(e.target.value)}
           >
@@ -855,7 +1048,7 @@ export function ClinicBookingModal({
           <Field label="Doctor">
             <select
               required
-              disabled={!!waitlist || saving}
+              disabled={!!waitlist || locked}
               value={doctorId}
               onChange={(e) => setDoctorId(e.target.value)}
             >
@@ -873,7 +1066,7 @@ export function ClinicBookingModal({
               type="date"
               min={minimumDate}
               max={waitlist?.endDate}
-              disabled={saving}
+              disabled={locked}
               value={date}
               onChange={(e) => setDate(e.target.value)}
             />
@@ -882,7 +1075,7 @@ export function ClinicBookingModal({
         {!appointment && (
           <Field label="Consultation mode">
             <select
-              disabled={!!waitlist || saving}
+              disabled={!!waitlist || locked}
               value={mode}
               onChange={(e) => setMode(e.target.value as typeof mode)}
             >
@@ -891,10 +1084,56 @@ export function ClinicBookingModal({
             </select>
           </Field>
         )}
+        {!appointment && !waitlist && (
+          <div className="form-grid">
+            <Field label="Visit length">
+              <select
+                value={lengthPolicy}
+                disabled={locked}
+                onChange={(event) => setLengthPolicy(event.target.value as 'schedule' | 'custom')}
+              >
+                <option value="schedule">Default consultation</option>
+                <option value="custom">Custom length</option>
+              </select>
+            </Field>
+            {customBooking && (
+              <Field label="Custom duration (minutes)" hint="15–240 minutes, in 5-minute steps.">
+                <input
+                  type="number"
+                  min={15}
+                  max={240}
+                  step={5}
+                  required
+                  value={customMinutes}
+                  disabled={locked}
+                  onChange={(event) => setCustomMinutes(event.target.value)}
+                />
+              </Field>
+            )}
+          </div>
+        )}
         <p className="muted small">
           {duration}-minute {mode === 'online' ? 'online' : 'in-clinic'} appointment
-          {appointment ? ' · Rescheduling uses the doctor’s current appointment length.' : ''}
+          {appointment
+            ? appointment.durationPolicy === 'custom'
+              ? ' · This custom visit keeps its saved length when rescheduled. Use Change visit length for a separate length change.'
+              : ' · Rescheduling uses the doctor’s current appointment length.'
+            : ''}
         </p>
+        {time && validCustomMinutes(duration) && (
+          <div className="notice visit-duration-preview">
+            <strong>
+              {formatDate(date)} · {visitInterval(time, duration)} · {duration} minutes
+            </strong>
+            <p>
+              Visit fee:{' '}
+              {doctors.find((doctor) => doctor.id === doctorId)
+                ? money(doctors.find((doctor) => doctor.id === doctorId)!.fee)
+                : 'Not available'}
+              . Length does not multiply the fee or create an invoice.
+            </p>
+          </div>
+        )}
         <p className="muted small">
           {appointment
             ? 'Assigned rooms and equipment move with this visit. Available times include those reservations.'
@@ -914,7 +1153,7 @@ export function ClinicBookingModal({
                     type="button"
                     className={`clinic-time-slot ${time === slot ? 'selected' : ''}`}
                     aria-pressed={time === slot}
-                    disabled={saving}
+                    disabled={locked}
                     onClick={() => setTime(slot)}
                   >
                     {timeLabel(slot)}
@@ -938,7 +1177,7 @@ export function ClinicBookingModal({
                 maxLength={300}
                 rows={3}
                 value={reason}
-                disabled={saving}
+                disabled={locked}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Briefly describe the reason for the appointment"
               />
@@ -967,14 +1206,13 @@ export function ClinicBookingModal({
             disabled={saving}
             onClick={onClose}
           >
-            Cancel
+            {uncertain ? 'Close for now' : 'Cancel'}
           </button>
           <button
             className="button button-primary"
             disabled={
               saving ||
-              slots.loading ||
-              !!slots.error ||
+              (!uncertain && (slots.loading || !!slots.error)) ||
               !time ||
               !patientId ||
               (!!waitlist && !patientConfirmed)
@@ -982,11 +1220,13 @@ export function ClinicBookingModal({
           >
             {saving
               ? 'Saving…'
-              : appointment
-                ? 'Save new time'
-                : waitlist
-                  ? 'Book confirmed visit'
-                  : 'Book appointment'}
+              : uncertain
+                ? 'Retry same request'
+                : appointment
+                  ? 'Save new time'
+                  : waitlist
+                    ? 'Book confirmed visit'
+                    : 'Book appointment'}
           </button>
         </div>
       </form>
