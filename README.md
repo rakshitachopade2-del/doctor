@@ -31,6 +31,7 @@ These are intentionally public **development-only credentials**. Production star
 - **Discovery:** doctor profiles, focus areas, qualifications, languages, consultation fees, and clinic contact information.
 - **Booking:** in-person or online appointments, live availability, protection against overlapping doctor and patient bookings, rescheduling, cancellation, check-in, consultation progression, no-shows, and `.ics` calendar export with the recorded visit duration.
 - **Custom visit lengths:** staff can reserve 15–240 minutes for an extended visit, change its length with retained history, or restore the doctor's default. Custom lengths stay intact when patients or staff reschedule.
+- **Procedure appointments:** staff can link an existing procedure plan to a booked visit, replace or remove an eligible link, and inspect attributed history. Patients see the current visit; original clinical plans, decisions and invoices stay intact.
 - **Rooms and equipment:** optional staff reservations for existing visits, maintenance windows, an operational diary, conflict-safe rescheduling and retained allocation history. Each resource represents one physical room or unit.
 - **Waitlist:** patient and reception requests with a preferred clinician, mode and date window; explicit confirmation before booking; atomic appointment linkage, withdrawal and retained history. Requests do not reserve slots.
 - **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute consultation defaults, doctor leave, and clinic-wide closures. Schedule changes protect existing bookings.
@@ -116,7 +117,17 @@ For an existing future scheduled visit, open **Change visit length**. Choose a c
 
 Patients see the saved duration when viewing or rescheduling their visits and in calendar exports. They cannot set the length themselves. A custom visit keeps its length even if the doctor's default later changes; staff must explicitly restore the default policy. Ordinary consultation rescheduling still adopts the selected doctor's current default.
 
-Changing only the length preserves the booked fee and clinician name. Moving the date or time adopts the current clinician fee/name under the existing rescheduling rule. Minutes never automatically multiply a fee or change an invoice. Custom length does not record clinical consent, choose suitable equipment or create a procedure plan. Existing procedure plans keep their original appointment links; scheduling an already saved unlinked procedure remains a separate extension.
+Changing only the length preserves the booked fee and clinician name. Moving the date or time adopts the current clinician fee/name under the existing rescheduling rule. Minutes never automatically multiply a fee or change an invoice. Custom length does not record clinical consent, choose suitable equipment or create a procedure plan. Use **Procedure appointments** to connect an existing plan to a booked visit.
+
+## Schedule an existing procedure plan
+
+Open **Procedure appointments** from the clinic workspace or **Manage appointment** on a clinical procedure card. Search patient names or procedure titles and filter by procedure status and appointment link. The operational list is available to reception without exposing clinical discussion, decisions or outcomes.
+
+Book the visit through **Appointments** first, using a custom length and room/equipment reservations when appropriate. Then select **Manage appointment**, choose a future scheduled visit for the same patient, and enter an internal reason. Booking alone does not attach a procedure plan. Multiple plans may share one visit; staff must ensure the booked time and resources fit the work.
+
+Staff can replace or explicitly remove an eligible link. The previous appointment remains booked, including its resource reservations; cancel or reschedule it separately if required. Completed/cancelled procedures and links to visits already underway, completed or past their scheduled start are read-only. A cancelled or no-show visit can be replaced without recreating the clinical plan.
+
+The original plan and original appointment ID remain preserved alongside attributed link history. Patients see current visit details and status in their procedure record and care summary; internal scheduling reasons remain private. Completion checks the effective appointment and retains its visit details at completion. Linking does not record agreement, change invoices or reserve additional time.
 
 ## Record staff attendance
 

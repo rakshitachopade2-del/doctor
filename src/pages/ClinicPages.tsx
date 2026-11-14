@@ -347,13 +347,18 @@ export function AppointmentsPage() {
         title="Appointments"
         description="A clear view of your day, from arrival to follow-up."
         actions={
-          <button
-            className="button button-primary"
-            disabled={!!pendingCustomBooking}
-            onClick={() => setBooking('new')}
-          >
-            <Plus size={17} /> New appointment
-          </button>
+          <>
+            <Link className="button button-secondary" to="/clinic/procedures">
+              Procedure appointments
+            </Link>
+            <button
+              className="button button-primary"
+              disabled={!!pendingCustomBooking}
+              onClick={() => setBooking('new')}
+            >
+              <Plus size={17} /> New appointment
+            </button>
+          </>
         }
       />
       {pendingCustomBooking && !booking && (

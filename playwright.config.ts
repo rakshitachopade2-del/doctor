@@ -62,6 +62,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)visit-duration\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5191' },
     },
+    {
+      name: 'procedure-scheduling',
+      testMatch: /(?:^|\/)procedure-scheduling\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5192' },
+    },
   ],
   webServer: [
     {
@@ -115,6 +120,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3019 E2E_VITE_PORT=5191 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5191',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3020 E2E_VITE_PORT=5192 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5192',
       reuseExistingServer: false,
       timeout: 60000,
     },

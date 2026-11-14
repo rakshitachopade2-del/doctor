@@ -1,4 +1,5 @@
 import type { Role } from './types';
+import type { ProcedureAppointmentSnapshot } from './procedure-scheduling';
 
 export interface InvestigationResult {
   id: string;
@@ -64,11 +65,16 @@ export interface ProcedureCompletion {
   doctorId: string;
   doctorName: string;
   completedAt: string;
+  /** Visit actually associated when completion was recorded; absent for legacy records. */
+  appointment?: ProcedureAppointmentSnapshot | null;
 }
 export interface ProcedureRecord {
   id: string;
   patientId: string;
   appointmentId: string | null;
+  /** Original appointmentId is immutable. Explicit null here means the current link was removed. */
+  effectiveAppointmentId?: string | null;
+  scheduledAppointment?: ProcedureAppointmentSnapshot | null;
   doctorId: string;
   doctorName: string;
   title: string;

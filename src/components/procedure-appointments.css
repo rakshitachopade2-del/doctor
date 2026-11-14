@@ -1,0 +1,217 @@
+.procedure-link-editor {
+  min-width: 0;
+}
+.procedure-link-plan h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.procedure-link-plan p {
+  color: #526653;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.procedure-link-current,
+.procedure-selected-visit,
+.procedure-link-reviewed {
+  padding: 16px;
+  border: 1px solid #dfe7da;
+  border-radius: 10px;
+  background: #f7faf3;
+  min-width: 0;
+}
+.procedure-link-current h3,
+.procedure-selected-visit h3,
+.procedure-candidate-section h3,
+.procedure-link-conflict h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+.procedure-visit-snapshot strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.procedure-visit-snapshot p {
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 7px 0;
+}
+.procedure-visit-snapshot a {
+  color: #286455;
+}
+.procedure-visit-snapshot svg {
+  vertical-align: middle;
+}
+.procedure-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.procedure-link-actions .button {
+  transition: none;
+}
+.procedure-candidate-section > p {
+  line-height: 1.7;
+}
+.procedure-candidate-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+  margin: 18px 0;
+}
+.procedure-candidate-filters .field,
+.procedure-candidate-filters input {
+  min-width: 0;
+  max-width: 100%;
+}
+.procedure-candidates {
+  display: grid;
+  gap: 10px;
+}
+.procedure-candidate {
+  border: 1px solid #dce5d6;
+  background: #fff;
+  border-radius: 9px;
+}
+.procedure-candidate.selected {
+  border-color: #286455;
+  background: #f0f7ed;
+}
+.procedure-candidate label {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px;
+  cursor: pointer;
+}
+.procedure-candidate input {
+  width: 16px !important;
+  flex: 0 0 16px;
+  margin: 3px 0 0;
+  accent-color: #286455;
+}
+.procedure-candidate label > span {
+  min-width: 0;
+}
+.procedure-candidate strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.procedure-candidate label > span > span {
+  display: block;
+  color: #536852;
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 5px;
+}
+.procedure-book-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.procedure-book-link > span {
+  flex: 1 1 180px;
+  font-size: 12px;
+  color: #576952;
+}
+.procedure-link-conflict {
+  padding: 16px;
+  border: 1px solid #e4d9bd;
+  border-radius: 10px;
+  background: #fbf7eb;
+}
+.procedure-link-conflict p {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.procedure-link-reviewed {
+  background: white;
+  margin: 14px 0;
+}
+.procedure-link-history {
+  border-top: 1px solid #e2e8dc;
+  padding-top: 20px;
+}
+.procedure-link-history > h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+.procedure-link-history > p {
+  line-height: 1.7;
+}
+.procedure-link-event {
+  padding: 16px 0;
+  border-top: 1px solid #e3e8de;
+}
+.procedure-link-event-heading {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.procedure-link-event-heading strong {
+  font-size: 13px;
+}
+.procedure-link-event-heading > span {
+  font-size: 11px;
+  color: #596b59;
+}
+.procedure-link-event p {
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.procedure-link-reason {
+  white-space: pre-wrap;
+}
+.procedure-link-event summary {
+  padding: 8px 0;
+  font-size: 13px;
+  cursor: pointer;
+  color: #286455;
+}
+.procedure-original-reference {
+  font-size: 12px;
+  margin: 14px 0;
+}
+.procedure-original-reference summary {
+  cursor: pointer;
+  color: #286455;
+  padding: 6px 0;
+}
+.procedure-original-reference p {
+  overflow-wrap: anywhere;
+}
+.procedure-link-history-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.procedure-link-history-pair h4 {
+  font-size: 12px;
+  margin: 12px 0;
+}
+@media (max-width: 680px) {
+  .procedure-candidate-filters,
+  .procedure-link-history-pair {
+    grid-template-columns: 1fr;
+  }
+  .procedure-link-editor .modal-actions {
+    flex-wrap: wrap;
+  }
+  .procedure-link-editor .modal-actions > .button {
+    flex: 1 1 120px;
+  }
+  .procedure-link-current,
+  .procedure-selected-visit,
+  .procedure-link-reviewed,
+  .procedure-link-conflict {
+    padding: 13px;
+  }
+}

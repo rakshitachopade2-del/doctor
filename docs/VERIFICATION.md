@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.14.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.15.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 280 passed                                              |
-| Browser and accessibility tests | 50 passed                                               |
+| API and online-backup tests     | 298 passed                                              |
+| Browser and accessibility tests | 53 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -38,6 +38,10 @@ The 21 custom-duration API checks cover ordinary/legacy compatibility, custom fi
 
 Custom-duration browser journeys cover lost/malformed booking and length-change responses, exact retries without duplicate events or allocations, explicit review after concurrent doctor/resource changes, refreshed availability for the unchanged slot query, fee/name preservation, restoring the schedule default, patient rescheduling with the saved custom interval, and patient calendar/record displays. Mobile accessibility checks include booking, retained-length confirmation, visit history and the staff length editor at 320 pixels. The horizontally scrolling patient visit-history table has a named keyboard-focusable region. The production smoke check books a synthetic 90-minute visit on a 20-minute schedule, verifies replay and generic rescheduling retain 90 minutes, checks its calendar interval, restores the default explicitly, and verifies private reason and access boundaries; this passes locally and in the disposable production container.
 
+The 18 procedure-scheduling API checks cover attachment/replacement/removal with preserved originals, operational reception projections, patient/temporary-session isolation, strict queries and explicit removal confirmation, same-patient future candidates, blocked started/terminal records, separate source/target revisions, actor-bound canonical retries after terminal changes, shared visits, unchanged reservations/decisions/invoice sources, effective-link completion and immutable completion snapshots after later visit changes. Explicit null never restores the original association; legacy unlinked completion and absent completion snapshots remain compatible. Concurrent writes, audit/activity rollback, immutable event/receipt tables, literal search, status/link filters, page clamping and restart are covered. A 2,500-plan/2,500-visit fixture verifies ten candidate JSON decodes for a ten-row page, no complete clinical-plan decoding and the composite candidate index. Another SQLite connection exercises coherent context/worklist/candidate reads and their audit transaction.
+
+Procedure-scheduling browser journeys exercise reception link replacement/removal, patient record and summary updates, preserved bookings/resources/agreements/invoices, current cancelled-visit status, lost or misattributed responses, exact retries after the current association has advanced, explicit source and target conflict review, and refreshed candidate selection. Worklist/candidate fixtures cross the 25-row page boundary, filter and reset dates, open exact records outside the current search, and retain terminal histories. New completion snapshots and explicitly unlinked completion are exercised. Mobile worklist, editor/history, patient procedure and summary views include accessibility checks. The fresh production smoke check verifies an empty private worklist, a synthetic clinician-authored plan, attachment/replay/removal/relink, current versus original association, retained booking and procedure invoice identity, patient-safe summary content and logout guards.
+
 Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout is also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
 
 Screenshots use only synthetic demonstration records:
@@ -50,4 +54,4 @@ Screenshots use only synthetic demonstration records:
 
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
-CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance and visit-duration workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration and procedure-scheduling workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.

@@ -243,6 +243,12 @@ try {
   assert.deepEqual(await followUps.json(), []);
   const investigations = await fetch(`${base}/api/investigation-worklist`, { headers: apiHeaders });
   assert.equal(investigations.status, 200);
+  const procedureSchedulingUrl = `${base}/api/procedure-scheduling`;
+  const emptyProcedureScheduling = await fetch(procedureSchedulingUrl, { headers: apiHeaders });
+  assert.equal(emptyProcedureScheduling.status, 200);
+  assert.match(emptyProcedureScheduling.headers.get('cache-control'), /no-store/);
+  assert.equal((await emptyProcedureScheduling.json()).total, 0);
+  assert.equal((await fetch(procedureSchedulingUrl)).status, 401);
   assert.match(investigations.headers.get('cache-control'), /no-store/);
   assert.deepEqual(await investigations.json(), []);
   const investigationOwners = await fetch(`${base}/api/investigation-owners`, {
@@ -476,6 +482,92 @@ try {
   assert.equal(restoredDuration.appointment.durationMinutes, 20);
   assert.equal(restoredDuration.appointment.durationPolicy, 'schedule');
   assert.equal((await fetch(durationUrl)).status, 401);
+  // Give the synthetic administrator a clinician profile in this disposable
+  // database, then refresh the session invalidated by that access change.
+  await visitWrite(`/accounts/${account.user.id}`, { doctorId: visitDoctor.id }, 200, 'PATCH');
+  const clinicianLogin = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: base },
+    body: JSON.stringify({ email, password }),
+  });
+  assert.equal(clinicianLogin.status, 200);
+  apiHeaders.Cookie = clinicianLogin.headers.get('set-cookie').split(';')[0];
+  apiHeaders['X-CSRF-Token'] = (await clinicianLogin.json()).csrfToken;
+  const procedurePlan = await visitWrite(
+    '/procedures',
+    {
+      patientId: patient.id,
+      title: 'Synthetic scheduling plan',
+      indication: 'Synthetic clinician-entered indication',
+      benefits: 'Synthetic discussion',
+      risks: 'Synthetic discussion',
+      alternatives: 'Synthetic discussion',
+      aftercare: 'Synthetic aftercare',
+      estimatedCost: 'Not a charge',
+    },
+    201,
+  );
+  const procedureScheduleUrl = `${base}/api/procedures/${procedurePlan.id}/scheduling`;
+  const scheduleRead = await fetch(procedureScheduleUrl, { headers: apiHeaders });
+  assert.equal(scheduleRead.status, 200);
+  const scheduleContext = await scheduleRead.json();
+  assert.equal(scheduleContext.procedure.originalAppointmentId, null);
+  assert.equal(scheduleContext.procedure.effectiveAppointmentId, null);
+  const candidateResponse = await fetch(
+    `${procedureScheduleUrl}/candidates?from=${visitDay}&to=${visitDay}`,
+    { headers: apiHeaders },
+  );
+  assert.equal(candidateResponse.status, 200);
+  const selectedVisit = (await candidateResponse.json()).items.find(
+    (item) => item.appointment.id === movedVisit.id,
+  );
+  assert.ok(selectedVisit);
+  const privateSchedulingReason = 'Synthetic private procedure scheduling reason';
+  const associationBody = {
+    appointmentId: movedVisit.id,
+    expectedAppointmentRevision: selectedVisit.revision,
+    expectedRevision: scheduleContext.revision,
+    requestId: randomUUID(),
+    reason: privateSchedulingReason,
+  };
+  const associated = await visitWrite(
+    `/procedures/${procedurePlan.id}/scheduling`,
+    associationBody,
+  );
+  assert.equal(associated.context.procedure.effectiveAppointmentId, movedVisit.id);
+  assert.equal(associated.context.procedure.originalAppointmentId, null);
+  const associationReplay = await visitWrite(
+    `/procedures/${procedurePlan.id}/scheduling`,
+    associationBody,
+  );
+  assert.equal(associationReplay.event.id, associated.event.id);
+  assert.equal(associationReplay.context.history.length, 1);
+  const removed = await visitWrite(`/procedures/${procedurePlan.id}/scheduling`, {
+    appointmentId: null,
+    expectedAppointmentRevision: null,
+    expectedRevision: associated.context.revision,
+    requestId: randomUUID(),
+    reason: 'Synthetic private removal reason',
+    removeConfirmed: true,
+  });
+  assert.equal(removed.context.procedure.effectiveAppointmentId, null);
+  const laterReplay = await visitWrite(
+    `/procedures/${procedurePlan.id}/scheduling`,
+    associationBody,
+  );
+  assert.equal(laterReplay.event.id, associated.event.id);
+  assert.equal(laterReplay.context.procedure.effectiveAppointmentId, null);
+  const relinked = await visitWrite(`/procedures/${procedurePlan.id}/scheduling`, {
+    ...associationBody,
+    expectedRevision: removed.context.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(relinked.context.history.length, 3);
+  const retainedVisit = await fetch(`${base}/api/appointments/${movedVisit.id}/duration`, {
+    headers: apiHeaders,
+  });
+  assert.equal((await retainedVisit.json()).appointment.status, 'scheduled');
+  assert.equal((await fetch(procedureScheduleUrl)).status, 401);
   async function billingWrite(path, body, status = 200) {
     const response = await fetch(`${base}/api${path}`, {
       method: 'POST',
@@ -490,6 +582,7 @@ try {
     {
       patientId: patient.id,
       requestId: randomUUID(),
+      procedureId: procedurePlan.id,
       items: [{ description: 'Synthetic verification charge', quantity: 1, unitAmountPaise: 1000 }],
     },
     201,
@@ -546,6 +639,13 @@ try {
   assert.deepEqual(summary.imageAnnotations, []);
   assert.deepEqual(summary.carePlans, []);
   assert.equal(JSON.stringify(summary).includes(privateDurationReason), false);
+  assert.equal(JSON.stringify(summary).includes(privateSchedulingReason), false);
+  assert.equal(JSON.stringify(summary).includes('Synthetic private removal reason'), false);
+  const sharedProcedure = summary.procedures.find((item) => item.id === procedurePlan.id);
+  assert.equal(sharedProcedure.appointmentId, null);
+  assert.equal(sharedProcedure.effectiveAppointmentId, movedVisit.id);
+  assert.equal(sharedProcedure.scheduledAppointment.durationMinutes, 20);
+  assert.equal(summary.invoices[0].procedureId, procedurePlan.id);
   const summaryDownload = await fetch(`${summaryUrl}/download?revision=${summary.revision}`, {
     headers: apiHeaders,
   });
@@ -578,6 +678,8 @@ try {
   assert.equal((await fetch(`${base}/api/search/patients`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(attendanceUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(durationUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(procedureScheduleUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(procedureSchedulingUrl, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,

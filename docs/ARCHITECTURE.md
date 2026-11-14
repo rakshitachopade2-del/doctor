@@ -47,6 +47,7 @@ flowchart LR
 | `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                        |
 | `server/scheduling.ts`                         | Schedule/closure storage, duration-aware slot generation, booking validation              |
 | `server/visit-duration.ts`                     | Custom booking, explicit length changes, private immutable events and retry receipts      |
+| `server/procedure-scheduling.ts`               | Procedure worklist, appointment assignments, immutable events and retry receipts          |
 | `server/record-search.ts`                      | SQL-filtered staff directories and appointment/audit pages with bounded results           |
 | `src/record-search.ts`                         | Query-scoped page loading, pagination validation and obsolete-response suppression        |
 | `src/pages/AuditPage.tsx`                      | Administrator history search with actor/action/record/date filters                        |
@@ -150,6 +151,16 @@ Status is derived from those events: an order with no result is `ordered`; a lat
 `procedureCompletions` and `procedureCancellations` are separate terminal events. Completion requires the latest decision to be agreed and records outcome, aftercare and the responsible doctor. A linked visit cannot be cancelled/no-show or have a start time still in the future. Decision, cancellation and completion checks use immediate transactions so a concurrent withdrawal cannot leave a completed record whose latest decision is declined. Completion or cancellation leaves the linked appointment unchanged.
 
 These events record communication and reported decisions; they are not an electronic signature system or an assurance that all consent requirements have been met. Medication safety checks, clinical protocol validation, pathology interpretation and external laboratory connections remain outside this implementation.
+
+### Procedure appointment assignments
+
+`procedureScheduleEvents` and `procedureScheduleCommands` preserve attributed attachment, replacement and removal without modifying `procedures.data`. The latest event determines the effective link; the original appointment ID is used only when no assignment event exists. An explicit null therefore stays unlinked. Original clinical explanations, authors, agreements and invoice links remain immutable.
+
+The staff worklist and appointment candidates use explicit SQL projections and bounded pages. They do not deserialize complete clinical plans into reception responses. Current names, plan status and safe appointment fields are sufficient for operational scheduling; reasons, discussion, outcomes and payment details are excluded. Source and target revisions protect the displayed association and chosen visit separately. Read context/audit and command/evidence/notification operations use coherent immediate transactions. Retry receipts bind account, procedure and exact normalized intent, and return the current context with the original event after later changes.
+
+Only planned procedures and eligible current links may change; target visits are same-patient future scheduled appointments. Replacing or removing an association does not cancel either booking or release resources. The existing booking and duration workflows remain responsible for appointment intervals and allocations; no additional slot, combined procedure duration, consent or charge is inferred.
+
+Clinical hydration adds safe `effectiveAppointmentId`/`scheduledAppointment` fields, leaving original `appointmentId` intact. Completion resolves the effective link inside its transaction and stores the visit snapshot actually used, or null when unlinked. Existing completions are not backfilled. Patient cards and care summaries show the current visit and new completion snapshot without private assignment events, internal reasons or revision tokens. A visible link/visit change invalidates the care-summary revision.
 
 ### Procedure billing linkage
 

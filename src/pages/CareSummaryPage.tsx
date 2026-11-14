@@ -5,6 +5,7 @@ import type { CareSummary } from '../../shared/care-summary';
 import type { AllergyStatus } from '../../shared/patient-profile';
 import type { InvoiceItem } from '../../shared/operations';
 import type { InvoiceHistory } from '../../shared/billing-corrections';
+import type { ProcedureAppointmentSnapshot } from '../../shared/procedure-scheduling';
 import { formatDate, money, useResource, useSession } from '../lib';
 import { Badge, EmptyState, ErrorState, Loading, PageHeader } from '../components/ui';
 import './care-summary.css';
@@ -287,6 +288,46 @@ function Detail({ label, value }: { label: string; value?: string | null }) {
     <div className="care-summary-detail">
       <strong>{label}</strong>
       <p>{safeValue(value)}</p>
+    </div>
+  );
+}
+function SummaryProcedureVisit({
+  appointment,
+  linked,
+  completed = false,
+}: {
+  appointment: ProcedureAppointmentSnapshot | null | undefined;
+  linked: boolean;
+  completed?: boolean;
+}) {
+  const [hours, minutes] = (appointment?.time ?? '00:00').split(':').map(Number);
+  const end = hours * 60 + minutes + (appointment?.durationMinutes ?? 0);
+  return (
+    <div className="care-summary-events care-summary-procedure-visit">
+      <h4>{completed ? 'Visit recorded at completion' : 'Linked visit at summary generation'}</h4>
+      {appointment ? (
+        <div className="care-summary-details">
+          <Detail
+            label="Visit date and time"
+            value={`${formatDate(appointment.date)} · ${appointment.time}–${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')} IST · ${appointment.durationMinutes} minutes`}
+          />
+          <Detail label="Visit clinician" value={appointment.doctorName} />
+          <Detail
+            label="Visit format"
+            value={`${appointment.mode === 'online' ? 'Online visit' : 'In-person visit'}${appointment.durationPolicy === 'custom' ? ' · Custom length' : ''}`}
+          />
+          <Detail label="Appointment status" value={status(appointment.status)} />
+        </div>
+      ) : (
+        <p>
+          {completed
+            ? 'No appointment was linked when completion was recorded.'
+            : linked
+              ? 'Linked visit details were unavailable when this summary was generated.'
+              : 'No appointment is currently linked to this procedure.'}
+        </p>
+      )}
+      {!completed && <p>A visit link does not change the recorded procedure decision.</p>}
     </div>
   );
 }
@@ -723,6 +764,14 @@ function SummaryDocument({ data, recordPath }: { data: CareSummary; recordPath: 
             date={entry.createdAt}
             badge={status(entry.status)}
           >
+            <SummaryProcedureVisit
+              appointment={entry.scheduledAppointment}
+              linked={
+                (entry.effectiveAppointmentId === undefined
+                  ? entry.appointmentId
+                  : entry.effectiveAppointmentId) !== null
+              }
+            />
             <div className="care-summary-details">
               <Detail label="Indication" value={entry.indication} />
               <Detail label="Expected benefits" value={entry.benefits} />
@@ -761,6 +810,13 @@ function SummaryDocument({ data, recordPath }: { data: CareSummary; recordPath: 
                 </p>
                 <Detail label="Outcome" value={entry.completion.outcome} />
                 <Detail label="Aftercare" value={entry.completion.aftercare} />
+                {entry.completion.appointment !== undefined && (
+                  <SummaryProcedureVisit
+                    appointment={entry.completion.appointment}
+                    linked={entry.completion.appointment !== null}
+                    completed
+                  />
+                )}
               </div>
             )}
           </SummaryEntry>

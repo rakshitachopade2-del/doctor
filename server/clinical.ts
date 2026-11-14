@@ -19,6 +19,10 @@ import {
   investigationRevision,
   registerInvestigationWorklist,
 } from './investigation-worklist.ts';
+import {
+  effectiveProcedureAppointment,
+  registerProcedureScheduling,
+} from './procedure-scheduling.ts';
 
 interface ClinicalContext {
   db: DB;
@@ -29,7 +33,10 @@ interface ClinicalContext {
   fail: (status: number, message: string) => never;
 }
 type InvestigationOrder = Omit<Investigation, 'results' | 'reviews'>;
-type ProcedurePlan = Omit<ProcedureRecord, 'agreements' | 'completion'>;
+type ProcedurePlan = Omit<
+  ProcedureRecord,
+  'agreements' | 'completion' | 'effectiveAppointmentId' | 'scheduledAppointment'
+>;
 const required = z.string().trim().min(1).max(300);
 const text = z.string().trim().max(8000);
 const date = z
@@ -74,6 +81,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     db.exec(`CREATE TRIGGER IF NOT EXISTS immutable_${table}_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Clinical documentation is append-only'); END;
       CREATE TRIGGER IF NOT EXISTS immutable_${table}_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Clinical documentation is append-only'); END;`);
   }
+  registerProcedureScheduling(app, { db, actor, audit, fail });
   function transaction<T>(operation: () => T): T {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -160,6 +168,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     const cancellation = get<{ reason: string }>(db, 'procedureCancellations', plan.id);
     return {
       ...plan,
+      ...effectiveProcedureAppointment(db, plan),
       status: completion ? 'completed' : cancellation ? 'cancelled' : 'planned',
       cancellationReason: cancellation?.reason ?? null,
       agreements,
@@ -569,20 +578,31 @@ export function registerClinical(app: Express, context: ClinicalContext) {
           409,
           'Record the patient agreement before completing this procedure. The latest recorded decision must be agreed.',
         );
-      if (plan.appointmentId) {
-        const appointment = get<Appointment>(db, 'appointments', plan.appointmentId)!;
-        if (['cancelled', 'no-show'].includes(appointment.status))
+      const effective = effectiveProcedureAppointment(db, plan);
+      if (effective.effectiveAppointmentId) {
+        const appointment = effective.scheduledAppointment;
+        if (!appointment)
           fail(
             409,
-            'The linked appointment is cancelled or marked as a no-show. Plan the procedure again against the correct appointment.',
+            'The linked appointment is missing. Review the procedure appointment association.',
           );
-        if (Date.parse(`${appointment.date}T${appointment.time}:00+05:30`) > Date.now())
+        if (['cancelled', 'no-show'].includes(appointment!.status))
+          fail(
+            409,
+            'The linked appointment is cancelled or marked as a no-show. Update the procedure appointment association.',
+          );
+        if (Date.parse(`${appointment!.date}T${appointment!.time}:00+05:30`) > Date.now())
           fail(
             409,
             'The linked appointment is in the future. Complete the procedure after the visit starts.',
           );
       }
-      const completion: ProcedureCompletion = { ...input, ...identity, completedAt: nowISO() };
+      const completion: ProcedureCompletion = {
+        ...input,
+        ...identity,
+        completedAt: nowISO(),
+        appointment: effective.scheduledAppointment,
+      };
       db.prepare('INSERT INTO procedureCompletions(id,data) VALUES (?,?)').run(
         plan.id,
         JSON.stringify(completion),

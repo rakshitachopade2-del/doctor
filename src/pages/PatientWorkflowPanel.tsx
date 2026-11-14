@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
   CalendarDays,
   CheckCircle2,
@@ -16,6 +17,7 @@ import type {
   ProcedureRecord,
 } from '../../shared/clinical';
 import type { PatientDocument } from '../../shared/documents';
+import type { ProcedureAppointmentSnapshot } from '../../shared/procedure-scheduling';
 import { api, formatDate, useResource, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
 import { DocumentUploadModal } from '../components/DocumentsPanel';
@@ -473,6 +475,85 @@ function ProcedureDetails({ procedure }: { procedure: ProcedureRecord }) {
   );
 }
 
+function ProcedureVisit({
+  appointment,
+  linked,
+  completed = false,
+  planned = false,
+}: {
+  appointment: ProcedureAppointmentSnapshot | null | undefined;
+  linked: boolean;
+  completed?: boolean;
+  planned?: boolean;
+}) {
+  const [hours, minutes] = (appointment?.time ?? '00:00').split(':').map(Number);
+  const end = hours * 60 + minutes + (appointment?.durationMinutes ?? 0);
+  const needsAttention =
+    planned &&
+    appointment &&
+    (['cancelled', 'no-show', 'completed'].includes(appointment.status) ||
+      (appointment.status === 'scheduled' &&
+        Date.parse(`${appointment.date}T${appointment.time}:00+05:30`) <= Date.now()));
+  return (
+    <div className="patient-procedure-visit">
+      <h4>{completed ? 'Visit recorded at completion' : 'Linked visit'}</h4>
+      {appointment ? (
+        <>
+          <p>
+            {formatDate(appointment.date)} · {appointment.time}–
+            {String(Math.floor(end / 60)).padStart(2, '0')}:{String(end % 60).padStart(2, '0')} IST
+            · {appointment.durationMinutes} minutes
+          </p>
+          <p>
+            {appointment.doctorName} ·{' '}
+            {appointment.mode === 'online' ? 'Online visit' : 'In-person visit'}
+            {appointment.durationPolicy === 'custom' && ' · Custom length'}
+          </p>
+          <p>Appointment status: {appointment.status.replaceAll('-', ' ')}</p>
+          {needsAttention && (
+            <p>Contact the clinic to confirm the visit for this planned procedure.</p>
+          )}
+        </>
+      ) : (
+        <p>
+          {completed
+            ? 'No appointment was linked when completion was recorded.'
+            : linked
+              ? 'The linked visit details are unavailable. Contact the clinic for confirmation.'
+              : 'No appointment is currently linked to this procedure.'}
+        </p>
+      )}
+      {!completed && (
+        <p className="small muted">
+          A visit link does not change your recorded procedure decision.
+          {appointment && (
+            <>
+              {' '}
+              <Link to="/my-care" className="text-link">
+                View your appointments
+              </Link>
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function CurrentProcedureVisit({ procedure }: { procedure: ProcedureRecord }) {
+  const effectiveId =
+    procedure.effectiveAppointmentId === undefined
+      ? procedure.appointmentId
+      : procedure.effectiveAppointmentId;
+  return (
+    <ProcedureVisit
+      appointment={procedure.scheduledAppointment}
+      linked={effectiveId !== null}
+      planned={procedure.status === 'planned'}
+    />
+  );
+}
+
 function ProcedureCard({
   procedure,
   onDecision,
@@ -495,6 +576,7 @@ function ProcedureCard({
           {procedure.status}
         </Badge>
       </div>
+      <CurrentProcedureVisit procedure={procedure} />
       <ProcedureDetails procedure={procedure} />
       {procedure.status === 'cancelled' && (
         <div className="notice">
@@ -517,6 +599,13 @@ function ProcedureCard({
           <p className="pre-line">{procedure.completion.outcome}</p>
           <strong>Aftercare from your clinician</strong>
           <p className="pre-line">{procedure.completion.aftercare}</p>
+          {procedure.completion.appointment !== undefined && (
+            <ProcedureVisit
+              appointment={procedure.completion.appointment}
+              linked={procedure.completion.appointment !== null}
+              completed
+            />
+          )}
         </div>
       )}
       {latest && (
@@ -615,6 +704,7 @@ function ProcedureDecisionModal({
             explained before making a choice.
           </p>
         </div>
+        <CurrentProcedureVisit procedure={procedure} />
         <ProcedureDetails procedure={procedure} />
         <Field label="Your decision">
           <select

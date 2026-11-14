@@ -1,0 +1,85 @@
+.procedure-schedule-intro {
+  margin-bottom: 20px;
+}
+.procedure-schedule-intro p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.procedure-schedule-search {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.procedure-schedule-search .field {
+  flex: 1;
+  min-width: 0;
+}
+.procedure-schedule-filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.procedure-schedule-filters .field {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.procedure-schedule-filters select {
+  min-width: 0;
+}
+.procedure-schedule-results {
+  margin-top: 24px;
+}
+.procedure-schedule-results > h2 {
+  font-size: 18px;
+  margin-bottom: 15px;
+}
+.procedure-schedule-rows {
+  display: grid;
+  gap: 12px;
+}
+.procedure-schedule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 22px;
+}
+.procedure-schedule-row h3 {
+  margin: 12px 0 8px;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.procedure-schedule-row p {
+  margin: 6px 0;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.procedure-schedule-visit {
+  font-size: 13px;
+}
+.procedure-schedule-row > .button {
+  white-space: normal;
+}
+@media (max-width: 900px) {
+  .procedure-schedule-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .procedure-schedule-row > .button {
+    justify-self: start;
+  }
+}
+@media (max-width: 480px) {
+  .procedure-schedule-search {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .procedure-schedule-row > .button {
+    width: 100%;
+  }
+  .procedure-schedule-filters > .button {
+    flex: 1;
+  }
+}

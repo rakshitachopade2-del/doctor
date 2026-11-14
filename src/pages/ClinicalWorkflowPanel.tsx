@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { Link } from 'react-router-dom';
 import {
   ClipboardCheck,
+  CalendarDays,
   FileCheck2,
   FilePlus2,
   FileText,
@@ -27,6 +28,7 @@ import { api, formatDate, today, useResource, useSession, useToast } from '../li
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
 import { DocumentUploadModal } from '../components/DocumentsPanel';
 import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
+import { ProcedureAppointmentModal } from '../components/ProcedureAppointmentModal';
 import './clinical-workflows.css';
 
 type ClinicalResource = {
@@ -39,7 +41,10 @@ type WorkflowAction =
   | { kind: 'order' | 'procedure' }
   | { kind: 'result' | 'cancel-investigation'; investigation: Investigation }
   | { kind: 'review'; investigation: Investigation; result: InvestigationResult }
-  | { kind: 'agreement' | 'complete' | 'cancel-procedure'; procedure: ProcedureRecord };
+  | {
+      kind: 'agreement' | 'complete' | 'cancel-procedure' | 'scheduling';
+      procedure: ProcedureRecord;
+    };
 const failure = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 const timestamp = (value: string) =>
@@ -497,9 +502,14 @@ export function ClinicalWorkflowPanel({
                 a.createdAt.localeCompare(b.createdAt),
               );
               const latest = agreements.at(-1);
-              const linkedAppointment = appointments.find(
-                (entry) => entry.id === procedure.appointmentId,
-              );
+              const effectiveAppointmentId =
+                procedure.effectiveAppointmentId === undefined
+                  ? procedure.appointmentId
+                  : procedure.effectiveAppointmentId;
+              const linkedAppointment =
+                procedure.scheduledAppointment === undefined
+                  ? (appointments.find((entry) => entry.id === effectiveAppointmentId) ?? null)
+                  : procedure.scheduledAppointment;
               return (
                 <Card key={procedure.id} className="cw-procedure">
                   <div className="cw-record-heading">
@@ -524,9 +534,9 @@ export function ClinicalWorkflowPanel({
                       {statusText[procedure.status]}
                     </Badge>
                   </div>
-                  {linkedAppointment && (
+                  {linkedAppointment ? (
                     <div className="cw-detail">
-                      <span>Linked appointment</span>
+                      <span>Current linked appointment</span>
                       <p>
                         <Link
                           to={`/clinic/appointments?date=${linkedAppointment.date}&patientId=${encodeURIComponent(patientId)}`}
@@ -539,6 +549,15 @@ export function ClinicalWorkflowPanel({
                         {linkedAppointment.durationPolicy === 'custom' ? ' · Custom length' : ''}
                       </p>
                     </div>
+                  ) : (
+                    <Detail
+                      label="Current linked appointment"
+                      value={
+                        effectiveAppointmentId
+                          ? 'The linked appointment is unavailable. Review scheduling history.'
+                          : 'No appointment is currently linked.'
+                      }
+                    />
                   )}
                   <div className="grid-2">
                     <Detail label="Indication" value={procedure.indication} />
@@ -552,6 +571,13 @@ export function ClinicalWorkflowPanel({
                     <strong>{procedure.estimatedCost || 'Not recorded'}</strong>
                   </div>
                   <div className="cw-record-actions">
+                    <button
+                      className="button button-secondary button-small"
+                      onClick={() => setAction({ kind: 'scheduling', procedure })}
+                    >
+                      <CalendarDays size={14} />
+                      {procedure.status === 'planned' ? 'Manage appointment' : 'Scheduling history'}
+                    </button>
                     <Link
                       className="button button-secondary button-small"
                       to={`/clinic/billing?procedure=${procedure.id}`}
@@ -606,6 +632,16 @@ export function ClinicalWorkflowPanel({
                         label="Final aftercare instructions"
                         value={procedure.completion.aftercare}
                       />
+                      {procedure.completion.appointment !== undefined && (
+                        <Detail
+                          label="Appointment recorded at completion"
+                          value={
+                            procedure.completion.appointment
+                              ? `${formatDate(procedure.completion.appointment.date)} · ${procedure.completion.appointment.time} IST · ${procedure.completion.appointment.durationMinutes} minutes · ${procedure.completion.appointment.doctorName} · ${procedure.completion.appointment.status.replaceAll('-', ' ')}`
+                              : 'No appointment was linked when completion was recorded.'
+                          }
+                        />
+                      )}
                       <p className="cw-attribution">
                         {procedure.completion.doctorName} ·{' '}
                         {timestamp(procedure.completion.completedAt)} IST
@@ -686,6 +722,14 @@ export function ClinicalWorkflowPanel({
           appointments={appointments}
           onClose={() => setAction(null)}
           onSaved={afterSave}
+        />
+      )}
+      {action?.kind === 'scheduling' && (
+        <ProcedureAppointmentModal
+          key={action.procedure.id}
+          procedureId={action.procedure.id}
+          onClose={() => setAction(null)}
+          onSaved={resource.reload}
         />
       )}
       {action?.kind === 'agreement' && (

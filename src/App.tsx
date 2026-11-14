@@ -97,6 +97,11 @@ const MessagesPage = lazy(() =>
 const AppointmentsPage = lazy(() =>
   import('./pages/ClinicPages').then((module) => ({ default: module.AppointmentsPage })),
 );
+const ProcedureSchedulingPage = lazy(() =>
+  import('./pages/ProcedureSchedulingPage').then((module) => ({
+    default: module.ProcedureSchedulingPage,
+  })),
+);
 const PatientsPage = lazy(() =>
   import('./pages/ClinicPages').then((module) => ({ default: module.PatientsPage })),
 );
@@ -209,6 +214,7 @@ function PublicLayout() {
 const staffNav = [
   { to: '/clinic', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/clinic/appointments', label: 'Appointments', icon: CalendarDays },
+  { to: '/clinic/procedures', label: 'Procedure appointments', icon: ClipboardList },
   { to: '/clinic/waitlist', label: 'Waitlist', icon: ClipboardList },
   { to: '/clinic/scheduling', label: 'Schedules & closures', icon: Clock3 },
   { to: '/clinic/resources', label: 'Rooms & equipment', icon: DoorOpen },
@@ -563,6 +569,7 @@ export function App() {
             }
           />
           <Route path="clinic/appointments" element={<AppointmentsPage />} />
+          <Route path="clinic/procedures" element={<ProcedureSchedulingPage />} />
           <Route path="clinic/patients" element={<PatientsPage />} />
           <Route path="clinic/patients/:id/details" element={<PatientProfilePage />} />
           <Route
