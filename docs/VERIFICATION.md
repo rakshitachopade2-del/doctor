@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.19.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.20.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 378 passed                                              |
-| Browser and accessibility tests | 65 passed                                               |
+| API and online-backup tests     | 392 passed                                              |
+| Browser and accessibility tests | 68 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -64,6 +64,12 @@ Catalogue browser journeys exercise create/review/publish, newer-draft separatio
 
 The local and container production checks start with an empty private catalogue, publish a synthetic template, create a tailored plan, save and publish a later version, reject stale selection and archive the template. Retrying the original plan keeps its ID, text and version without duplicate creation. Existing scheduling/billing checks then operate on that same plan. Patient summaries retain safe provenance and exclude private catalogue reasons, command UUIDs and later unpublished or unused wording. These checks use only disposable synthetic records and require no external provider.
 
+The 14 public-library API tests verify explicit published-only projections, full initial HTML and real article links, stable URLs across changes, draft withdrawal, publication audit rollback, and privacy independent of attached session cookies. Malicious stored text is escaped in visible content, attributes, inert JSON and XML without losing its original text. Query tests cover literal wildcard-like searches, 25-row pages, stable ordering, page clamping and strict parameters. A second SQLite writer withdraws an article between count and page reads to verify one coherent snapshot. Route checks cover direct HEAD responses, conditional requests after withdrawal, no automatic ETags, private noindex shells, missing assets, encoded index aliases, static HTML rejection and malformed percent paths. Origin/opt-in cases include default, development/demo, disabled, missing/invalid configuration, environment precedence and Host/forwarded-header poisoning. An oversized synthetic collection verifies the sitemap refuses truncation.
+
+Three public-library browser journeys verify clinician draft preview and publication, native public article links, full article reading and search/pagination with JavaScript disabled, literal hostile-markup text, matching metadata and quiet hydration without session requests. They exercise title changes preserving URLs, content edits withdrawing pages with real 404 responses, private patient-library links, clamped search pages, literal percent/underscore queries and metadata replacement on navigation into a private account page. Desktop and 320-pixel article, index and missing-page views include automated accessibility checks and synthetic screenshots. Article links have explicit accessible names that include their titles.
+
+Local and Docker production smoke checks use an intentionally synthetic configured origin to verify canonical URLs and opt-in sitemap output without contacting or deploying to that address. They create a draft, confirm private 404 behavior, publish readable escaped HTML, verify public search/noindex and sitemap membership, withdraw it under a conditional request, then republish at the same URL. They also check private-record exclusion and real unknown-page/asset 404 responses. The Docker runtime includes the shared renderer and JSX configuration. Default indexing remains disabled outside this explicit test configuration; no search service was contacted or publication performed.
+
 Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout is also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
 
 Screenshots use only synthetic demonstration records:
@@ -76,4 +82,4 @@ Screenshots use only synthetic demonstration records:
 
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
-CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling, follow-up-escalation, MFA, procedure-catalogue and authentication-security workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling, follow-up-escalation, MFA, procedure-catalogue, authentication-security and public-library workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.

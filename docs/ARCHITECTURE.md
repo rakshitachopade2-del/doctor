@@ -93,6 +93,16 @@ flowchart LR
 
 The permission model is clinic-wide for clinicians. A second organization must use a separate deployment/database until true tenancy and clinic-scoped authorization are implemented.
 
+## Published public library
+
+`server/public-library.ts` serves `/library` and stable `/library/:articleId` documents from explicit SQL projections of currently published knowledge. List queries use a coherent read snapshot, literal substring search with ASCII case folding and fixed 25-row pages. Substring matching scans text; it is not a full-text index. Detail responses include the full plain-text body; list summaries carry only excerpts. Historical revisions and arbitrary stored fields are excluded. Existing authoring/publication rules and private workspace routes remain unchanged.
+
+`src/public-library/PublicLibraryDocument.tsx` is the shared React presentation for initial HTML and browser hydration. It has no session/provider/router or stylesheet dependencies. A safely serialized `application/json` bootstrap contains only the public projection and public configuration; `main.tsx` validates it before hydration. Other routes keep the existing React application. Real document navigation between these surfaces replaces route metadata and preserves readable pages when JavaScript is disabled. The development Vite middleware fetches the same Express-rendered source template and applies Vite's normal HTML transform; production renders the built template directly. Docker includes the small shared presentation module for the server renderer.
+
+Absolute metadata and sitemap URLs use validated configuration, never request headers. Search results, errors, private routes and development/demo pages are noindex. Public indexing is an explicit production opt-in; the sitemap includes only the library index and current published article IDs. HTML/API responses avoid conditional-response reuse after withdrawal. The Express/production SPA fallback is limited to known routes, with real 404s for unknown pages and missing assets. Vite retains its development fallback outside the forwarded library routes. The public discovery homepage remains part of the existing client-rendered application; this release does not claim site-wide server rendering or search rankings.
+
+The rendering boundary follows the documented [Vite server-rendering workflow](https://vite.dev/guide/ssr) and [React hydration contract](https://react.dev/reference/react-dom/client/hydrateRoot). Robots directives complement authenticated access; they do not protect private data, as explained in [Google's robots guidance](https://developers.google.com/search/docs/crawling-indexing/robots/intro).
+
 ## Configurable scheduling
 
 `doctorSchedules` stores each doctor’s weekly sessions and appointment length. Sessions have a weekday, start/end time, and in-person/online/both mode. Allowed lengths are 15, 20, 30, 45, and 60 minutes. Multiple non-overlapping sessions express breaks; overnight sessions are not accepted. Profiles without a saved schedule retain the original Monday–Saturday, 09:00–18:00, 30-minute default.

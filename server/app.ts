@@ -41,10 +41,13 @@ import { initializeMfa, invalidateMfaTransient, mfaSessionAllowed, registerMfa }
 import { mfaEncryptionKey } from './mfa-crypto.ts';
 import { AuthenticationThrottle, createAuthSecurity } from './auth-security.ts';
 import { registerVisitDuration } from './visit-duration.ts';
+import {
+  publicSiteConfiguration,
+  registerPublicLibrary,
+  type PublicSiteOptions,
+} from './public-library.ts';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { z } from 'zod';
 import {
   openDatabase,
@@ -150,7 +153,7 @@ const doctorSchema = z.object({
     .default('#b3c7aa'),
 });
 
-export interface AppOptions {
+export interface AppOptions extends PublicSiteOptions {
   databasePath?: string;
   demoMode?: boolean;
   production?: boolean;
@@ -164,6 +167,7 @@ export function createApp(options: AppOptions = {}) {
     throw new Error(
       'Demo mode is disabled in production. Use a fresh database and bootstrap an administrator.',
     );
+  const publicSite = publicSiteConfiguration(options, production, demoMode);
   const db = openDatabase(options.databasePath);
   if (production && db.prepare('SELECT 1 FROM meta WHERE key=?').get('demo-seeded')) {
     db.close();
@@ -202,6 +206,7 @@ export function createApp(options: AppOptions = {}) {
   });
   app.use('/api', (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     next();
   });
   app.use(express.json({ limit: '7mb' }));
@@ -1338,12 +1343,8 @@ export function createApp(options: AppOptions = {}) {
   registerInventory(app, { db, actor, audit, fail });
   followUp.register(app, followUpEscalation.states);
   followUpEscalation.register(app);
+  registerPublicLibrary(app, { db, configuration: publicSite, demoMode });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
-  const dist = resolve('dist');
-  if (existsSync(resolve(dist, 'index.html'))) {
-    app.use(express.static(dist, { index: false }));
-    app.get('/{*splat}', (_req, res) => res.sendFile(resolve(dist, 'index.html')));
-  }
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (error instanceof AuthenticationThrottle)
       return res

@@ -1757,12 +1757,31 @@ export function LibraryPage({ manage = false }: { manage?: boolean }) {
               </p>
               <small>Updated {formatDate(a.updatedAt)}</small>
               <div className="row">
-                <button
-                  className="button button-secondary button-small"
-                  onClick={() => setReading(a)}
-                >
-                  Read article
-                </button>
+                {manage ? (
+                  <button
+                    className="button button-secondary button-small"
+                    onClick={() => setReading(a)}
+                  >
+                    Read article
+                  </button>
+                ) : (
+                  <a
+                    className="button button-secondary button-small"
+                    href={`/library/${encodeURIComponent(a.id)}`}
+                    aria-label={`Read article: ${a.title}`}
+                  >
+                    Read article
+                  </a>
+                )}
+                {manage && a.status === 'published' && (
+                  <a
+                    className="button button-secondary button-small"
+                    href={`/library/${encodeURIComponent(a.id)}`}
+                    aria-label={`Open public article: ${a.title}`}
+                  >
+                    Open public article
+                  </a>
+                )}
                 {manage && (
                   <button
                     className="button button-ghost button-small"

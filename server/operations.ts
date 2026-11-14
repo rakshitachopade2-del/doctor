@@ -303,10 +303,19 @@ export function registerOperations(app: Express, context: OperationsContext) {
     }
     res.status(duplicate ? 200 : 201).json(detail(invoice));
   });
-  app.get('/api/knowledge', (_req, res) => {
-    res.json(
-      list<KnowledgeArticle>(db, 'knowledge').filter((article) => article.status === 'published'),
-    );
+  app.get('/api/knowledge', (req, res) => {
+    const articles = db
+      .prepare(
+        `SELECT id, json_extract(data,'$.title') AS title,
+        json_extract(data,'$.category') AS category, json_extract(data,'$.body') AS body,
+        'published' AS status, json_extract(data,'$.authorName') AS authorName,
+        json_extract(data,'$.updatedAt') AS updatedAt FROM knowledge
+        WHERE json_extract(data,'$.status')='published' ORDER BY rowid DESC`,
+      )
+      .all();
+    const body = JSON.stringify(articles);
+    res.type('json').setHeader('Content-Length', String(Buffer.byteLength(body)));
+    res.end(req.method === 'HEAD' ? undefined : body);
   });
   app.get('/api/knowledge/manage', (req: AuthRequest, res) => {
     clinician(req);

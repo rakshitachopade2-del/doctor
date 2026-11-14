@@ -303,6 +303,19 @@ A procedure can have one linked invoice. It must belong to the invoice patient a
 
 Procedure estimates never populate a charge automatically: staff enter the agreed line items and amounts explicitly. Planning/completing a procedure does not create an invoice; creating an invoice does not record a payment. Cancelling a procedure does not change an existing charge or create a refund. Payment collection, refunds, tax calculation and external reconciliation require separate clinic processes.
 
+## Public clinic library
+
+- `GET /public-library?q=&page=` → `PublicLibraryIndex`: `articles`, normalized `query`, effective `page`, fixed `pageSize:25`, `total` and `totalPages`. Each summary contains only `id`, `title`, `category`, `excerpt`, `authorName` and `updatedAt`. Search is a literal substring match across title/category/body with ASCII case folding; non-ASCII characters match literally. Queries are limited to 200 characters; pages are positive integers up to 1,000,000 and clamp to the last available page. Unknown, duplicate and invalid parameters return `400`.
+- `GET /public-library/:articleId` → `PublicArticle`: `id`, `title`, `category`, full plain-text `body`, `authorName` and `updatedAt`. Missing, draft and malformed identifiers have the same generic `404`; extra query parameters return `400`. IDs are stable across title changes and republication.
+
+These endpoints are public, including for temporary-password sessions. They never include historical revisions, draft text, arbitrary stored fields or session/patient data. The existing `/knowledge` array remains compatible and explicitly projects its published fields, including `status:'published'`.
+
+Document routes `/library` and `/library/:articleId` are outside the `/api` prefix. They serve initial public HTML, then hydrate the same shared React view. Real anchors, a GET search form and pagination remain usable without JavaScript. Unavailable articles and invalid document routes/queries return HTML `404` with no article details. Noncanonical case, trailing-slash and encoded path variants are rejected. In Express/production serving, known private SPA routes retain their shell response and access guards; unknown pages, `/index.html` and missing assets return `404`. Vite preserves its development fallback outside the forwarded `/library` routes.
+
+Public library documents, JSON, sitemap and robots responses use `Cache-Control:no-store`; public content responses do not use automatic ETags. Withdrawal is checked on every request, including conditional requests. This prevents stale server responses; it cannot retract a page already downloaded by a reader or an external search engine.
+
+Page titles, descriptions, canonical links and Open Graph/Twitter metadata derive from approved public fields. Absolute URLs use validated configuration, never request Host or forwarded headers. Indexing requires production mode, no demo data, a configured public origin and explicit opt-in. Search results are always noindex; unfiltered pagination may be indexed. `/sitemap.xml` lists only `/library` and current published article addresses when indexing is enabled, otherwise an empty URL set. `/robots.txt` permits fetching HTML so crawlers can observe noindex and excludes API crawling; it is not an access control. All other HTML routes remain noindex. See `DEPLOYMENT.md` for the optional publication settings.
+
 ## Administrator expenses and clinic reports
 
 All endpoints in this section require an active administrator session. Other roles are denied, including doctors and reception. Reads and CSV downloads use the same authorization and `Cache-Control: no-store`.
@@ -400,7 +413,7 @@ Timestamp inputs are real canonical UTC ISO strings with milliseconds. Times can
 
 ## Frontend structure
 
-Public routes: `/`, `/login`, `/register`, `/recover`, `/library`; authenticated booking: `/book`; patient intake: `/intake`.
+Public routes: `/`, `/login`, `/register`, `/recover`, `/library`, `/library/:articleId`; authenticated booking: `/book`; patient intake: `/intake`.
 
 Patient routes: `/my-care`, `/my-care/record`, `/my-care/messages`, `/my-care/invoices`, `/my-care/library`, `/my-care/activity`, `/my-care/summary`, `/my-care/details`. Staff routes: `/clinic`, `/clinic/appointments`, `/clinic/scheduling`, `/clinic/resources`, `/clinic/waitlist`, `/clinic/patients`, `/clinic/billing`, `/clinic/inventory`, `/clinic/attendance`, `/clinic/patients/:id/details`. Clinical-only routes: `/clinic/investigations`, `/clinic/patients/:id`, `/clinic/patients/:id/summary`, `/clinic/follow-ups`, `/clinic/knowledge`, `/clinic/activity`. Administrator routes: `/clinic/settings`, `/clinic/accounts`, `/clinic/audit`, `/clinic/insights`, `/clinic/expenses`. Inventory selection uses `/clinic/inventory?item=id` with `view=lots|movements|changes`. Every signed-in role can use `/account`; temporary-password sessions are directed there before entering their workspace.
 

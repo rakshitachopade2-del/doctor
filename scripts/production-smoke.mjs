@@ -11,6 +11,7 @@ const imageIndex = process.argv.indexOf('--image');
 const image = imageIndex >= 0 ? process.argv[imageIndex + 1] : undefined;
 if (imageIndex >= 0 && !image) throw new Error('Pass a container image after --image.');
 const email = 'smoke-admin@example.test';
+const publicOrigin = 'https://clinic.example.test';
 const password = randomBytes(24).toString('base64url');
 const mfaKey = randomBytes(32).toString('hex');
 const directory = await mkdtemp(join(tmpdir(), 'derma-production-'));
@@ -82,6 +83,10 @@ try {
         'FOLLOW_UP_ESCALATION_AUTO=true',
         '-e',
         'MFA_ENCRYPTION_KEY',
+        '-e',
+        `PUBLIC_SITE_ORIGIN=${publicOrigin}`,
+        '-e',
+        'PUBLIC_INDEXING_ENABLED=true',
         '-p',
         '127.0.0.1::3001',
         image,
@@ -121,6 +126,8 @@ try {
       HOST: '127.0.0.1',
       PORT: String(port),
       APP_ORIGIN: '',
+      PUBLIC_SITE_ORIGIN: publicOrigin,
+      PUBLIC_INDEXING_ENABLED: 'true',
       TRUST_PROXY: 'false',
       FOLLOW_UP_ESCALATION_AUTO: 'true',
       MFA_ENCRYPTION_KEY: mfaKey,
@@ -846,8 +853,88 @@ try {
     (await fetch(`${base}/api/documents?patientId=missing`, { headers: apiHeaders })).status,
     404,
   );
+  const emptyLibrary = await fetch(`${base}/api/public-library`);
+  assert.equal(emptyLibrary.status, 200);
+  assert.equal((await emptyLibrary.json()).total, 0);
+  const libraryDraft = await visitWrite(
+    '/knowledge',
+    {
+      title: 'Synthetic public clinic guide',
+      category: 'Clinic information',
+      body: 'Synthetic public reading paragraph.\nSecond line <script>synthetic</script> & details.',
+    },
+    201,
+  );
+  const articleUrl = `${base}/library/${libraryDraft.id}`;
+  assert.equal((await fetch(articleUrl)).status, 404);
+  assert.equal((await fetch(`${base}/api/public-library/${libraryDraft.id}`)).status, 404);
+  await visitWrite(`/knowledge/${libraryDraft.id}`, { status: 'published' }, 200, 'PATCH');
+  const publicArticleResponse = await fetch(articleUrl);
+  assert.equal(publicArticleResponse.status, 200);
+  assert.match(publicArticleResponse.headers.get('content-type'), /text\/html/);
+  assert.match(publicArticleResponse.headers.get('cache-control'), /no-store/);
+  assert.equal(publicArticleResponse.headers.get('etag'), null);
+  const articleHtml = await publicArticleResponse.text();
+  assert.match(articleHtml, /<h1[^>]*>Synthetic public clinic guide<\/h1>/);
+  assert.ok(articleHtml.includes('Synthetic public reading paragraph.'));
+  assert.ok(articleHtml.includes('&lt;script&gt;synthetic&lt;/script&gt;'));
+  assert.ok(!articleHtml.includes('<script>synthetic</script>'));
+  const bootstrapMatch = articleHtml.match(
+    /<script\b[^>]*id="public-library-data"[^>]*>([\s\S]*?)<\/script>/,
+  );
+  assert.ok(bootstrapMatch);
+  const libraryBootstrap = JSON.parse(bootstrapMatch[1]);
+  assert.equal(libraryBootstrap.pageType, 'article');
+  assert.equal(libraryBootstrap.article.id, libraryDraft.id);
+  assert.equal(libraryBootstrap.indexable, true);
+  assert.equal(libraryBootstrap.canonicalUrl, `${publicOrigin}/library/${libraryDraft.id}`);
+  for (const value of [
+    patient.id,
+    privateDurationReason,
+    privateSchedulingReason,
+    account.csrfToken,
+  ])
+    assert.equal(articleHtml.includes(value), false);
+  const libraryHtmlResponse = await fetch(`${base}/library`);
+  assert.equal(libraryHtmlResponse.status, 200);
+  assert.match(await libraryHtmlResponse.text(), new RegExp(`href="/library/${libraryDraft.id}"`));
+  const searchedLibrary = await fetch(`${base}/library?q=Synthetic`);
+  assert.equal(searchedLibrary.status, 200);
+  assert.match(searchedLibrary.headers.get('x-robots-tag'), /noindex/);
+  const sitemapResponse = await fetch(`${base}/sitemap.xml`);
+  assert.equal(sitemapResponse.status, 200);
+  const sitemap = await sitemapResponse.text();
+  assert.ok(sitemap.includes(`<loc>${publicOrigin}/library/${libraryDraft.id}</loc>`));
+  for (const privatePath of ['/my-care', '/clinic/', '/account', patient.id])
+    assert.equal(sitemap.includes(privatePath), false);
+  const robots = await (await fetch(`${base}/robots.txt`)).text();
+  assert.ok(robots.includes(`Sitemap: ${publicOrigin}/sitemap.xml`));
+  await visitWrite(
+    `/knowledge/${libraryDraft.id}`,
+    { body: 'Synthetic private revision awaiting review.' },
+    200,
+    'PATCH',
+  );
+  const withdrawn = await fetch(articleUrl, { headers: { 'If-None-Match': '*' } });
+  assert.equal(withdrawn.status, 404);
+  const withdrawnHtml = await withdrawn.text();
+  assert.ok(!withdrawnHtml.includes('Synthetic private revision'));
+  assert.ok(!withdrawnHtml.includes(libraryDraft.title));
+  assert.ok(!(await (await fetch(`${base}/sitemap.xml`)).text()).includes(libraryDraft.id));
+  await visitWrite(
+    `/knowledge/${libraryDraft.id}`,
+    { title: 'Synthetic revised public guide', status: 'published' },
+    200,
+    'PATCH',
+  );
+  const republished = await fetch(articleUrl);
+  assert.equal(republished.status, 200);
+  assert.match(await republished.text(), /<h1[^>]*>Synthetic revised public guide<\/h1>/);
+  assert.equal((await fetch(`${base}/missing-public-page`)).status, 404);
+  assert.equal((await fetch(`${base}/assets/missing-test.js`)).status, 404);
   const spa = await fetch(`${base}/clinic/scheduling`);
   assert.equal(spa.status, 200);
+  assert.match(spa.headers.get('x-robots-tag'), /noindex/);
   const html = await spa.text();
   assert.match(html, /<div id="root"><\/div>/);
   assert.match(html, /\/assets\/index-/);
@@ -1074,7 +1161,7 @@ try {
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, public library HTML/publication/sitemap, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

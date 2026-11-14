@@ -87,6 +87,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)auth-security\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5196' },
     },
+    {
+      name: 'public-library',
+      testMatch: /(?:^|\/)public-library\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5197' },
+    },
   ],
   webServer: [
     {
@@ -170,6 +175,13 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3024 E2E_VITE_PORT=5196 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5196',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command:
+        'PUBLIC_SITE_ORIGIN=http://127.0.0.1:5197 PUBLIC_INDEXING_ENABLED=false E2E_API_PORT=3025 E2E_VITE_PORT=5197 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5197',
       reuseExistingServer: false,
       timeout: 60000,
     },

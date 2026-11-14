@@ -67,6 +67,11 @@ export function sessionLabel(userAgent: string | undefined) {
 
 /** Restrict temporary-password sessions before any private application route executes. */
 export function restrictedSessionAllows(method: string, path: string) {
+  if (
+    ['GET', 'HEAD'].includes(method) &&
+    /^\/public-library(?:\/[A-Za-z0-9_-]{1,100})?$/.test(path)
+  )
+    return true;
   if (['GET', 'HEAD'].includes(method))
     return [
       '/session',

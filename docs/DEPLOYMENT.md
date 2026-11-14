@@ -108,6 +108,23 @@ Administrators can filter Audit history by record type `auth-security` to inspec
 
 If no administrator can sign in, a trusted deployment operator can run the same administrator-bootstrap command with a **new, unique email** against the existing production database. It creates a separate administrator and refuses to overwrite an existing account. That administrator can then manage access through the audited interface. The operator must already have authorized host/database access; there is no public bootstrap endpoint.
 
+## Public library publication settings
+
+Published articles work locally without any provider or domain configuration. `/library` and `/library/:articleId` include readable initial HTML, search/pagination, recorded author/date and sharing metadata. Changing an article to draft withdraws its document/API response and sitemap entry immediately. A reader or external search engine may retain previously downloaded content; withdrawal cannot erase those copies.
+
+Search indexing is disabled by default. For a deliberately published production installation, the optional settings are:
+
+```dotenv
+PUBLIC_SITE_ORIGIN=https://clinic.example.com
+PUBLIC_INDEXING_ENABLED=true
+```
+
+The canonical origin defaults to `APP_ORIGIN` when `PUBLIC_SITE_ORIGIN` is empty. It must be an HTTPS origin with no credentials, path, query or fragment; HTTP is allowed only for localhost/loopback testing. A root trailing slash is normalized. Invalid explicit origins stop startup. Request Host and forwarded headers never supply public URLs. Without an origin the pages still work, omit absolute metadata and remain noindex; the sitemap is empty.
+
+Indexing additionally requires production mode without demo data. Even with opt-in, only the public library and published article pages are eligible; search results and all other application pages remain noindex. `/sitemap.xml` contains the library index and published article URLs. It supports at most 49,999 published articles and returns a clear error beyond that size rather than a truncated sitemap. The home/discovery page remains client-rendered and is outside this release's indexing scope.
+
+`robots.txt` permits HTML crawling so crawlers can observe noindex and excludes API crawling. These directives do not replace authentication or guarantee indexing/removal. No search-engine account, analytics integration or automatic submission is configured. The existing library authoring review remains the publication gate. Docker Compose forwards both optional settings; no hosting or deployment action is part of local verification.
+
 ## TLS and reverse proxy
 
 Terminate HTTPS at your reverse proxy and forward to `127.0.0.1:3001`. Preserve the public `Host` header and forward the original scheme. `APP_ORIGIN` must match the public browser origin; cross-origin writes are rejected.

@@ -188,7 +188,7 @@ function PublicLayout() {
             Find your dermatologist
           </NavLink>
           <NavLink to="/intake">Prepare for your visit</NavLink>
-          <NavLink to="/library">Clinic library</NavLink>
+          <a href="/library">Clinic library</a>
         </nav>
         <Link
           className="button button-primary"
@@ -500,6 +500,18 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
     </div>
   );
 }
+function PublicLibraryNavigation() {
+  const location = useLocation();
+  const target = location.pathname + location.search;
+  useEffect(() => {
+    window.location.replace(target);
+  }, [target]);
+  return (
+    <p role="status">
+      Opening the clinic library… <a href={target}>Continue to the library</a>
+    </p>
+  );
+}
 export function App() {
   return (
     <Suspense fallback={<Loading />}>
@@ -509,7 +521,8 @@ export function App() {
           <Route path="login" element={<AuthPage />} />
           <Route path="register" element={<AuthPage register />} />
           <Route path="recover" element={<RecoveryPage />} />
-          <Route path="library" element={<LibraryPage />} />
+          <Route path="library" element={<PublicLibraryNavigation />} />
+          <Route path="library/:articleId" element={<PublicLibraryNavigation />} />
           <Route
             path="book"
             element={

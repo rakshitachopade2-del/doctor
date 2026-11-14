@@ -21,6 +21,8 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server ./server
 COPY --from=build /app/shared ./shared
+COPY --from=build /app/src/public-library ./src/public-library
+COPY tsconfig.json ./
 COPY package.json package-lock.json ./
 RUN mkdir -p /app/data && chown node:node /app/data
 USER node
