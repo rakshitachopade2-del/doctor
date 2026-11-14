@@ -1,0 +1,34 @@
+.patient-selected-appointment {
+  border: 1px solid #a4bdb0;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 24px;
+  background: #f3f7f3;
+  scroll-margin-top: 100px;
+  overflow-wrap: anywhere;
+}
+.patient-selected-appointment:focus-visible {
+  outline: 3px solid #286455;
+  outline-offset: 3px;
+}
+.patient-selected-appointment > .text-link {
+  display: inline-block;
+  margin-top: 16px;
+}
+.patient-appointment-history-note {
+  color: #465b50;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 10px 0 18px;
+}
+.patient-selected-appointment .upcoming-visit > div:last-child {
+  min-width: 0;
+}
+@media (max-width: 400px) {
+  .patient-selected-appointment {
+    padding: 12px;
+  }
+  .patient-selected-appointment .upcoming-visit {
+    flex-direction: column;
+  }
+}

@@ -77,6 +77,16 @@ Escalation policy, command, run and notice tables are additive and begin empty o
 
 The server checks at startup and every 15 minutes. Set `FOLLOW_UP_ESCALATION_AUTO=false` for manual-only checks; this does not change the saved policy. A process shutdown stops its timer. Startup catches up from current plan state and retained dedupe history. Each run creates notices for at most 200 plans, oldest first; the preview shows the remaining eligible backlog. Pausing the follow-up module or disabling the policy prevents new notices. Plans without eligible clinician recipients remain eligible for future checks. The policy view reports whether this process runs automatic checks and the last check/error time. A recorded notice is in-app activity, not proof of clinical review or delivery to an external device.
 
+## Appointment reminder operation
+
+Appointment reminder tables and command receipts are created empty on upgrade. The saved policy starts disabled with a 24-hour lead window. Administrators can configure 1–168 hours in **Appointments → Appointment reminders**; staff can inspect operational previews and history. Enabling the policy permits upcoming eligible existing bookings to receive a new notice, but does not backfill past appointments or fabricate earlier history. SQLite backups retain policies, run receipts, recipient-specific events and activity.
+
+The process checks at startup and every 300 seconds unless `APPOINTMENT_REMINDERS_AUTO=false`. This environment setting controls the timer, independently of the saved policy; administrator manual checks remain available when the policy is enabled. Shutdown stops the timer. Each check records at most 200 pending notices ordered by appointment start and ID. No-notice checks update bounded worker status without creating empty run history. The page shows automatic/manual operation and last successful/failed check times.
+
+Only currently scheduled appointments whose exact Asia/Kolkata start is still in the future and within the lead window qualify. A later restart can catch a visit while it remains upcoming; it cannot guarantee creation at the exact window-opening time. Visits without an active linked patient account that has completed initial password rotation receive no notice and consume no deduplication key. Multiple processes share transactional deduplication in the same database. Appointment changes, recipient access, policy and current time are rechecked before recording notices.
+
+No provider, external credentials or network delivery is required. Notices are visible in the patient inbox when the app is opened or refreshed. They do not send email, SMS, WhatsApp, push alarms or external calendar updates. Historical notices remain immutable and link to current appointment status. Recording or reading a notice is not evidence of attendance or external delivery.
+
 ## Authenticator sign-in and key management
 
 Authenticator MFA is optional. Without `MFA_ENCRYPTION_KEY`, ordinary accounts keep their existing sign-in behavior and new enrollment is unavailable. Configure a unique cryptographically random 32-byte key encoded as 64 hexadecimal characters. Keep it in the application's protected environment or `.env`, never in source control, command history or shared logs. The Compose configuration passes this setting through to the container.

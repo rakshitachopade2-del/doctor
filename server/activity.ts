@@ -57,6 +57,30 @@ export function notifyClinicalRecipients(
   }
   return inserted;
 }
+/** Exact patient delivery, with an insertion receipt. No email matching or fallback. */
+export function notifyPatientRecipient(
+  db: DB,
+  patientId: string,
+  recipientId: string,
+  eventKey: string,
+  input: ActivityContent,
+): string | null {
+  const eligible = db
+    .prepare(
+      `SELECT id FROM users WHERE id=? AND role='patient'
+    AND json_extract(data,'$.patientId')=? AND COALESCE(json_extract(data,'$.active'),1)=1
+    AND COALESCE(json_extract(data,'$.mustChangePassword'),0)=0`,
+    )
+    .get(recipientId, patientId);
+  if (!eligible) return null;
+  const value: ActivityItem = { ...input, id: id(), createdAt: nowISO(), readAt: null };
+  const inserted = db
+    .prepare(
+      'INSERT OR IGNORE INTO activity(id,userId,patientId,audience,eventKey,data) VALUES (?,?,?,?,?,?)',
+    )
+    .run(value.id, recipientId, patientId, 'patient', eventKey, JSON.stringify(value));
+  return Number(inserted.changes) === 1 ? value.id : null;
+}
 function activeUsers(db: DB) {
   return db
     .prepare('SELECT data FROM users')

@@ -82,6 +82,8 @@ try {
         '-e',
         'FOLLOW_UP_ESCALATION_AUTO=true',
         '-e',
+        'APPOINTMENT_REMINDERS_AUTO=true',
+        '-e',
         'MFA_ENCRYPTION_KEY',
         '-e',
         `PUBLIC_SITE_ORIGIN=${publicOrigin}`,
@@ -130,6 +132,7 @@ try {
       PUBLIC_INDEXING_ENABLED: 'true',
       TRUST_PROXY: 'false',
       FOLLOW_UP_ESCALATION_AUTO: 'true',
+      APPOINTMENT_REMINDERS_AUTO: 'true',
       MFA_ENCRYPTION_KEY: mfaKey,
     };
     await command(
@@ -1604,6 +1607,208 @@ try {
   });
   assert.equal(duplicateRegistration.status, 409);
   assert.deepEqual(duplicateRegistration.headers.getSetCookie(), []);
+  async function reminderRead(path, headers = verifiedHeaders) {
+    const response = await fetch(`${base}/api${path}`, { headers });
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.match(response.headers.get('cache-control'), /no-store/);
+    return response.json();
+  }
+  async function reminderWrite(path, body, status = 200, method = 'POST') {
+    const response = await fetch(`${base}/api${path}`, {
+      method,
+      headers: verifiedHeaders,
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, status, await response.clone().text());
+    return response.json();
+  }
+  const reminderPolicyPath = '/appointment-reminder-policy';
+  const reminderPreviewPath = '/appointment-reminders/preview';
+  const reminderRunPath = '/appointment-reminders/run';
+  const initialReminderPolicy = await reminderRead(reminderPolicyPath);
+  assert.deepEqual(initialReminderPolicy.policy, { enabled: false, leadHours: 24 });
+  assert.equal(initialReminderPolicy.latestChange, null);
+  assert.equal(initialReminderPolicy.worker.automaticEnabled, true);
+  assert.equal(initialReminderPolicy.worker.intervalSeconds, 300);
+  assert.ok(initialReminderPolicy.worker.lastCheckedAt);
+  const disabledReminders = await reminderRead(reminderPreviewPath);
+  assert.equal(disabledReminders.status, 'disabled');
+  assert.equal(disabledReminders.readyTotal, 0);
+  assert.deepEqual(disabledReminders.items, []);
+  const reminderDay = new Date(Date.parse(`${attendanceDay}T12:00:00Z`) + 2 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const reminderBooking = await reminderWrite(
+    '/visit-duration/bookings',
+    {
+      patientId: registeredSession.user.patientId,
+      doctorId: visitDoctor.id,
+      date: reminderDay,
+      time: '10:05',
+      mode: 'in-person',
+      reason: 'Synthetic shared upcoming appointment',
+      durationMinutes: 45,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const reminderAppointment = reminderBooking.appointment;
+  await reminderWrite(
+    '/appointments',
+    {
+      patientId: patient.id,
+      doctorId: visitDoctor.id,
+      date: reminderDay,
+      time: '14:00',
+      mode: 'in-person',
+      reason: 'Synthetic visit without a portal account',
+    },
+    201,
+  );
+  const privateReminderReason = 'Synthetic private appointment reminder policy reason';
+  const reminderPolicyCommand = {
+    enabled: true,
+    leadHours: 72,
+    reason: privateReminderReason,
+    expectedRevision: initialReminderPolicy.revision,
+    requestId: randomUUID(),
+  };
+  const enabledReminders = await reminderWrite(reminderPolicyPath, reminderPolicyCommand, 201);
+  assert.deepEqual(enabledReminders.change.after, { enabled: true, leadHours: 72 });
+  assert.deepEqual(
+    (await reminderWrite(reminderPolicyPath, reminderPolicyCommand)).change,
+    enabledReminders.change,
+  );
+  const initialReminderPreview = await reminderRead(reminderPreviewPath);
+  assert.equal(initialReminderPreview.status, 'ready');
+  assert.equal(initialReminderPreview.readyTotal, 1);
+  assert.ok(initialReminderPreview.unroutableTotal >= 1);
+  assert.equal(initialReminderPreview.items[0].appointment.id, reminderAppointment.id);
+  assert.equal(initialReminderPreview.items[0].recipient.id, registeredSession.user.id);
+  assert.equal(initialReminderPreview.items[0].appointment.durationMinutes, 45);
+  assert.equal('reason' in initialReminderPreview.items[0].appointment, false);
+  assert.equal('fee' in initialReminderPreview.items[0].appointment, false);
+  const reminderCommand = {
+    expectedPreviewRevision: initialReminderPreview.revision,
+    expectedPolicyRevision: initialReminderPreview.policyRevision,
+    confirmed: true,
+    requestId: randomUUID(),
+  };
+  await reminderWrite(`/appointments/${reminderAppointment.id}`, { time: '10:10' }, 200, 'PATCH');
+  await reminderWrite(reminderRunPath, reminderCommand, 409);
+  const refreshedReminders = await reminderRead(reminderPreviewPath);
+  reminderCommand.expectedPreviewRevision = refreshedReminders.revision;
+  const reminderSummaryPath = `/patients/${registeredSession.user.patientId}/care-summary`;
+  const beforeReminderSummary = await reminderRead(reminderSummaryPath, patientHeaders);
+  const reminderRun = await reminderWrite(reminderRunPath, reminderCommand, 201);
+  assert.equal(reminderRun.noticeCount, 1);
+  assert.equal(reminderRun.events.length, 1);
+  assert.equal(reminderRun.events[0].appointment.time, '10:10');
+  assert.equal(reminderRun.events[0].recipient.id, registeredSession.user.id);
+  assert.equal(reminderRun.source, 'manual');
+  assert.equal(reminderRun.createdById, account.user.id);
+  assert.deepEqual(await reminderWrite(reminderRunPath, reminderCommand), reminderRun);
+  const afterReminderSummary = await reminderRead(reminderSummaryPath, patientHeaders);
+  assert.equal(afterReminderSummary.revision, beforeReminderSummary.revision);
+  const recordedReminderPreview = await reminderRead(reminderPreviewPath);
+  assert.equal(recordedReminderPreview.readyTotal, 0);
+  assert.equal(recordedReminderPreview.alreadyRecordedTotal, 1);
+  const reminderHistoryPath = `/appointments/${reminderAppointment.id}/reminders`;
+  const reminderHistory = await reminderRead(reminderHistoryPath);
+  assert.equal(reminderHistory.current.state, 'recorded');
+  assert.equal(reminderHistory.total, 1);
+  assert.deepEqual(reminderHistory.items[0], reminderRun.events[0]);
+  const reminderRuns = await reminderRead('/appointment-reminders/runs');
+  assert.equal(reminderRuns.total, 1);
+  assert.equal('events' in reminderRuns.items[0], false);
+  assert.deepEqual(
+    await reminderRead(`/appointment-reminders/runs/${reminderRun.id}`),
+    reminderRun,
+  );
+  const reminderActivity = await reminderRead('/activity?limit=100', patientHeaders);
+  const patientReminders = reminderActivity.items.filter(
+    (item) => item.title === 'Upcoming appointment reminder',
+  );
+  assert.equal(patientReminders.length, 1);
+  assert.equal(patientReminders[0].href, `/my-care?appointment=${reminderAppointment.id}`);
+  for (const value of [reminderActivity, afterReminderSummary])
+    for (const privateValue of [
+      privateReminderReason,
+      reminderPolicyCommand.requestId,
+      reminderCommand.requestId,
+      reminderRun.id,
+    ])
+      assert.equal(JSON.stringify(value).includes(privateValue), false);
+  for (const path of [
+    reminderPolicyPath,
+    `${reminderPolicyPath}/history`,
+    reminderPreviewPath,
+    '/appointment-reminders/runs',
+    `/appointment-reminders/runs/${reminderRun.id}`,
+    reminderHistoryPath,
+  ]) {
+    assert.equal((await fetch(`${base}/api${path}`)).status, 401);
+    assert.equal((await fetch(`${base}/api${path}`, { headers: patientHeaders })).status, 403);
+  }
+  const reminderDuration = await reminderRead(`/appointments/${reminderAppointment.id}/duration`);
+  await reminderWrite(`/appointments/${reminderAppointment.id}/duration`, {
+    durationPolicy: 'custom',
+    durationMinutes: 60,
+    date: reminderDay,
+    time: '10:10',
+    reason: 'Synthetic duration adjustment without another reminder',
+    expectedRevision: reminderDuration.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal((await reminderRead(reminderPreviewPath)).readyTotal, 0);
+  await reminderWrite(`/appointments/${reminderAppointment.id}`, { time: '10:20' }, 200, 'PATCH');
+  const laterReminderPreview = await reminderRead(reminderPreviewPath);
+  assert.equal(laterReminderPreview.readyTotal, 1);
+  const laterReminderRun = await reminderWrite(
+    reminderRunPath,
+    {
+      expectedPreviewRevision: laterReminderPreview.revision,
+      expectedPolicyRevision: laterReminderPreview.policyRevision,
+      confirmed: true,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  assert.equal(laterReminderRun.events[0].appointment.durationMinutes, 60);
+  await reminderWrite(`/appointments/${reminderAppointment.id}`, { time: '10:10' }, 200, 'PATCH');
+  assert.equal((await reminderRead(reminderPreviewPath)).readyTotal, 0);
+  await reminderWrite(
+    `/appointments/${reminderAppointment.id}`,
+    { status: 'cancelled' },
+    200,
+    'PATCH',
+  );
+  const cancelledReminderHistory = await reminderRead(reminderHistoryPath);
+  assert.equal(cancelledReminderHistory.current.state, 'not-scheduled');
+  assert.equal(cancelledReminderHistory.total, 2);
+  assert.deepEqual(await reminderWrite(reminderRunPath, reminderCommand), reminderRun);
+  const finalReminderActivity = await reminderRead('/activity?limit=100', patientHeaders);
+  assert.equal(
+    finalReminderActivity.items.filter((item) => item.title === 'Upcoming appointment reminder')
+      .length,
+    2,
+  );
+  const finalReminderPolicy = await reminderRead(reminderPolicyPath);
+  await reminderWrite(
+    reminderPolicyPath,
+    {
+      enabled: false,
+      leadHours: 72,
+      reason: 'Finish disposable reminder verification',
+      expectedRevision: finalReminderPolicy.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const oldPolicyReplay = await reminderWrite(reminderPolicyPath, reminderPolicyCommand);
+  assert.equal(oldPolicyReplay.context.policy.enabled, false);
+  assert.deepEqual(oldPolicyReplay.change, enabledReminders.change);
+  assert.equal((await reminderRead(`${reminderPolicyPath}/history`)).total, 2);
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -1683,8 +1888,16 @@ try {
     200,
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
+  assert.equal(
+    (await fetch(`${base}/api${reminderPolicyPath}`, { headers: verifiedHeaders })).status,
+    401,
+  );
+  assert.equal(
+    (await fetch(`${base}/api${reminderHistoryPath}`, { headers: verifiedHeaders })).status,
+    401,
+  );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/cancellations/rescheduling/retries, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

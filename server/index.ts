@@ -6,6 +6,7 @@ const server = app.listen(port, host, () =>
   console.log(`Derma Studio API ready at http://${host}:${port}`),
 );
 if (process.env.FOLLOW_UP_ESCALATION_AUTO !== 'false') app.locals.startFollowUpEscalations();
+if (process.env.APPOINTMENT_REMINDERS_AUTO !== 'false') app.locals.startAppointmentReminders();
 function shutdown() {
   server.close(() => {
     app.locals.close();

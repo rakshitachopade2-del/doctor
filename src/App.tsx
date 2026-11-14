@@ -102,6 +102,11 @@ const AppointmentSeriesPage = lazy(() =>
     default: module.AppointmentSeriesPage,
   })),
 );
+const AppointmentRemindersPage = lazy(() =>
+  import('./pages/AppointmentRemindersPage').then((module) => ({
+    default: module.AppointmentRemindersPage,
+  })),
+);
 const ProcedureSchedulingPage = lazy(() =>
   import('./pages/ProcedureSchedulingPage').then((module) => ({
     default: module.ProcedureSchedulingPage,
@@ -250,6 +255,7 @@ const staffNav = [
 ];
 const workspacePageLabels: Record<string, string> = {
   '/clinic/appointment-series': 'Appointment series',
+  '/clinic/appointment-reminders': 'Appointment reminders',
   '/clinic/insights': 'Clinic reports',
   '/clinic/expenses': 'Expenses',
   '/clinic/accounts': 'Accounts & access',
@@ -602,6 +608,7 @@ export function App() {
           />
           <Route path="clinic/appointments" element={<AppointmentsPage />} />
           <Route path="clinic/appointment-series" element={<AppointmentSeriesPage />} />
+          <Route path="clinic/appointment-reminders" element={<AppointmentRemindersPage />} />
           <Route path="clinic/procedures" element={<ProcedureSchedulingPage />} />
           <Route
             path="clinic/procedure-catalogue"

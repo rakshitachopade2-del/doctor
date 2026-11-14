@@ -1,0 +1,216 @@
+.appointment-reminders-page,
+.reminder-policy-form,
+.reminder-preview-form {
+  min-width: 0;
+}
+.appointment-reminders-page .page-header {
+  margin-top: 21px;
+}
+.appointment-reminders-page .page-actions {
+  flex-wrap: wrap;
+}
+.appointment-reminders-page .page-actions .button {
+  max-width: 100%;
+  white-space: normal;
+}
+.reminder-policy-form,
+.reminder-preview-form {
+  display: grid;
+  gap: 17px;
+}
+.reminder-policy-form p,
+.reminder-preview-form p {
+  margin: 0;
+  line-height: 1.8;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.reminder-policy-form .notice,
+.reminder-preview-form .notice,
+.reminder-delivery-note {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.reminder-policy-form .modal-actions,
+.reminder-preview-form .modal-actions {
+  flex-wrap: wrap;
+}
+.reminder-policy-form .button,
+.reminder-preview-form .button {
+  max-width: 100%;
+  white-space: normal;
+}
+.reminder-overview,
+.reminder-current-appointment,
+.reminder-run-receipt {
+  padding: 22px;
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 12px;
+  margin: 22px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.reminder-overview h2,
+.reminder-current-appointment h2,
+.reminder-run-receipt h2,
+.reminder-policy-history h2,
+.reminder-runs h2 {
+  font-size: 19px;
+  margin: 0 0 12px;
+}
+.reminder-overview p,
+.reminder-current-appointment p,
+.reminder-run-receipt p {
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 10px 0;
+}
+.reminder-policy-description {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.reminder-policy-history,
+.reminder-runs {
+  margin-top: 30px;
+}
+.reminder-policy-change,
+.reminder-run-row,
+.reminder-event,
+.reminder-preview-candidate {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: white;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.reminder-policy-change,
+.reminder-run-row {
+  margin-top: 12px;
+}
+.reminder-policy-change h3,
+.reminder-run-row h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.reminder-policy-change p,
+.reminder-run-row p,
+.reminder-event p,
+.reminder-preview-candidate p {
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 7px 0;
+}
+.reminder-private-reason {
+  white-space: pre-wrap;
+}
+.reminder-run-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.reminder-run-row > div {
+  min-width: 0;
+}
+.reminder-run-row > .button {
+  flex-shrink: 0;
+}
+.reminder-preview-list,
+.reminder-events {
+  display: grid;
+  gap: 13px;
+  margin-top: 15px;
+}
+.reminder-events {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reminder-visit-summary > strong {
+  display: block;
+  color: #365943;
+  font-size: 14px;
+}
+.reminder-visit-summary p {
+  margin: 7px 0;
+}
+.reminder-event .text-link,
+.reminder-preview-candidate .text-link {
+  display: inline-flex;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.reminder-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  line-height: 1.8;
+  font-size: 13px;
+}
+.reminder-checkbox input {
+  flex: 0 0 auto;
+  margin-top: 5px;
+}
+.reminder-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.reminder-counts > div {
+  padding: 14px;
+  background: #f0f5ef;
+  border-radius: 9px;
+  min-width: 0;
+}
+.reminder-counts span {
+  display: block;
+  font-size: 11px;
+  color: #4b6355;
+  line-height: 1.8;
+}
+.reminder-counts strong {
+  display: block;
+  font-size: 24px;
+  margin-top: 7px;
+  color: #286455;
+}
+.reminder-latest-policy {
+  padding-top: 15px;
+  margin-top: 15px;
+  border-top: 1px solid var(--line);
+}
+.reminder-latest-policy h3 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+.reminder-latest-policy .button {
+  margin-top: 15px;
+}
+@media (max-width: 600px) {
+  .reminder-events {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reminder-run-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .reminder-policy-form .modal-actions > .button,
+  .reminder-preview-form .modal-actions > .button {
+    flex: 1 1 100%;
+  }
+  .reminder-overview,
+  .reminder-current-appointment,
+  .reminder-run-receipt {
+    padding: 17px;
+  }
+}
+@media (max-width: 360px) {
+  .reminder-counts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

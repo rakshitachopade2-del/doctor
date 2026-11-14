@@ -11,6 +11,7 @@ const env = {
   NODE_ENV: 'test',
   DEMO_MODE: 'true',
   FOLLOW_UP_ESCALATION_AUTO: 'false',
+  APPOINTMENT_REMINDERS_AUTO: 'false',
   MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
   DATABASE_PATH: join(directory, 'clinic.sqlite'),
   PORT: apiPort,

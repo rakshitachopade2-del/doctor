@@ -360,6 +360,9 @@ export function AppointmentsPage() {
             <Link className="button button-secondary" to="/clinic/appointment-series">
               Appointment series
             </Link>
+            <Link className="button button-secondary" to="/clinic/appointment-reminders">
+              Appointment reminders
+            </Link>
             <button
               className="button button-secondary"
               disabled={!!pendingCustomBooking}
@@ -633,6 +636,12 @@ export function AppointmentsPage() {
                     </td>
                     <td>
                       <div className="clinic-appointment-actions">
+                        <Link
+                          className="button button-secondary button-small"
+                          to={`/clinic/appointment-reminders?appointment=${encodeURIComponent(a.id)}`}
+                        >
+                          Reminder history
+                        </Link>
                         <button
                           className="button button-secondary button-small"
                           onClick={() => openDuration(a.id)}

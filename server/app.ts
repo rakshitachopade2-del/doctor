@@ -2,6 +2,7 @@ import { registerOperations } from './operations.ts';
 import { registerClinical } from './clinical.ts';
 import { createFollowUp } from './follow-up.ts';
 import { createFollowUpEscalation } from './follow-up-escalation.ts';
+import { createAppointmentReminders } from './appointment-reminders.ts';
 import { createWaitlist } from './waitlist.ts';
 import { registerInsights } from './insights.ts';
 import { registerInventory } from './inventory.ts';
@@ -404,11 +405,16 @@ export function createApp(options: AppOptions = {}) {
     fail,
   });
   const followUpEscalation = createFollowUpEscalation({ db, actor, audit, fail });
+  const appointmentReminders = createAppointmentReminders({ db, actor, audit, fail });
+  app.locals.runAppointmentReminders = appointmentReminders.runAutomatic;
+  app.locals.startAppointmentReminders = appointmentReminders.start;
+  app.locals.stopAppointmentReminders = appointmentReminders.stop;
   app.locals.runFollowUpEscalations = followUpEscalation.runAutomatic;
   app.locals.startFollowUpEscalations = followUpEscalation.start;
   app.locals.stopFollowUpEscalations = followUpEscalation.stop;
   app.locals.close = () => {
     followUpEscalation.stop();
+    appointmentReminders.stop();
     db.close();
   };
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
@@ -1381,6 +1387,7 @@ export function createApp(options: AppOptions = {}) {
   registerInventory(app, { db, actor, audit, fail });
   followUp.register(app, followUpEscalation.states);
   followUpEscalation.register(app);
+  appointmentReminders.register(app);
   registerPublicLibrary(app, { db, configuration: publicSite, demoMode });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

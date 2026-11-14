@@ -51,6 +51,7 @@ import { DocumentsPanel } from '../components/DocumentsPanel';
 import { PatientWorkflowPanel } from './PatientWorkflowPanel';
 import type { WaitlistEntry } from '../../shared/waitlist';
 import { PatientWaitlistPanel, WaitlistJoinModal } from '../components/PatientWaitlist';
+import { PatientAppointments } from '../components/PatientAppointments';
 import { ImageAnnotationViewer } from '../components/ImageAnnotations';
 import {
   PatientFollowUp,
@@ -1210,14 +1211,6 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
       setShowCompleted(true);
     }
   }, [selectedPlanId, record.data]);
-  const upcoming =
-    record.data?.appointments
-      .filter(
-        (appointment) =>
-          appointment.date >= today() &&
-          !['cancelled', 'completed', 'no-show'].includes(appointment.status),
-      )
-      .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)) ?? [];
   async function cancelVisit() {
     if (!cancel) return;
     setBusy(true);
@@ -1334,67 +1327,11 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           )}
         </div>
         <aside className="stack">
-          <Card>
-            <div className="row between">
-              <h2 className="section-title">Your next visits</h2>
-              <CalendarDays size={20} />
-            </div>
-            {upcoming.length ? (
-              <div className="upcoming-visits">
-                {upcoming.map((appointment) => (
-                  <div className="upcoming-visit" key={appointment.id}>
-                    <div className="visit-date">
-                      <strong>{new Date(`${appointment.date}T12:00:00`).getDate()}</strong>
-                      <span>
-                        {new Date(`${appointment.date}T12:00:00`).toLocaleDateString('en-IN', {
-                          month: 'short',
-                        })}
-                      </span>
-                    </div>
-                    <div>
-                      <h3>{appointment.doctorName}</h3>
-                      <p>
-                        {formatDate(appointment.date)} ·{' '}
-                        {visitInterval(appointment.time, appointment.durationMinutes ?? 30)} IST
-                      </p>
-                      <p className="muted">
-                        {appointment.durationPolicy === 'custom'
-                          ? appointment.mode === 'online'
-                            ? 'Online clinic visit'
-                            : 'In-person clinic visit'
-                          : appointment.mode === 'online'
-                            ? 'Online consultation'
-                            : 'In-person consultation'}{' '}
-                        · {appointment.durationMinutes ?? 30} minutes
-                      </p>
-                      <Badge>{readableStatus(appointment.status)}</Badge>
-                      <div className="appointment-actions">
-                        <a href={`/api/appointments/${appointment.id}/calendar`} download>
-                          Add to calendar
-                        </a>
-                        {appointment.status === 'scheduled' && (
-                          <>
-                            <Link to={`/book?appointmentId=${appointment.id}`}>Reschedule</Link>
-                            <button onClick={() => setCancel(appointment)}>Cancel</button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                title="No upcoming visits"
-                description="Choose a time when you’re ready."
-                action={
-                  <Link className="button button-secondary" to="/book">
-                    View availability
-                  </Link>
-                }
-              />
-            )}
-          </Card>
+          <PatientAppointments
+            appointments={record.data?.appointments ?? []}
+            selectedId={params.get('appointment')}
+            onCancel={setCancel}
+          />
           <PatientWaitlistPanel />
           {settings.data?.modules.intake && (
             <Card className="preparation-card">
