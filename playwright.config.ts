@@ -102,6 +102,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)appointment-series\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5199' },
     },
+    {
+      name: 'care-summary-copies',
+      testMatch: /(?:^|\/)care-summary-copies\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5200' },
+    },
   ],
   webServer: [
     {
@@ -204,6 +209,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3027 E2E_VITE_PORT=5199 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5199',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3028 E2E_VITE_PORT=5200 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5200',
       reuseExistingServer: false,
       timeout: 60000,
     },

@@ -13,6 +13,7 @@ import {
   safeAllergyHistory,
 } from './patient-profile.ts';
 import { registerCareSummary } from './care-summary.ts';
+import { registerCareSummaryCopies } from './care-summary-copies.ts';
 import {
   registerImageAnnotations,
   imageProvenance,
@@ -1328,7 +1329,7 @@ export function createApp(options: AppOptions = {}) {
     audit,
     fail,
   });
-  registerCareSummary(app, {
+  const careSummary = registerCareSummary(app, {
     db,
     actor,
     patientAccess,
@@ -1340,6 +1341,14 @@ export function createApp(options: AppOptions = {}) {
     publishedAnnotations: (patientId) => publishedImageAnnotationsForPatient(db, patientId),
     allergyHistory: (patientId) => safeAllergyHistory(db, patientId).changes,
     invoiceHistory: (invoiceId) => safeInvoiceHistory(db, invoiceId),
+  });
+  registerCareSummaryCopies(app, {
+    db,
+    actor,
+    patientAccess,
+    audit,
+    fail,
+    snapshot: careSummary.snapshot,
   });
   registerInsights(app, { db, actor, audit, fail });
   registerInventory(app, { db, actor, audit, fail });

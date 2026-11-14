@@ -153,4 +153,8 @@ export function registerCareSummary(app: Express, context: SummaryContext) {
     );
     res.type('application/json').send(JSON.stringify(summary, null, 2) + '\n');
   });
+  // Callers must hold a transaction and authorize the supplied current patient.
+  // Reuse this projection for saved copies so historical content has exactly the
+  // same patient-facing scope as the existing live summary.
+  return { snapshot };
 }

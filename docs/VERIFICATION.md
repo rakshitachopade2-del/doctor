@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.22.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.23.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 424 passed                                              |
-| Browser and accessibility tests | 74 passed                                               |
+| API and online-backup tests     | 438 passed                                              |
+| Browser and accessibility tests | 77 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -84,7 +84,13 @@ The full regression run also caught a transient contrast failure when the sign-i
 
 Local and Docker production checks book a three-visit custom series, move one visit and cancel another, then replay the original command without duplicating appointments or changing the original snapshots. A stale command and a newly previewed conflict at the last visit both fail without partial bookings. The checks inspect private list/detail access, ordinary appointment and care-summary privacy, logout protection, and direct serving of the private series SPA route. Temporary databases and containers are removed afterward; no recurrence job or external service is involved.
 
-Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout, knowledge editor/history and recurring visit preview/history are also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
+The 14 saved-care-summary API tests cover own-patient and clinical access, frozen UTF-8 bytes and independently calculated SHA-256 fingerprints, source-revision conflicts, canonical UUID retries, actor/patient/payload collisions, and private-content exclusion. Failure injection verifies atomic copy, receipt and audit writes and prevents successful reads when auditing fails. Every archive path rechecks changed sessions, CSRF bindings, MFA, role, account status and patient linkage under the transaction lock. Other checks cover metadata-only SQL pagination, coherent count/page reads, the 10 MiB output bound, paused modules, concurrent connections, restart and an actual SQLite backup/restore preserving original bytes, receipts and immutable triggers.
+
+Three saved-summary browser journeys exercise patient and clinician archives with populated clinical, image, PDF and billing records; explicit reviewed saves; historical patient names; unchanged print and JSON content after live changes; and 320-pixel layouts and accessibility. Stale sources require a refreshed review. Malformed or mismatched save receipts and later errors retain the original command UUID. Archive reads recover from errors, pages remain bounded through back/forward navigation, and corrupt downloads produce no file. Pending saves/downloads and obsolete list/detail authorization responses cannot redirect the user, trigger a download or expire the current session after leaving their initiating view.
+
+Local and Docker production checks save a summary, independently verify its download bytes and fingerprint, then change a shared invoice. A new command with the old revision is rejected; retrying the original command returns the same copy and byte-for-byte download. A freshly reviewed revision creates a separate copy. Archive metadata excludes summaries and command receipts, private query views serve the SPA, and list/detail/download access is rejected after logout.
+
+Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout, knowledge editor/history, recurring visit preview/history and saved-summary archive/document are also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
 
 Screenshots use only synthetic demonstration records:
 
@@ -96,4 +102,4 @@ Screenshots use only synthetic demonstration records:
 
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
-CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling, follow-up-escalation, MFA, procedure-catalogue, authentication-security, public-library, knowledge-authoring and appointment-series workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling, follow-up-escalation, MFA, procedure-catalogue, authentication-security, public-library, knowledge-authoring, appointment-series and saved-care-summary workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.

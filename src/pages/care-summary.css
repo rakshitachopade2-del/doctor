@@ -1,6 +1,96 @@
 .care-summary-page {
   min-width: 0;
 }
+.care-summary-view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 23px;
+}
+.care-summary-view-controls .button {
+  transition: none;
+}
+.care-copy-list {
+  display: grid;
+  gap: 14px;
+  margin: 24px 0;
+}
+.care-copy-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px;
+  border: 1px solid #dce6d4;
+  border-radius: 12px;
+  background: #fff;
+  min-width: 0;
+}
+.care-copy-card > div {
+  min-width: 0;
+}
+.care-copy-card h2 {
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0 0 9px;
+  color: #355c43;
+  overflow-wrap: anywhere;
+}
+.care-copy-card p {
+  font-size: 12px;
+  color: #52684b;
+  line-height: 1.8;
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.care-copy-card .button {
+  flex-shrink: 0;
+}
+.care-copy-confirm {
+  min-width: 0;
+}
+.care-copy-confirm p {
+  font-size: 13px;
+  line-height: 1.9;
+  color: #455d3e;
+}
+.care-copy-context {
+  display: grid;
+  gap: 7px;
+  padding: 17px;
+  background: #f1f6eb;
+  border: 1px solid #dce6d4;
+  border-radius: 9px;
+  margin: 18px 0;
+  overflow-wrap: anywhere;
+}
+.care-copy-context span {
+  font-size: 12px;
+  color: #52684b;
+  line-height: 1.8;
+}
+.care-copy-confirm .checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.8;
+  margin: 20px 0;
+}
+.care-copy-confirm .checkbox-label input {
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.care-copy-confirm .notice {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.care-copy-confirm .modal-actions {
+  flex-wrap: wrap;
+}
+.care-summary-copy-provenance {
+  font-weight: 600;
+}
 .care-summary-controls {
   margin: 0 0 21px;
   flex-wrap: wrap;
@@ -302,6 +392,22 @@
   flex-wrap: wrap;
 }
 @media (max-width: 700px) {
+  .care-copy-card {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 18px;
+  }
+  .care-copy-card .button {
+    max-width: 100%;
+    white-space: normal;
+  }
+  .care-summary-view-controls .button {
+    max-width: 100%;
+    white-space: normal;
+  }
+  .care-summary-page .page-actions .button {
+    white-space: normal;
+  }
   .care-summary-identity {
     padding: 21px;
   }
@@ -358,6 +464,8 @@
     max-width: none;
   }
   .care-summary-controls,
+  .care-summary-view-controls,
+  .care-copy-list,
   .care-summary-index,
   .care-summary-page .page-actions,
   .care-summary-download-error,

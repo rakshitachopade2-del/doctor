@@ -204,6 +204,17 @@ The image module must be enabled to save or publish. Existing history remains re
 
 Summaries exclude internal encounters/amendments, private messages, clinician follow-up assessments/report snapshots/assignment reasons, unpublished investigation interpretations, private image annotations and original file bytes. Attachment URLs remain private authenticated routes. Private drafts and operational handovers do not invalidate a summary unless patient-visible content actually changes. Original regimen dates and instructions remain distinct from later shared follow-up reviews. Printing keeps the displayed snapshot; this is a patient-facing summary rather than a complete internal clinical-record release.
 
+### Saved care-summary copies
+
+- `POST /patients/:id/care-summary/copies {expectedRevision,requestId}` → `{copy,receipt}`, `201` for a new copy and `200` for an exact retry. `expectedRevision` is the displayed summary's 64-character lowercase content revision; `requestId` is a UUID, normalized to lowercase. No client-authored summary, author, label or timestamp is accepted. A changed shared record returns `409`; a serialized copy above 10 MiB returns `413` without saving or truncating it.
+- `GET /patients/:id/care-summary/copies?page=1&pageSize=25` → `{items,page,pageSize,total,totalPages}`. Pages are bounded to 1–1,000,000 and sizes to 10, 25 or 50. Items contain metadata only, ordered by saved date and ID descending. Unknown or repeated query fields are rejected.
+- `GET /patients/:id/care-summary/copies/:copyId` → `{copy,summary}`. `summary` is the original immutable `CareSummary`; it is not rebuilt from the current record.
+- `GET /patients/:id/care-summary/copies/:copyId/download` → the exact stored UTF-8 JSON attachment, including its original generation timestamp. No live revision is required. It remains protected by current authorization and no-store headers.
+
+`copy` contains `id`, `patientId`, `patientName` (as recorded in this copy), `sourceRevision`, `generatedAt`, `savedAt`, `savedBy:{name,role}`, `contentSha256` and `byteLength`. The fingerprint covers the exact download bytes; it is not a digital signature. The save-only `receipt` contains `requestId`, `actorId`, `patientId`, `expectedRevision` and `copyId`. Receipts bind the UUID to the original actor, patient and payload; a conflicting reuse returns `409`. Exact retries return the original result even after the live record changes.
+
+Owning patients, doctors and administrators can save and read copies; reception is denied. Every operation rechecks the current account, session, MFA and patient access inside its transaction. A save commits the server-generated snapshot, receipt and audit together. Copies and receipts cannot be edited or deleted through this feature. Saving records preservation, not clinical approval, a complete record release or an external delivery. Attachment bytes are not duplicated; file links still require current access. Historical copies may retain content that has since changed or stopped being shared.
+
 ## Private PDF reports
 
 - `GET /documents?patientId=` → `PatientDocument[]` (doctor/administrator or owning patient; reception denied). Patient accounts default to their own record; clinical staff supply `patientId`.

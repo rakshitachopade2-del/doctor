@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -938,6 +938,70 @@ try {
   assert.match(summaryDownload.headers.get('content-disposition'), /attachment/);
   assert.match(summaryDownload.headers.get('cache-control'), /no-store/);
   assert.equal((await summaryDownload.json()).revision, summary.revision);
+  const copiesPath = `/patients/${patient.id}/care-summary/copies`;
+  const copiesUrl = `${base}/api${copiesPath}`;
+  assert.equal((await fetch(copiesUrl)).status, 401);
+  const emptyCopies = await fetch(copiesUrl, { headers: apiHeaders });
+  assert.equal(emptyCopies.status, 200);
+  assert.equal((await emptyCopies.json()).total, 0);
+  const copyCommand = { expectedRevision: summary.revision, requestId: randomUUID() };
+  const savedCopy = await visitWrite(copiesPath, copyCommand, 201);
+  assert.equal(savedCopy.copy.patientId, patient.id);
+  assert.equal(savedCopy.copy.patientName, summary.patient.name);
+  assert.equal(savedCopy.copy.sourceRevision, summary.revision);
+  assert.equal(savedCopy.copy.savedBy.role, 'admin');
+  assert.equal(savedCopy.receipt.requestId, copyCommand.requestId);
+  assert.equal(savedCopy.receipt.copyId, savedCopy.copy.id);
+  const copyUrl = `${copiesUrl}/${savedCopy.copy.id}`;
+  const copyResponse = await fetch(copyUrl, { headers: apiHeaders });
+  assert.equal(copyResponse.status, 200);
+  const originalCopy = await copyResponse.json();
+  assert.deepEqual(originalCopy.copy, savedCopy.copy);
+  assert.deepEqual(originalCopy.summary, {
+    ...summary,
+    generatedAt: savedCopy.copy.generatedAt,
+  });
+  const copyDownload = await fetch(`${copyUrl}/download`, { headers: apiHeaders });
+  assert.equal(copyDownload.status, 200);
+  assert.match(copyDownload.headers.get('content-disposition'), /attachment/);
+  assert.match(copyDownload.headers.get('cache-control'), /no-store/);
+  assert.equal(copyDownload.headers.get('x-content-type-options'), 'nosniff');
+  const copyBytes = Buffer.from(await copyDownload.arrayBuffer());
+  assert.equal(copyBytes.length, savedCopy.copy.byteLength);
+  assert.equal(createHash('sha256').update(copyBytes).digest('hex'), savedCopy.copy.contentSha256);
+  assert.deepEqual(JSON.parse(copyBytes.toString('utf8')), originalCopy.summary);
+  await billingWrite(`/invoices/${invoice.id}/corrections`, {
+    items: [{ description: 'Later synthetic charge', quantity: 1, unitAmountPaise: 900 }],
+    reason: 'Synthetic change after saving the care-summary copy',
+    expectedRevision: noCharges.revision,
+    requestId: randomUUID(),
+  });
+  const laterSummary = await (await fetch(summaryUrl, { headers: apiHeaders })).json();
+  assert.notEqual(laterSummary.revision, summary.revision);
+  assert.equal(laterSummary.invoices[0].totalPaise, 900);
+  await visitWrite(copiesPath, { ...copyCommand, requestId: randomUUID() }, 409);
+  assert.deepEqual(await visitWrite(copiesPath, copyCommand), savedCopy);
+  assert.deepEqual(await (await fetch(copyUrl, { headers: apiHeaders })).json(), originalCopy);
+  const laterDownload = await fetch(`${copyUrl}/download`, { headers: apiHeaders });
+  assert.equal(laterDownload.status, 200);
+  assert.deepEqual(Buffer.from(await laterDownload.arrayBuffer()), copyBytes);
+  const newestCopy = await visitWrite(
+    copiesPath,
+    { expectedRevision: laterSummary.revision, requestId: randomUUID() },
+    201,
+  );
+  const copiesPage = await (
+    await fetch(`${copiesUrl}?pageSize=10`, { headers: apiHeaders })
+  ).json();
+  assert.equal(copiesPage.total, 2);
+  assert.equal(copiesPage.items[0].id, newestCopy.copy.id);
+  assert.equal(copiesPage.items[1].id, savedCopy.copy.id);
+  assert.ok(copiesPage.items.every((item) => !('summary' in item) && !('receipt' in item)));
+  const savedSummaryRoute = await fetch(
+    `${base}/clinic/patients/${patient.id}/summary?view=copies&copy=${savedCopy.copy.id}`,
+  );
+  assert.equal(savedSummaryRoute.status, 200);
+  assert.match(savedSummaryRoute.headers.get('x-robots-tag'), /noindex/);
   assert.equal(
     (await fetch(`${base}/api/documents?patientId=missing`, { headers: apiHeaders })).status,
     404,
@@ -1152,6 +1216,8 @@ try {
   assert.equal(logout.status, 200);
   assert.equal((await fetch(`${base}/api/accounts`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(summaryUrl, { headers: apiHeaders })).status, 401);
+  for (const privateCopyUrl of [copiesUrl, copyUrl, `${copyUrl}/download`])
+    assert.equal((await fetch(privateCopyUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/inventory/items`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/clinic-resources`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/search/patients`, { headers: apiHeaders })).status, 401);
@@ -1337,7 +1403,7 @@ try {
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/retries, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {
