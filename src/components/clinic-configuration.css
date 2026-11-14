@@ -1,0 +1,132 @@
+.clinic-configuration {
+  min-width: 0;
+}
+.clinic-configuration [hidden] {
+  display: none !important;
+}
+.configuration-editor,
+.configuration-history,
+.configuration-fields {
+  min-width: 0;
+}
+.configuration-editor h2,
+.configuration-history h2 {
+  margin-top: 0;
+}
+.configuration-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 20px;
+}
+.configuration-fields .module-grid {
+  min-width: 0;
+}
+.configuration-fields .module-grid h3 {
+  font-size: 17px;
+  margin: 12px 0 8px;
+}
+.configuration-fields .module-grid .card {
+  min-width: 0;
+}
+.configuration-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.6;
+}
+.configuration-confirm input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-top: 4px;
+}
+.configuration-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.configuration-notice {
+  display: block;
+}
+.configuration-conflict,
+.configuration-latest {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f5f8f5;
+  min-width: 0;
+}
+.configuration-values {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+.configuration-values > div {
+  min-width: 0;
+}
+.configuration-values dt {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+.configuration-values dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.configuration-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 16px;
+}
+.configuration-change,
+.configuration-change section {
+  min-width: 0;
+}
+.configuration-change h3 {
+  margin: 0;
+  font-size: 17px;
+}
+.configuration-change h4 {
+  margin: 0 0 16px;
+}
+.configuration-change summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--green);
+  padding: 8px 0;
+}
+.configuration-reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.configuration-history > .field {
+  max-width: 350px;
+}
+.configuration-editor .button,
+.configuration-history .button {
+  white-space: normal;
+}
+@media (max-width: 600px) {
+  .configuration-comparison {
+    grid-template-columns: 1fr;
+  }
+  .configuration-fields .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .configuration-conflict,
+  .configuration-latest {
+    padding: 12px;
+  }
+  .configuration-actions .button {
+    flex: 1 1 100%;
+  }
+  .configuration-change .section-heading,
+  .configuration-history > .section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

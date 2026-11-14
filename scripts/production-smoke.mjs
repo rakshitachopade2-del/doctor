@@ -210,6 +210,141 @@ try {
   assert.equal(auditPage.items[0].action, 'signed in');
   assert.equal(auditPage.items[0].actorName, 'Smoke Administrator');
   assert.equal((await fetch(`${base}/api/search/audit`)).status, 401);
+  const configurationPath = '/api/clinic-configuration';
+  const privateConfigurationReason = 'Synthetic private clinic configuration reason';
+  async function configurationRead(path = configurationPath, headers = apiHeaders) {
+    const response = await fetch(`${base}${path}`, { headers });
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.match(response.headers.get('cache-control'), /no-store/);
+    return response.json();
+  }
+  async function configurationWrite(path, body, status = 201, method = 'POST') {
+    const response = await fetch(`${base}${path}`, {
+      method,
+      headers: apiHeaders,
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, status, await response.clone().text());
+    return response.json();
+  }
+  const initialConfiguration = await configurationRead();
+  assert.equal(initialConfiguration.latestProfileChange, null);
+  assert.equal(initialConfiguration.latestModulesChange, null);
+  assert.equal((await configurationRead(`${configurationPath}/history`)).total, 0);
+  const { modules: initialModules, ...initialProfile } = initialConfiguration.settings;
+  const pausedModulesCommand = {
+    modules: { ...initialModules, images: false },
+    reason: privateConfigurationReason,
+    expectedRevision: initialConfiguration.modulesRevision,
+    requestId: randomUUID(),
+  };
+  const pausedModules = await configurationWrite(
+    `${configurationPath}/modules`,
+    pausedModulesCommand,
+  );
+  assert.equal(pausedModules.context.profileRevision, initialConfiguration.profileRevision);
+  const profileCommand = {
+    profile: {
+      ...initialProfile,
+      name: 'Synthetic Verification Clinic',
+      phone: '9000000291',
+      email: 'configuration@example.test',
+      address: 'Synthetic verification clinic address',
+      hours: 'Synthetic public hours; consult the booking calendar',
+    },
+    reason: privateConfigurationReason,
+    expectedRevision: initialConfiguration.profileRevision,
+    requestId: randomUUID(),
+  };
+  const configuredProfile = await configurationWrite(
+    `${configurationPath}/profile`,
+    profileCommand,
+  );
+  assert.equal(configuredProfile.context.settings.modules.images, false);
+  assert.equal(configuredProfile.context.modulesRevision, pausedModules.context.modulesRevision);
+  assert.equal(configuredProfile.change.scope, 'profile');
+  assert.equal(configuredProfile.change.source, 'reviewed');
+  assert.equal(configuredProfile.receipt.requestId, profileCommand.requestId);
+  const legacyConfiguration = await configurationWrite(
+    '/api/settings',
+    {
+      phone: '9000000292',
+      ignoredPrivateField: 'MUST_NOT_ENTER_PUBLIC_SETTINGS',
+    },
+    200,
+    'PATCH',
+  );
+  assert.equal(legacyConfiguration.phone, '9000000292');
+  assert.equal(legacyConfiguration.modules.images, false);
+  const afterLegacyConfiguration = await configurationRead();
+  assert.equal(afterLegacyConfiguration.modulesRevision, pausedModules.context.modulesRevision);
+  assert.notEqual(
+    afterLegacyConfiguration.profileRevision,
+    configuredProfile.context.profileRevision,
+  );
+  assert.equal(afterLegacyConfiguration.latestProfileChange.source, 'legacy');
+  assert.equal(afterLegacyConfiguration.latestProfileChange.reason, null);
+  await configurationWrite(
+    `${configurationPath}/profile`,
+    {
+      ...profileCommand,
+      requestId: randomUUID(),
+      profile: { ...profileCommand.profile, phone: 'STALE' },
+    },
+    409,
+  );
+  const restoredModules = await configurationWrite(`${configurationPath}/modules`, {
+    modules: initialModules,
+    reason: 'Synthetic module restoration after independent profile save',
+    expectedRevision: pausedModules.context.modulesRevision,
+    requestId: randomUUID(),
+  });
+  assert.deepEqual(restoredModules.context.settings.modules, initialModules);
+  assert.notEqual(restoredModules.context.modulesRevision, initialConfiguration.modulesRevision);
+  assert.equal(restoredModules.context.profileRevision, afterLegacyConfiguration.profileRevision);
+  await configurationWrite(
+    `${configurationPath}/modules`,
+    {
+      ...pausedModulesCommand,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  const configurationReplay = await configurationWrite(
+    `${configurationPath}/profile`,
+    profileCommand,
+    200,
+  );
+  assert.deepEqual(configurationReplay.change, configuredProfile.change);
+  assert.deepEqual(configurationReplay.receipt, configuredProfile.receipt);
+  assert.equal(configurationReplay.context.settings.phone, '9000000292');
+  assert.deepEqual(configurationReplay.context.settings.modules, initialModules);
+  assert.equal((await configurationRead(`${configurationPath}/history?pageSize=10`)).total, 4);
+  assert.equal((await configurationRead(`${configurationPath}/history?scope=profile`)).total, 2);
+  assert.equal((await configurationRead(`${configurationPath}/history?scope=modules`)).total, 2);
+  await configurationWrite('/api/settings', {}, 200, 'PATCH');
+  assert.equal((await configurationRead(`${configurationPath}/history`)).total, 4);
+  const publicConfiguration = await (await fetch(`${base}/api/settings`)).json();
+  assert.deepEqual(publicConfiguration, configurationReplay.context.settings);
+  assert.deepEqual(Object.keys(publicConfiguration).sort(), [
+    'address',
+    'email',
+    'hours',
+    'modules',
+    'name',
+    'phone',
+    'tagline',
+    'timezone',
+  ]);
+  for (const secret of [
+    privateConfigurationReason,
+    profileCommand.requestId,
+    configuredProfile.change.id,
+    'MUST_NOT_ENTER_PUBLIC_SETTINGS',
+  ])
+    assert.equal(JSON.stringify(publicConfiguration).includes(secret), false);
+  for (const path of [configurationPath, `${configurationPath}/history`])
+    assert.equal((await fetch(`${base}${path}`)).status, 401);
   const attendanceUrl = `${base}/api/attendance/me`;
   const attendanceResponse = await fetch(attendanceUrl, { headers: apiHeaders });
   assert.equal(attendanceResponse.status, 200);
@@ -524,6 +659,7 @@ try {
       .replace(/\.\d{3}Z$/, 'Z');
   const visitStart = Date.parse(`${visitDay}T09:10:00+05:30`);
   assert.ok(calendarText.includes(`DTSTART:${calendarStamp(visitStart)}`));
+  assert.ok(calendarText.includes(`LOCATION:${profileCommand.profile.address}`));
   assert.ok(calendarText.includes(`DTEND:${calendarStamp(visitStart + 90 * 60000)}`));
   const durationUrl = `${base}/api/appointments/${movedVisit.id}/duration`;
   const durationResponse = await fetch(durationUrl, { headers: apiHeaders });
@@ -1180,6 +1316,10 @@ try {
   assert.equal(summaryResponse.status, 200);
   const summary = await summaryResponse.json();
   assert.equal(summary.audience, 'patient');
+  assert.equal(summary.clinic.name, profileCommand.profile.name);
+  assert.equal(summary.clinic.phone, legacyConfiguration.phone);
+  assert.equal(JSON.stringify(summary).includes(privateConfigurationReason), false);
+  assert.equal(JSON.stringify(summary).includes(profileCommand.requestId), false);
   assert.equal(summary.patient.id, patient.id);
   assert.equal(summary.patient.phone, '9000000088');
   assert.equal(summary.patient.allergyStatus, 'not-recorded');
@@ -1495,6 +1635,8 @@ try {
   });
   assert.equal(logout.status, 200);
   assert.equal((await fetch(`${base}/api/accounts`, { headers: apiHeaders })).status, 401);
+  for (const path of [configurationPath, `${configurationPath}/history`])
+    assert.equal((await fetch(`${base}${path}`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(summaryUrl, { headers: apiHeaders })).status, 401);
   for (const privateCopyUrl of [copiesUrl, copyUrl, `${copyUrl}/download`])
     assert.equal((await fetch(privateCopyUrl, { headers: apiHeaders })).status, 401);
@@ -1600,6 +1742,14 @@ try {
     Cookie: patientCookie.split(';')[0],
     'X-CSRF-Token': registeredSession.csrfToken,
   };
+  for (const path of [configurationPath, `${configurationPath}/history`])
+    assert.equal((await fetch(`${base}${path}`, { headers: patientHeaders })).status, 403);
+  const patientConfigurationWrite = await fetch(`${base}${configurationPath}/profile`, {
+    method: 'POST',
+    headers: patientHeaders,
+    body: JSON.stringify(profileCommand),
+  });
+  assert.equal(patientConfigurationWrite.status, 403);
   const duplicateRegistration = await fetch(`${base}/api/auth/register`, {
     method: 'POST',
     headers: publicHeaders,
@@ -2185,7 +2335,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

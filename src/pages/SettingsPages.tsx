@@ -1,15 +1,6 @@
 import { useSearchParams, Link } from 'react-router-dom';
-import { useEffect, useState, type FormEvent } from 'react';
-import {
-  Check,
-  CircleOff,
-  FileClock,
-  Plus,
-  Settings2,
-  ShieldCheck,
-  Stethoscope,
-  Users,
-} from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { Check, CircleOff, Plus } from 'lucide-react';
 import { api, useResource, useToast } from '../lib';
 import {
   Avatar,
@@ -21,33 +12,28 @@ import {
   Modal,
   PageHeader,
 } from '../components/ui';
-import type { ClinicSettings, Doctor, User, Patient } from '../../shared/types';
+import type { Doctor, User, Patient } from '../../shared/types';
+import { ClinicConfigurationPanel } from '../components/ClinicConfigurationPanel';
 export function SettingsPage() {
-  const settings = useResource<ClinicSettings>('/api/settings');
   const doctors = useResource<Doctor[]>('/api/doctors');
   const users = useResource<User[]>('/api/users');
   const toast = useToast();
-  const [draft, setDraft] = useState<ClinicSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<'doctor' | 'user' | null>(null);
   const [editing, setEditing] = useState<Doctor | null>(null);
-  const [params] = useSearchParams();
-  const [tab, setTab] = useState(params.get('tab') === 'team' ? 'team' : 'clinic');
-  useEffect(() => {
-    if (settings.data) setDraft(settings.data);
-  }, [settings.data]);
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await api('/api/settings', { method: 'PATCH', body: draft });
-      await settings.reload();
-      toast('Clinic settings saved.');
-    } catch (e) {
-      toast((e as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
+  const [params, setParams] = useSearchParams();
+  const sections = [
+    ['clinic', 'Clinic profile'],
+    ['modules', 'Care modules'],
+    ['team', 'Your team'],
+    ['integrations', 'Connections'],
+    ['history', 'Configuration history'],
+  ];
+  const tab = sections.some(([key]) => key === params.get('tab')) ? params.get('tab')! : 'clinic';
+  function setTab(key: string) {
+    const next = new URLSearchParams(params);
+    next.set('tab', key);
+    setParams(next);
   }
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -90,9 +76,6 @@ export function SettingsPage() {
       setBusy(false);
     }
   }
-  if (settings.loading) return <Loading />;
-  if (settings.error) return <ErrorState message={settings.error} retry={settings.reload} />;
-  if (!draft) return null;
   return (
     <>
       <PageHeader
@@ -101,166 +84,45 @@ export function SettingsPage() {
         description="Manage your clinic details, care modules, and the people behind it."
       />
       <div className="tabs" role="tablist" aria-label="Settings sections">
-        {[
-          ['clinic', 'Clinic profile'],
-          ['modules', 'Care modules'],
-          ['team', 'Your team'],
-          ['integrations', 'Connections'],
-        ].map(([key, label]) => (
+        {sections.map(([key, label], index) => (
           <button
             key={key}
+            id={`settings-tab-${key}`}
             role="tab"
+            aria-controls={tab === key ? `settings-panel-${key}` : undefined}
             aria-selected={tab === key}
+            tabIndex={tab === key ? 0 : -1}
             className={tab === key ? 'active' : ''}
             onClick={() => setTab(key)}
+            onKeyDown={(event) => {
+              const target =
+                event.key === 'ArrowRight'
+                  ? (index + 1) % sections.length
+                  : event.key === 'ArrowLeft'
+                    ? (index + sections.length - 1) % sections.length
+                    : event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? sections.length - 1
+                        : null;
+              if (target === null) return;
+              event.preventDefault();
+              setTab(sections[target][0]);
+              document.getElementById(`settings-tab-${sections[target][0]}`)?.focus();
+            }}
           >
             {label}
           </button>
         ))}
       </div>
-      {tab === 'clinic' && (
-        <div className="settings-grid">
-          <Card>
-            <h2>Public clinic information</h2>
-            <p className="muted">These details appear on your patient-facing clinic page.</p>
-            <form className="stack" onSubmit={save}>
-              <Field label="Clinic name">
-                <input
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  required
-                  maxLength={120}
-                />
-              </Field>
-              <Field label="Tagline">
-                <input
-                  value={draft.tagline}
-                  onChange={(e) => setDraft({ ...draft, tagline: e.target.value })}
-                  required
-                  maxLength={200}
-                />
-              </Field>
-              <div className="form-grid">
-                <Field label="Contact phone">
-                  <input
-                    type="tel"
-                    value={draft.phone}
-                    onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
-                    required
-                    maxLength={30}
-                  />
-                </Field>
-                <Field label="Contact email">
-                  <input
-                    type="email"
-                    value={draft.email}
-                    onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-                    required
-                  />
-                </Field>
-              </div>
-              <Field label="Clinic address">
-                <textarea
-                  value={draft.address}
-                  onChange={(e) => setDraft({ ...draft, address: e.target.value })}
-                  required
-                  maxLength={300}
-                />
-              </Field>
-              <Field
-                label="Opening hours"
-                hint="Public information only. Appointment availability is managed in Schedules & closures."
-              >
-                <input
-                  value={draft.hours}
-                  onChange={(e) => setDraft({ ...draft, hours: e.target.value })}
-                  required
-                />
-              </Field>
-              <Field label="Clinic time zone">
-                <input value="Asia/Kolkata (IST)" readOnly />
-              </Field>
-              <div>
-                <button className="button button-primary" disabled={busy}>
-                  {busy ? 'Saving…' : 'Save clinic details'}
-                </button>
-              </div>
-            </form>
-          </Card>
-          <Card className="settings-tip">
-            <Settings2 size={25} />
-            <h2>A familiar face for your clinic.</h2>
-            <p>
-              Your public profile helps patients find your clinic, understand your services, and
-              book with confidence.
-            </p>
-            <div className="notice">
-              <ShieldCheck size={18} />
-              <span>Patient records stay inside the protected workspace.</span>
-            </div>
-          </Card>
-        </div>
-      )}
-      {tab === 'modules' && (
-        <form onSubmit={save}>
-          <div className="module-grid">
-            {(
-              [
-                {
-                  key: 'intake',
-                  title: 'Structured intake',
-                  text: 'Give patients space to share their history before a consultation.',
-                  icon: FileClock,
-                },
-                {
-                  key: 'images',
-                  title: 'Clinical image library',
-                  text: 'Keep private clinical photographs and image reports connected to each patient.',
-                  icon: Stethoscope,
-                },
-                {
-                  key: 'followUp',
-                  title: 'Follow-up companion',
-                  text: 'Capture daily check-ins and keep your clinic conversations in one place.',
-                  icon: Users,
-                },
-              ] as const
-            ).map((m) => (
-              <Card key={m.key}>
-                <span className="module-icon">
-                  <m.icon size={24} />
-                </span>
-                <h2>{m.title}</h2>
-                <p className="muted">{m.text}</p>
-                <label className="toggle-row">
-                  <span>{draft.modules[m.key] ? 'Enabled' : 'Disabled'}</span>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    aria-label={`Enable ${m.title}`}
-                    checked={draft.modules[m.key]}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        modules: { ...draft.modules, [m.key]: e.target.checked },
-                      })
-                    }
-                  />
-                </label>
-              </Card>
-            ))}
-          </div>
-          <div className="notice">
-            Turning off a module pauses new activity. Existing records remain available for
-            continuity of care.
-          </div>
-          <button className="button button-primary" disabled={busy}>
-            {busy ? 'Saving…' : 'Save modules'}
-          </button>
-        </form>
-      )}
+      <ClinicConfigurationPanel activeTab={tab} />
       {tab === 'team' && (
-        <div className="stack">
+        <div
+          className="stack"
+          role="tabpanel"
+          id="settings-panel-team"
+          aria-labelledby="settings-tab-team"
+        >
           <Card>
             <div className="section-heading">
               <div>
@@ -357,7 +219,12 @@ export function SettingsPage() {
         </div>
       )}
       {tab === 'integrations' && (
-        <div className="grid-2">
+        <div
+          className="grid-2"
+          role="tabpanel"
+          id="settings-panel-integrations"
+          aria-labelledby="settings-tab-integrations"
+        >
           {[
             {
               title: 'Calendar export',

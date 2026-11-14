@@ -1,18 +1,24 @@
 # Release verification
 
-Release **1.28.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.29.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 513 passed                                              |
-| Browser and accessibility tests | 94 passed                                               |
+| API and online-backup tests     | 527 passed                                              |
+| Browser and accessibility tests | 98 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
 | Prettier and whitespace checks  | Passed                                                  |
 | Docker Compose configuration    | Valid                                                   |
 | Docker image build/runtime      | Passed: image build and disposable production container |
+
+Clinic configuration verification adds 14 API tests for independent profile/module revisions, changes away and back, exact actor-bound retries after later edits, current authorization under the transaction lock, strict inputs and unchanged-value rejection. Compatibility PATCH checks preserve partial-field behavior, unknown-field stripping, legacy provenance, unchanged module pauses, no-op revisions and atomic two-group updates. Injected failures cover settings/event/receipt/audit rollback, including a second legacy event and the final compatibility audit. History checks cover deterministic filtering/pagination, SQL-bounded decoding and index plans, a coherent count/page snapshot, immutable records, public projection privacy and persistence after database restart.
+
+Configuration browser journeys exercise independent unsaved drafts, concurrent changes to the other group, explicit review after a change away and back, malformed confirmations followed by later errors and wrong-account receipts, exact recovery after newer changes, a never-committed request returning to conflict review after a stale retry, private history filters/pages and Back/Forward. Paused modules preserve existing patient image/message reads. Public settings and care summaries exclude private configuration reasons/history, and public hours leave schedules unchanged. Delayed save/read responses after navigation cannot replace current state or expire the current session. The profile, configuration-history and paused patient-conversation views receive 320-pixel overflow and automated accessibility checks.
+
+Local and disposable Docker production checks create a reviewed module pause, save a profile from its independent revision, apply a legacy contact update, reject stale/ABA writes and recover an exact original receipt after later changes. They verify scoped private history, no-op behavior, public field allowlisting, anonymous/patient/logout restrictions, public clinic details in care summaries and calendar locations, and unchanged empty schedules. All configuration data is synthetic and exists only in disposable verification databases.
 
 The production smoke check used a new temporary database and a randomly generated administrator password. It verified administrator bootstrap, disabled demo mode, absence of fictional doctor profiles, a Secure session cookie, built SPA route serving, security headers, empty administrator reporting/expense tables, private investigation worklist/owner reads on a fresh database, unauthenticated worklist rejection, private CSV export access, and a synthetic patient-facing care summary/download with logout protection. It also created a synthetic consumable, received five units, recorded use of two and verified three remained; these records existed only in the disposable test database. It also corrected a synthetic patient contact, verified attributed history and confirmed the corrected contact and explicit allergy status in the patient-facing summary. It created a synthetic invoice, recorded a payment, corrected the charges, reversed the erroneous payment entry and explicitly removed all charges, then verified preserved originals and shared summary history. The same reusable check also passed against the production Docker image. It also read the empty private resource catalogue/diary, created and archived a synthetic room with preserved history, and verified unauthenticated/logout protection. The record-search smoke checks also verify empty private pages, filtered administrator audit results, a demographic-only synthetic patient match and logout protection. Temporary databases, the container, and its anonymous volume were removed afterward. Run `npm run test:production` after building; use `npm run test:production -- --image derma-platform:verify` to check a built container image.
 

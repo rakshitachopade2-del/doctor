@@ -112,6 +112,14 @@ Absolute metadata and sitemap URLs use validated configuration, never request he
 
 The rendering boundary follows the documented [Vite server-rendering workflow](https://vite.dev/guide/ssr) and [React hydration contract](https://react.dev/reference/react-dom/client/hydrateRoot). Robots directives complement authenticated access; they do not protect private data, as explained in [Google's robots guidance](https://developers.google.com/search/docs/crawling-indexing/robots/intro).
 
+## Versioned clinic configuration
+
+`server/clinic-configuration.ts` owns the public settings projection, administrator context/history, reviewed group commands and compatibility PATCH adapter. `shared/clinic-configuration.ts` defines the profile/module discriminated records. The existing `meta.settings` value remains the current source for clinical module enforcement, public contact information and care-summary exports.
+
+`clinicConfigurationChanges` stores immutable before/after events with indexes for scope and newest-first history. `clinicConfigurationCommands` stores immutable actor-bound retry receipts. Separate revisions hash each canonical group and its latest event identity, preserving independence while detecting changes away and back. Pre-existing settings remain an unattributed baseline. Legacy PATCH merges only submitted fields under the same write lock and records actual changed groups as legacy events without inventing reviewed reasons.
+
+Administrator authorization and current session/MFA checks occur under the transaction lock. Settings, events, receipt and audit commit atomically; replay returns the original confirmation with current context. History counts and pages inside one transaction and decodes only the bounded page. Public projection strips history, reasons, revisions and command identities. The UI keeps separate drafts, review bases and pending commands for profile/modules; history uses URL-backed tabs and filters. Public hours remain descriptive and do not edit scheduling records.
+
 ## Configurable scheduling
 
 `doctorSchedules` stores each doctor’s weekly sessions and appointment length. Sessions have a weekday, start/end time, and in-person/online/both mode. Allowed lengths are 15, 20, 30, 45, and 60 minutes. Multiple non-overlapping sessions express breaks; overnight sessions are not accepted. Profiles without a saved schedule retain the original Monday–Saturday, 09:00–18:00, 30-minute default.

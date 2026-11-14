@@ -63,11 +63,24 @@ Password change, recovery and account access changes invalidate pending MFA prep
 - `GET /doctors` → `Doctor[]` (public). Each profile includes its current `appointmentDurationMinutes`.
 - `POST /doctors`, `PATCH /doctors/:id` → `Doctor` (administrator; full profile: name, title, qualifications, specialties, experience, fee, bio, languages, optional color).
 - `GET /settings` → `ClinicSettings` (public fields only).
-- `PATCH /settings` → `ClinicSettings` (administrator; partial clinic fields). Timezone remains `Asia/Kolkata`; module settings cover `intake`, `images` and `followUp`.
+- `PATCH /settings` → `ClinicSettings` (administrator; compatibility API with partial clinic fields). Timezone remains `Asia/Kolkata`; module settings cover `intake`, `images` and `followUp`. Explicitly submitted fields merge into current settings under the write lock, with atomic legacy change history and audit. This unversioned API does not reject stale submitted fields. Unknown fields are stripped; a no-op creates no configuration change.
 - `GET /audit` → `AuditEntry[]` (administrator).
 - `GET /health` → `{status:'ok'}`.
 
 Disabling a module pauses its new activity. Existing records remain readable within the usual permissions. The clinic’s public `hours` string is descriptive; bookable hours are configured by scheduling endpoints.
+
+## Versioned clinic configuration
+
+- `GET /clinic-configuration` → `{settings,profileRevision,modulesRevision,latestProfileChange,latestModulesChange}` (administrator).
+- `POST /clinic-configuration/profile {profile,reason,expectedRevision,requestId}` → `{context,change,receipt}` (administrator; 201 new / 200 exact retry).
+- `POST /clinic-configuration/modules {modules,reason,expectedRevision,requestId}` → the same result (administrator).
+- `GET /clinic-configuration/history?scope=all|profile|modules&page&pageSize` → `{items,page,pageSize,total,totalPages}` (administrator). Defaults are all/1/25; sizes are 10, 25 or 50. Pages clamp to the current total, with stable newest-first timestamp/ID ordering and SQL-bounded materialization.
+
+`profile` contains all public clinic fields except modules: name, tagline, phone, email, address, hours and timezone. Name is required (1–300 characters); tagline, phone, address and hours allow blank values up to 300 characters. Email is blank or valid, trimmed/lowercase and at most 254 characters. Timezone remains `Asia/Kolkata`. `modules` requires the three booleans `intake`, `images` and `followUp`. Reasons are trimmed 1–1000 characters, revisions are lowercase 64-character SHA-256 strings and request IDs are UUIDs. Reviewed routes reject unknown fields/query parameters and unchanged values.
+
+Each scope has its own revision binding current canonical values and the latest immutable change identity. Edits to the other scope preserve the revision; changing away and back does not revive an old revision. A stale new request returns 409. An exact retry binds administrator identity, scope and the normalized complete request, including the original revision. It returns the original change/receipt alongside current context, even after later edits. Authentication, session/MFA, required password change and current administrator role are checked again inside the transaction before replay or mutation.
+
+Change records contain a discriminated scope, before/after values, source (`reviewed` or `legacy`), private reason, actor display name and timestamp. The receipt contains requestId, actorId, scope, expectedRevision and changeId. Current public settings exclude these private records and metadata. Existing configuration has null latest changes until explicitly edited; no earlier authorship or reason is invented. The compatibility PATCH writes source `legacy` with null reason; updating both groups produces two changes in the same transaction. Settings, events, command receipt and audit save or roll back together. There is no history deletion or restore endpoint.
 
 ## Availability and appointments
 

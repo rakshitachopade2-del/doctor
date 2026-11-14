@@ -43,11 +43,15 @@ Configure each doctor in **Availability & time off** before opening bookings. Ne
 
 A database seeded in demo mode is deliberately rejected by production. Keep demo and production databases separate; importing fictional records is not a production migration.
 
+Clinic details and care modules use independent forms in Clinic settings. Each reviewed change needs a private reason; use Configuration history to inspect retained before/after values. Review current values after a stale edit, and use the pending request's retry after an uncertain response. Public hours are descriptive; configure bookable hours separately under Scheduling.
+
 ## Upgrade an existing installation
 
 Create and verify a backup before replacing the running application. Stop the service, install the new dependencies, build, and restart against the same production database. Startup creates the scheduling, recovery, clinical workflow, private PDF, follow-up review/assignment, waitlist, procedure-invoice link, expense, image annotation/publication, inventory, patient-detail/allergy correction, billing-correction/reversal, investigation handover/command and activity tables and adds session metadata where needed. Existing users retain their current access; the mandatory-password rule applies to newly provisioned accounts. Existing doctor profiles retain the original default hours until an authorized user saves another schedule. Previously booked appointments without a stored duration continue to count as 30 minutes.
 
 Knowledge authoring adds private, immutable content versions, change events and retry receipts automatically. Startup imports retained article snapshots and current content without changing existing publication status or public URLs. Legacy snapshots show their recorded labels and dates; they do not invent a saving account or publication approval. No external service or manual migration is required. New changes record their actual author and review. Saving or restoring a draft withdraws the article from public readers until it is explicitly approved again; restoring creates a new version and keeps the original history.
+
+Clinic configuration adds empty immutable change and command tables automatically. Existing contact details and module values remain intact, with no invented earlier history or author. Subsequent reviewed changes record a private reason; compatibility settings writes are identified as legacy events. The ordinary SQLite backup retains this history and retry receipts. No provider or manual migration is required.
 
 Recurring appointment series add immutable booking origins and retry receipts automatically. Existing appointments are unchanged and are not assigned invented series membership. Staff can book a finite set using the clinic's existing schedules; no background recurrence job, external calendar or additional configuration is required. Backups retain series origins, original visit snapshots and private booking notes alongside the ordinary appointment records.
 

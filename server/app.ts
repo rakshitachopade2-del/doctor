@@ -3,6 +3,7 @@ import { registerClinical } from './clinical.ts';
 import { createFollowUp } from './follow-up.ts';
 import { createFollowUpEscalation } from './follow-up-escalation.ts';
 import { createAppointmentReminders } from './appointment-reminders.ts';
+import { registerClinicConfiguration } from './clinic-configuration.ts';
 import { createWaitlist } from './waitlist.ts';
 import { registerInsights } from './insights.ts';
 import { registerInventory } from './inventory.ts';
@@ -628,27 +629,7 @@ export function createApp(options: AppOptions = {}) {
     audit(req, 'updated doctor profile', 'doctor', key);
     res.json(doctor);
   });
-  app.get('/api/settings', (_req, res) => res.json(settings(db)));
-  app.patch('/api/settings', (req: AuthRequest, res) => {
-    actor(req, ['admin']);
-    const input = z
-      .object({
-        name: required,
-        tagline: short,
-        phone: short,
-        email: email.or(z.literal('')),
-        address: short,
-        hours: short,
-        timezone: z.literal('Asia/Kolkata'),
-        modules: z.object({ intake: z.boolean(), images: z.boolean(), followUp: z.boolean() }),
-      })
-      .partial()
-      .parse(req.body);
-    const updated = { ...settings(db), ...input };
-    db.prepare('UPDATE meta SET value=? WHERE key=?').run(JSON.stringify(updated), 'settings');
-    audit(req, 'updated clinic settings', 'settings', 'clinic');
-    res.json(updated);
-  });
+  registerClinicConfiguration(app, { db, actor, audit, fail });
   app.get('/api/slots', (req: AuthRequest, res) => {
     const input = z
       .object({

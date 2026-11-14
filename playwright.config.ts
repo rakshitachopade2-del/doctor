@@ -132,6 +132,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)refund-voids\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5205' },
     },
+    {
+      name: 'clinic-configuration',
+      testMatch: /(?:^|\/)clinic-configuration\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5206' },
+    },
   ],
   webServer: [
     {
@@ -270,6 +275,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3033 E2E_VITE_PORT=5205 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5205',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3034 E2E_VITE_PORT=5206 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5206',
       reuseExistingServer: false,
       timeout: 60000,
     },
