@@ -752,6 +752,153 @@ try {
   );
   for (const privateCancellationUrl of [cancellationUrl, `${cancellationUrl}/context`])
     assert.equal((await fetch(privateCancellationUrl)).status, 401);
+  const rescheduleInput = { ...seriesInput, time: '11:05' };
+  const rescheduleBookingPreview = await visitWrite('/appointment-series/preview', rescheduleInput);
+  assert.equal(rescheduleBookingPreview.canBook, true);
+  const rescheduleBooking = {
+    input: rescheduleInput,
+    expectedRevision: rescheduleBookingPreview.revision,
+    patientConfirmed: true,
+    privateNote: privateSeriesNote,
+    requestId: randomUUID(),
+  };
+  const rescheduleSeries = await visitWrite('/appointment-series', rescheduleBooking, 201);
+  const [firstMove, secondMove, untouchedMove] = rescheduleSeries.appointments;
+  const reschedulePath = `/appointment-series/${rescheduleSeries.series.id}/reschedules`;
+  const rescheduleUrl = `${base}/api${reschedulePath}`;
+  const rescheduleContextResponse = await fetch(`${rescheduleUrl}/context`, {
+    headers: apiHeaders,
+  });
+  assert.equal(rescheduleContextResponse.status, 200);
+  assert.match(rescheduleContextResponse.headers.get('cache-control'), /no-store/);
+  const rescheduleContext = await rescheduleContextResponse.json();
+  assert.ok(rescheduleContext.visits.every((visit) => visit.eligible));
+  const blockedMoves = [firstMove, secondMove].map((visit) => ({
+    appointmentId: visit.id,
+    date: untouchedMove.date,
+    time: '12:05',
+  }));
+  const blockedReschedule = await visitWrite(`${reschedulePath}/preview`, { moves: blockedMoves });
+  assert.equal(blockedReschedule.canReschedule, false);
+  assert.ok(blockedReschedule.visits.every((visit) => !visit.eligible));
+  const privateRescheduleReason = 'Synthetic private series rescheduling reason';
+  await visitWrite(
+    reschedulePath,
+    {
+      moves: blockedMoves,
+      expectedRevision: blockedReschedule.revision,
+      reason: privateRescheduleReason,
+      patientConfirmed: true,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  const swapMoves = [
+    { appointmentId: secondMove.id, date: firstMove.date, time: firstMove.time },
+    { appointmentId: firstMove.id, date: secondMove.date, time: secondMove.time },
+  ];
+  const swapPreview = await visitWrite(`${reschedulePath}/preview`, { moves: swapMoves });
+  assert.equal(swapPreview.canReschedule, true);
+  for (const visit of [firstMove, secondMove]) {
+    const path = `/appointments/${visit.id}/resources`;
+    const context = await (await fetch(`${base}/api${path}`, { headers: apiHeaders })).json();
+    await visitWrite(
+      path,
+      {
+        resourceIds: [cancellationRoom.resource.id],
+        reason: 'Synthetic room retained through date swap',
+        expectedRevision: context.revision,
+        requestId: randomUUID(),
+      },
+      200,
+      'PUT',
+    );
+  }
+  const rescheduleCommand = {
+    moves: swapMoves,
+    expectedRevision: swapPreview.revision,
+    reason: privateRescheduleReason,
+    patientConfirmed: true,
+    requestId: randomUUID(),
+  };
+  await visitWrite(reschedulePath, rescheduleCommand, 409);
+  const beforeSwap = await (
+    await fetch(`${base}/api/appointment-series/${rescheduleSeries.series.id}`, {
+      headers: apiHeaders,
+    })
+  ).json();
+  assert.deepEqual(beforeSwap.appointments, rescheduleSeries.appointments);
+  const refreshedSwap = await visitWrite(`${reschedulePath}/preview`, { moves: swapMoves });
+  assert.equal(refreshedSwap.canReschedule, true);
+  assert.deepEqual(
+    refreshedSwap.visits.map((visit) => visit.reservationCount),
+    [1, 1],
+  );
+  assert.ok(
+    refreshedSwap.visits.every(
+      (visit) => visit.after.durationMinutes === 45 && visit.endTime === '11:50',
+    ),
+  );
+  rescheduleCommand.expectedRevision = refreshedSwap.revision;
+  const swapped = await visitWrite(reschedulePath, rescheduleCommand, 201);
+  assert.deepEqual(swapped.event.moves, [...swapMoves].reverse());
+  assert.deepEqual(
+    swapped.event.visits.map((visit) => visit.retainedReservationCount),
+    [1, 1],
+  );
+  assert.equal(swapped.detail.appointments[0].date, secondMove.date);
+  assert.equal(swapped.detail.appointments[1].date, firstMove.date);
+  assert.deepEqual(swapped.detail.appointments[2], untouchedMove);
+  assert.deepEqual(swapped.detail.series, rescheduleSeries.series);
+  for (const visit of swapped.detail.appointments.slice(0, 2)) {
+    assert.equal(visit.status, 'scheduled');
+    assert.equal(visit.durationMinutes, 45);
+    assert.equal(visit.durationPolicy, 'custom');
+    const context = await (
+      await fetch(`${base}/api/appointments/${visit.id}/resources`, {
+        headers: apiHeaders,
+      })
+    ).json();
+    assert.deepEqual(context.resourceIds, [cancellationRoom.resource.id]);
+    assert.equal(context.history[0].source, 'appointment-rescheduled');
+    const movedCalendar = await fetch(`${base}/api/appointments/${visit.id}/calendar`, {
+      headers: apiHeaders,
+    });
+    assert.equal(movedCalendar.status, 200);
+    const content = await movedCalendar.text();
+    const start = Date.parse(`${visit.date}T${visit.time}:00+05:30`);
+    assert.ok(content.includes(`DTSTART:${calendarStamp(start)}`));
+    assert.ok(content.includes(`DTEND:${calendarStamp(start + 45 * 60000)}`));
+  }
+  await visitWrite(
+    `/appointments/${firstMove.id}`,
+    { date: secondMove.date, time: '16:05' },
+    200,
+    'PATCH',
+  );
+  const rescheduleReplay = await visitWrite(reschedulePath, {
+    ...rescheduleCommand,
+    moves: [...swapMoves].reverse(),
+  });
+  assert.deepEqual(rescheduleReplay.event, swapped.event);
+  assert.equal(rescheduleReplay.detail.appointments[0].time, '16:05');
+  const rescheduleHistory = await (await fetch(rescheduleUrl, { headers: apiHeaders })).json();
+  assert.equal(rescheduleHistory.total, 1);
+  assert.deepEqual(rescheduleHistory.items[0], swapped.event);
+  const bookingAfterSwap = await visitWrite('/appointment-series', rescheduleBooking);
+  assert.deepEqual(bookingAfterSwap.series, rescheduleSeries.series);
+  assert.equal(bookingAfterSwap.appointments[0].time, '16:05');
+  const movedAppointments = await (
+    await fetch(`${base}/api/appointments`, { headers: apiHeaders })
+  ).text();
+  for (const privateValue of [
+    privateRescheduleReason,
+    rescheduleCommand.requestId,
+    swapped.event.id,
+  ])
+    assert.equal(movedAppointments.includes(privateValue), false);
+  for (const privateRescheduleUrl of [rescheduleUrl, `${rescheduleUrl}/context`])
+    assert.equal((await fetch(privateRescheduleUrl)).status, 401);
   // Give the synthetic administrator a clinician profile in this disposable
   // database, then refresh the session invalidated by that access change.
   await visitWrite(`/accounts/${account.user.id}`, { doctorId: visitDoctor.id }, 200, 'PATCH');
@@ -1046,6 +1193,8 @@ try {
   assert.equal(JSON.stringify(summary).includes(privateSchedulingReason), false);
   assert.equal(JSON.stringify(summary).includes(privateSeriesNote), false);
   assert.equal(JSON.stringify(summary).includes(privateCancellationReason), false);
+  assert.equal(JSON.stringify(summary).includes(privateRescheduleReason), false);
+  assert.equal(JSON.stringify(summary).includes(rescheduleCommand.requestId), false);
   assert.equal(JSON.stringify(summary).includes(cancellationCommand.requestId), false);
   assert.equal(JSON.stringify(summary).includes(seriesCommand.requestId), false);
   assert.equal(JSON.stringify(summary).includes('Synthetic private removal reason'), false);
@@ -1354,6 +1503,8 @@ try {
   assert.equal((await fetch(seriesUrl, { headers: apiHeaders })).status, 401);
   for (const privateCancellationUrl of [cancellationUrl, `${cancellationUrl}/context`])
     assert.equal((await fetch(privateCancellationUrl, { headers: apiHeaders })).status, 401);
+  for (const privateRescheduleUrl of [rescheduleUrl, `${rescheduleUrl}/context`])
+    assert.equal((await fetch(privateRescheduleUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureScheduleUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureSchedulingUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(catalogueUrl, { headers: apiHeaders })).status, 401);
@@ -1533,7 +1684,7 @@ try {
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/cancellations/retries, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/cancellations/rescheduling/retries, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

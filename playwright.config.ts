@@ -112,6 +112,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)appointment-series-cancellations\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5201' },
     },
+    {
+      name: 'appointment-series-rescheduling',
+      testMatch: /(?:^|\/)appointment-series-rescheduling\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5202' },
+    },
   ],
   webServer: [
     {
@@ -226,6 +231,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3029 E2E_VITE_PORT=5201 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5201',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3030 E2E_VITE_PORT=5202 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5202',
       reuseExistingServer: false,
       timeout: 60000,
     },

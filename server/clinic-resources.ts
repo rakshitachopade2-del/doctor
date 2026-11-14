@@ -32,6 +32,10 @@ interface StoredResource {
   kind: ResourceMetadata['kind'];
   createdAt: string;
 }
+interface AppointmentMove {
+  before: Appointment;
+  after: Appointment;
+}
 type StoredClosure = Omit<ResourceClosure, 'cancellation'>;
 type Operation = 'create' | 'metadata' | 'closure' | 'cancel-closure' | 'allocate';
 const openStatuses = new Set<Appointment['status']>(['scheduled', 'checked-in', 'in-consultation']);
@@ -468,6 +472,149 @@ export function createClinicResources({ db, actor, audit, fail }: ResourceContex
       null,
     );
   }
+  /** Read-only virtual batch: selected old claims are vacant; selected targets still conflict. */
+  function inspectAppointmentMoves(changes: readonly AppointmentMove[]) {
+    const selectedIds = changes.map((change) => change.before.id);
+    if (
+      !selectedIds.length ||
+      selectedIds.length > 12 ||
+      new Set(selectedIds).size !== selectedIds.length ||
+      changes.some((change) => change.before.id !== change.after.id)
+    )
+      return fail(400, 'Use distinct existing appointments for a resource move.');
+    const placeholders = selectedIds.map(() => '?').join(',');
+    const claims = db
+      .prepare(
+        `SELECT appointmentId,resourceId,data FROM resourceReservations WHERE appointmentId IN (${placeholders}) ORDER BY appointmentId,resourceId`,
+      )
+      .all(...selectedIds)
+      .map((row) => ({
+        appointmentId: String(row.appointmentId),
+        resourceId: String(row.resourceId),
+        value: JSON.parse(String(row.data)) as ResourceReservation,
+      }));
+    const heads = selectedIds.map((appointmentId) => ({
+      appointmentId,
+      eventId:
+        db
+          .prepare(
+            'SELECT id FROM resourceAllocationEvents WHERE appointmentId=? ORDER BY rowid DESC LIMIT 1',
+          )
+          .get(appointmentId)?.id ?? null,
+    }));
+    const targets = changes.map((change) => ({
+      appointment: snapshotAppointment(change.after),
+      claims: claims.filter((claim) => claim.appointmentId === change.before.id),
+      blockedReason: null as string | null,
+    }));
+    const resourceSources = [...new Set(claims.map((claim) => claim.resourceId))]
+      .sort()
+      .map((resourceId) => {
+        const row = db
+          .prepare(
+            'SELECT id,data FROM resourceChanges WHERE resourceId=? ORDER BY rowid DESC LIMIT 1',
+          )
+          .get(resourceId);
+        if (!row) return fail(500, 'Resource catalogue history is incomplete.');
+        const change = JSON.parse(String(row.data)) as ResourceChange;
+        const affected = targets.filter((target) =>
+          target.claims.some((claim) => claim.resourceId === resourceId),
+        );
+        const dateWindows = affected.map((target) => target.appointment.date);
+        const closures = db
+          .prepare(
+            `SELECT c.id,c.data,x.data AS cancellation FROM resourceClosures c LEFT JOIN resourceClosureCancellations x ON x.id=c.id WHERE c.resourceId=? AND (${dateWindows.map(() => '(c.startDate<=? AND c.endDate>=?)').join(' OR ')}) ORDER BY c.id`,
+          )
+          .all(resourceId, ...dateWindows.flatMap((date) => [date, date]))
+          .map((closure) => ({
+            ...(JSON.parse(String(closure.data)) as StoredClosure),
+            cancellation: closure.cancellation
+              ? (JSON.parse(String(closure.cancellation)) as ResourceClosureCancellation)
+              : null,
+          }));
+        const windows = affected.map((target) => interval(target.appointment));
+        const conflicts = db
+          .prepare(
+            `SELECT appointmentId,startAt,endAt FROM resourceReservations WHERE resourceId=? AND appointmentId NOT IN (${placeholders}) AND (${windows.map(() => '(startAt<? AND endAt>?)').join(' OR ')}) ORDER BY appointmentId`,
+          )
+          .all(
+            resourceId,
+            ...selectedIds,
+            ...windows.flatMap((window) => [window.end, window.start]),
+          );
+        for (const target of affected) {
+          const window = interval(target.appointment);
+          if (!change.after.active)
+            target.blockedReason ??= 'An assigned clinic resource is inactive.';
+          else if (closures.some((closure) => closureOverlaps(closure, target.appointment)))
+            target.blockedReason ??=
+              'An assigned clinic resource is under maintenance at the target time.';
+          else if (
+            conflicts.some((claim) =>
+              overlaps(window.start, window.end, Number(claim.startAt), Number(claim.endAt)),
+            )
+          )
+            target.blockedReason ??= 'An assigned clinic resource is reserved at the target time.';
+        }
+        for (let left = 0; left < affected.length; left++) {
+          for (let right = left + 1; right < affected.length; right++) {
+            const a = interval(affected[left].appointment),
+              b = interval(affected[right].appointment);
+            if (overlaps(a.start, a.end, b.start, b.end)) {
+              affected[left].blockedReason ??=
+                'Selected visits overlap on an assigned clinic resource.';
+              affected[right].blockedReason ??=
+                'Selected visits overlap on an assigned clinic resource.';
+            }
+          }
+        }
+        return { resourceId, changeId: row.id, metadata: change.after, closures, conflicts };
+      });
+    return {
+      claims,
+      visits: targets.map((target) => ({
+        appointmentId: target.appointment.id,
+        reservationCount: target.claims.length,
+        available: target.blockedReason === null,
+        blockedReason: target.blockedReason,
+      })),
+      revision: hash({
+        claims,
+        heads,
+        resourceSources,
+        targets: targets.map((target) => target.appointment),
+      }),
+    };
+  }
+  function previewAppointmentMoves(changes: readonly AppointmentMove[]) {
+    const { visits, revision } = inspectAppointmentMoves(changes);
+    return { visits, revision };
+  }
+  /** Caller holds BEGIN IMMEDIATE. Capture originals before vacating all selected keys. */
+  function applyAppointmentMoves(req: AuthRequest, changes: readonly AppointmentMove[]) {
+    const checked = inspectAppointmentMoves(changes);
+    const blocked = checked.visits.find((visit) => !visit.available);
+    if (blocked) return fail(409, blocked.blockedReason!);
+    const selectedIds = changes.map((change) => change.before.id);
+    db.prepare(
+      `DELETE FROM resourceReservations WHERE appointmentId IN (${selectedIds.map(() => '?').join(',')})`,
+    ).run(...selectedIds);
+    for (const change of changes) {
+      const resources = checked.claims
+        .filter((claim) => claim.appointmentId === change.before.id)
+        .map((claim) => claim.value.resource);
+      if (!resources.length) continue;
+      recordAllocation(
+        req,
+        { appointment: snapshotAppointment(change.before), resources },
+        { appointment: snapshotAppointment(change.after), resources },
+        'appointment-rescheduled',
+        'Reservations moved with the appointment.',
+        null,
+      );
+    }
+    return checked.visits;
+  }
   function availableForAppointment(
     appointmentId: string,
     date: string,
@@ -840,5 +987,12 @@ export function createClinicResources({ db, actor, audit, fail }: ResourceContex
       );
     });
   }
-  return { register, appointmentChanged, availableForAppointment, availableSlotsForAppointment };
+  return {
+    register,
+    appointmentChanged,
+    availableForAppointment,
+    availableSlotsForAppointment,
+    previewAppointmentMoves,
+    applyAppointmentMoves,
+  };
 }

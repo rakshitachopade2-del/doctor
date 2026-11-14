@@ -21,6 +21,12 @@ interface SlotQuery {
   /** Internal, authorized override. Custom visits retain this length on rescheduling. */
   customDurationMinutes?: number;
 }
+interface BookingValidationOptions {
+  /** Internal batch-only exclusions. Never accepted by a public request schema. */
+  excludeAppointmentIds?: readonly string[];
+  /** A coherent preview instant; commit callers must revalidate with the live clock. */
+  asOf?: number;
+}
 const timeSchema = z
   .string()
   .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, 'Use a real 24-hour time (HH:mm).');
@@ -167,12 +173,18 @@ export function createScheduling(context: SchedulingContext) {
           appointment.status !== 'scheduled'),
     );
   }
-  function busyAppointments(query: SlotQuery): Appointment[] {
+  function busyAppointments(query: SlotQuery, excludedIds: readonly string[] = []): Appointment[] {
     return db
       .prepare(
-        "SELECT data FROM appointments WHERE date=? AND (doctorId=? OR patientId=?) AND id!=? AND status NOT IN ('cancelled','no-show')",
+        `SELECT data FROM appointments WHERE date=? AND (doctorId=? OR patientId=?) AND id!=? AND status NOT IN ('cancelled','no-show')${excludedIds.length ? ` AND id NOT IN (${excludedIds.map(() => '?').join(',')})` : ''}`,
       )
-      .all(query.date, query.doctorId, query.patientId ?? '', query.excludeAppointmentId ?? '')
+      .all(
+        query.date,
+        query.doctorId,
+        query.patientId ?? '',
+        query.excludeAppointmentId ?? '',
+        ...excludedIds,
+      )
       .map((row) => JSON.parse(row.data as string) as Appointment);
   }
   function availableSlots(query: SlotQuery): string[] {
@@ -215,14 +227,21 @@ export function createScheduling(context: SchedulingContext) {
   }
   function validateBooking(
     query: SlotQuery & { time: string; mode: 'in-person' | 'online' },
+    options: BookingValidationOptions = {},
   ): number {
+    const asOf = options.asOf ?? Date.now();
     const value = schedule(query.doctorId),
-      today = clinicToday();
+      today = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(asOf));
     const duration = query.customDurationMinutes ?? value.durationMinutes;
     const cadence = query.customDurationMinutes === undefined ? value.durationMinutes : 5;
     if (query.date < today || query.date > addDays(today, 180))
       return fail(400, 'Choose a date within the next 180 days.');
-    if (Date.parse(`${query.date}T${query.time}:00+05:30`) <= Date.now())
+    if (Date.parse(`${query.date}T${query.time}:00+05:30`) <= asOf)
       return fail(400, 'This appointment time has already passed.');
     timeSchema.parse(query.time);
     const start = minutes(query.time),
@@ -244,7 +263,7 @@ export function createScheduling(context: SchedulingContext) {
     if (closed(query.doctorId, query.date, start, end))
       return fail(409, 'The clinic or doctor is unavailable at this time. Choose another slot.');
     if (
-      busyAppointments(query).some((appointment) =>
+      busyAppointments(query, options.excludeAppointmentIds).some((appointment) =>
         overlaps(
           start,
           end,

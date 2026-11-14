@@ -16,6 +16,10 @@ import {
 } from '../components/SeriesCancellationModal';
 import { useCancellationData } from '../components/series-cancellation-helpers';
 import {
+  SeriesRescheduleModal,
+  SeriesRescheduleHistory,
+} from '../components/SeriesRescheduleModal';
+import {
   checkedSeriesDetail,
   checkedSeriesPage,
   seriesCadence,
@@ -60,10 +64,12 @@ export function AppointmentSeriesPage() {
   const [draft, setDraft] = useState(filters),
     [booking, setBooking] = useState<string | null>(null),
     [cancelling, setCancelling] = useState<string | null>(null),
+    [rescheduling, setRescheduling] = useState<string | null>(null),
     ownNavigation = useRef<string | null>(null);
   useLayoutEffect(() => {
     setBooking((origin) => (origin === location.key ? origin : null));
     setCancelling((origin) => (origin === location.key ? origin : null));
+    setRescheduling((origin) => (origin === location.key ? origin : null));
     if (ownNavigation.current === location.search) {
       ownNavigation.current = null;
       return;
@@ -108,12 +114,20 @@ export function AppointmentSeriesPage() {
         actions={
           <>
             {seriesId && detail.data && !detail.loading && !detail.error && (
-              <button
-                className="button button-secondary"
-                onClick={() => setCancelling(location.key)}
-              >
-                Cancel remaining visits
-              </button>
+              <>
+                <button
+                  className="button button-secondary"
+                  onClick={() => setRescheduling(location.key)}
+                >
+                  Reschedule visits together
+                </button>
+                <button
+                  className="button button-secondary"
+                  onClick={() => setCancelling(location.key)}
+                >
+                  Cancel remaining visits
+                </button>
+              </>
             )}
             <button className="button button-primary" onClick={() => setBooking(location.key)}>
               <Plus size={16} />
@@ -274,6 +288,19 @@ export function AppointmentSeriesPage() {
           }}
         />
       )}
+      {rescheduling === location.key && detail.data && (
+        <SeriesRescheduleModal
+          series={detail.data.series}
+          onClose={() => setRescheduling(null)}
+          onSaved={async (result) => {
+            setRescheduling(null);
+            toast(
+              `${result.event.visits.length} ${result.event.visits.length === 1 ? 'visit rescheduled' : 'visits rescheduled'}.`,
+            );
+            await detail.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -317,8 +344,8 @@ function SeriesDetail({ detail }: { detail: AppointmentSeriesDetail }) {
         <p className="notice">
           Every listed date and time was confirmed with the patient when booked. Changes below show
           individual visits. Future scheduled visits may also be selected and reviewed for
-          cancellation together. The original booking and internal note remain unchanged; no future
-          visits are generated automatically.
+          cancellation or rescheduling together. The original booking and internal note remain
+          unchanged; no future visits are generated automatically.
         </p>
       </Card>
       {series.bookedAppointments.map((original, index) => {
@@ -378,6 +405,7 @@ function SeriesDetail({ detail }: { detail: AppointmentSeriesDetail }) {
         );
       })}
       <SeriesCancellationHistory series={series} />
+      <SeriesRescheduleHistory series={series} />
     </div>
   );
 }

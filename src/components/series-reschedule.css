@@ -1,0 +1,205 @@
+.series-reschedule-form,
+.series-reschedule-selection,
+.series-reschedule-preview,
+.series-reschedule-history {
+  min-width: 0;
+}
+.series-reschedule-form {
+  display: grid;
+  gap: 18px;
+}
+.series-reschedule-form .notice {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.series-reschedule-form p {
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.series-reschedule-boundary {
+  color: #425e50;
+  font-size: 12px;
+  margin: 0;
+}
+.series-reschedule-patient {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  background: #f0f5ef;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.series-reschedule-patient span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.series-reschedule-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.series-reschedule-selection-actions span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.series-reschedule-selection {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.series-reschedule-visit,
+.series-reschedule-preview-visit,
+.series-reschedule-event {
+  padding: 17px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: white;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.series-reschedule-checkbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  line-height: 1.8;
+  font-size: 13px;
+}
+.series-reschedule-checkbox input {
+  flex: 0 0 auto;
+}
+.series-reschedule-facts p,
+.series-reschedule-visit > p,
+.series-reschedule-preview-visit > p {
+  margin: 7px 0 0;
+  font-size: 12px;
+}
+.series-reschedule-facts p {
+  color: #425e50;
+}
+.series-reschedule-blocked {
+  color: #8b3928;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.series-reschedule-targets,
+.series-reschedule-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 17px;
+}
+.series-reschedule-targets > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.series-reschedule-targets > *,
+.series-reschedule-columns > * {
+  min-width: 0;
+}
+.series-reschedule-targets input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.series-reschedule-columns h5 {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.series-reschedule-changes {
+  margin-top: 12px;
+  background: #f1f6eb;
+  border-radius: 8px;
+  padding: 12px;
+}
+.series-reschedule-changes p {
+  color: #365943;
+  font-size: 12px;
+  margin: 0;
+  line-height: 1.8;
+}
+.series-reschedule-preview {
+  display: grid;
+  gap: 12px;
+}
+.series-reschedule-preview > h3,
+.series-reschedule-preview-visit > h4 {
+  margin: 0;
+}
+.series-reschedule-preview > p {
+  margin: 0;
+}
+.series-reschedule-confirm {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f6f4ee;
+}
+.series-reschedule-confirm input {
+  margin-top: 5px;
+}
+.series-reschedule-actions {
+  flex-wrap: wrap;
+}
+.series-reschedule-actions .button,
+.series-reschedule-selection-actions .button {
+  max-width: 100%;
+  white-space: normal;
+}
+.series-reschedule-history {
+  margin-top: 24px;
+}
+.series-reschedule-history > h2 {
+  font-size: 21px;
+  margin: 0 0 10px;
+}
+.series-reschedule-event {
+  margin: 17px 0;
+}
+.series-reschedule-event h3 {
+  margin: 0 0 9px;
+  font-size: 17px;
+}
+.series-reschedule-event h4 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+.series-reschedule-event p {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.series-reschedule-internal {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.series-reschedule-event summary {
+  cursor: pointer;
+  padding: 12px 0;
+  color: #286455;
+  font-size: 13px;
+  font-weight: 600;
+}
+.series-reschedule-history-visit {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  margin-top: 12px;
+}
+@media (max-width: 600px) {
+  .series-reschedule-targets,
+  .series-reschedule-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .series-reschedule-actions > .button {
+    flex: 1 1 100%;
+  }
+  .series-reschedule-visit,
+  .series-reschedule-preview-visit,
+  .series-reschedule-event {
+    padding: 14px;
+  }
+}
