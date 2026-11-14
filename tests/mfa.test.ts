@@ -755,10 +755,18 @@ test('password verification cannot issue a challenge after a concurrent password
   const external = openDatabase(path);
   t.after(() => external.close());
   const replacement = hashPassword('ExternalNewPassword2026!'),
-    original = f.db.exec.bind(f.db);
-  let interrupted = false;
+    original = f.db.exec.bind(f.db),
+    originalPrepare = f.db.prepare.bind(f.db);
+  let interrupted = false,
+    verifiedSourceRead = false;
+  f.db.prepare = ((sql: string) => {
+    // Durable network admission and password verification now have their own transactions.
+    // Intervene only after the password source was read, before challenge issuance acquires its lock.
+    if (sql.startsWith('SELECT data,password,COALESCE(')) verifiedSourceRead = true;
+    return originalPrepare(sql);
+  }) as typeof f.db.prepare;
   f.db.exec = ((sql: string) => {
-    if (sql === 'BEGIN IMMEDIATE' && !interrupted) {
+    if (sql === 'BEGIN IMMEDIATE' && verifiedSourceRead && !interrupted) {
       interrupted = true;
       external.prepare('UPDATE users SET password=? WHERE id=?').run(replacement, who.userId!);
     }
@@ -766,6 +774,7 @@ test('password verification cannot issue a challenge after a concurrent password
   }) as typeof f.db.exec;
   const result = await f.call('/auth/login', client(), 'POST', { email: who.email, password });
   f.db.exec = original;
+  f.db.prepare = originalPrepare;
   assert.equal(interrupted, true);
   assert.equal(result.status, 409);
   assert.deepEqual(result.headers.getSetCookie(), []);

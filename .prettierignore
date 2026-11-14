@@ -4,3 +4,5 @@ data
 package-lock.json
 test-results
 playwright-report
+# Preserve supplied development references.
+/dev_ref/

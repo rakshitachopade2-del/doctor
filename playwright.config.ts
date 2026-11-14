@@ -82,6 +82,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)procedure-catalogue\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5195' },
     },
+    {
+      name: 'auth-security',
+      testMatch: /(?:^|\/)auth-security\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5196' },
+    },
   ],
   webServer: [
     {
@@ -159,6 +164,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3023 E2E_VITE_PORT=5195 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5195',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3024 E2E_VITE_PORT=5196 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5196',
       reuseExistingServer: false,
       timeout: 60000,
     },

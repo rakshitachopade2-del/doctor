@@ -39,6 +39,7 @@ import { registerRecordSearch } from './record-search.ts';
 import { registerAttendance } from './attendance.ts';
 import { initializeMfa, invalidateMfaTransient, mfaSessionAllowed, registerMfa } from './mfa.ts';
 import { mfaEncryptionKey } from './mfa-crypto.ts';
+import { AuthenticationThrottle, createAuthSecurity } from './auth-security.ts';
 import { registerVisitDuration } from './visit-duration.ts';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
@@ -347,11 +348,6 @@ export function createApp(options: AppOptions = {}) {
       },
     };
   };
-  const makeSession = (user: User, res: Response, req: Request) => {
-    const issued = issueSession(user, req);
-    issued.apply(res);
-    return issued.session;
-  };
   const clearSessionCookie = (res: Response) => {
     res.clearCookie('derma_session', {
       httpOnly: true,
@@ -361,19 +357,14 @@ export function createApp(options: AppOptions = {}) {
     });
   };
   const dummyPasswordHash = hashPassword('dummy-password-for-unregistered-account');
-  const limiters = new Map<string, { count: number; reset: number }>();
-  const rateLimit = (req: Request, key: string, max = 20) => {
-    const k = `${req.ip}:${key}`,
-      now = Date.now();
-    let item = limiters.get(k);
-    if (!item || item.reset < now) {
-      item = { count: 0, reset: now + 15 * 60000 };
-      limiters.set(k, item);
-    }
-    item.count++;
-    if (item.count > max) fail(429, 'Too many attempts. Please try again in 15 minutes.');
-    if (limiters.size > 10000) for (const [k, v] of limiters) if (v.reset < now) limiters.delete(k);
-  };
+  let authSecurity: ReturnType<typeof createAuthSecurity>;
+  try {
+    authSecurity = createAuthSecurity({ db, dummyPasswordHash, fail });
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+  const rateLimit = authSecurity.rateLimit;
   registerIdentity(app, { db, production, actor, audit, fail, rateLimit });
   const mfa = registerMfa(app, {
     db,
@@ -418,41 +409,44 @@ export function createApp(options: AppOptions = {}) {
   app.post('/api/auth/login', (req: AuthRequest, res) => {
     rateLimit(req, 'login');
     const input = z.object({ email, password: z.string().min(1).max(128) }).parse(req.body);
-    const row = db
-      .prepare(
-        'SELECT data,password,COALESCE((SELECT version FROM mfaEpochs WHERE userId=users.id),0) AS securityVersion FROM users WHERE email=? COLLATE NOCASE',
-      )
-      .get(input.email) as { data: string; password: string; securityVersion: number } | undefined;
-    if (!verifyPassword(input.password, row?.password ?? dummyPasswordHash) || !row)
-      return fail(401, 'Email or password is incorrect.');
-    const user = JSON.parse(row.data) as User;
-    if (user.active === false) return fail(401, 'Email or password is incorrect.');
-    const challenge = mfa.beginLogin(user, req, res, row.password, row.securityVersion);
-    if (challenge) return res.status(202).json(challenge);
-    const issued = scheduling.transaction(() => {
-      const current = get<User>(db, 'users', user.id);
-      if (
-        !current ||
-        current.active === false ||
-        db.prepare('SELECT password FROM users WHERE id=?').get(user.id)?.password !==
-          row.password ||
-        Number(
-          db.prepare('SELECT version FROM mfaEpochs WHERE userId=?').get(user.id)?.version ?? 0,
-        ) !== row.securityVersion
-      )
-        return fail(409, 'The account changed. Sign in again.');
-      audit({ ...req, user: current } as AuthRequest, 'signed in', 'user', user.id);
-      return issueSession(current, req);
+    const verified = authSecurity.verifyLogin(req, input.email, input.password);
+    const { user } = verified;
+    const result = authSecurity.finalize(() => {
+      const challenge = mfa.beginLogin(
+        user,
+        req,
+        res,
+        verified.passwordHash,
+        verified.securityVersion,
+        () => authSecurity.acceptPassword(req, input.email),
+      );
+      if (challenge) return { challenge };
+      const issued = scheduling.transaction(() => {
+        const current = get<User>(db, 'users', user.id);
+        if (
+          !current ||
+          current.active === false ||
+          db.prepare('SELECT password FROM users WHERE id=?').get(user.id)?.password !==
+            verified.passwordHash ||
+          Number(
+            db.prepare('SELECT version FROM mfaEpochs WHERE userId=?').get(user.id)?.version ?? 0,
+          ) !== verified.securityVersion
+        )
+          return fail(409, 'The account changed. Sign in again.');
+        authSecurity.acceptPassword(req, input.email);
+        audit({ ...req, user: current } as AuthRequest, 'signed in', 'user', user.id);
+        return issueSession(current, req);
+      });
+      return { issued };
     });
-    issued.apply(res);
+    if (result.challenge) return res.status(202).json(result.challenge);
+    result.issued!.apply(res);
     mfa.clearChallenge(res);
-    res.json(issued.session);
+    res.json(result.issued!.session);
   });
   app.post('/api/auth/register', (req: AuthRequest, res) => {
     rateLimit(req, 'register', 10);
     const input = patientFields.extend({ password }).parse(req.body);
-    if (db.prepare('SELECT 1 FROM users WHERE email=? COLLATE NOCASE').get(input.email))
-      fail(409, 'An account already exists with this email.');
     const p: Patient = {
       id: id(),
       name: input.name,
@@ -472,23 +466,33 @@ export function createApp(options: AppOptions = {}) {
       active: true,
       mustChangePassword: false,
     };
-    db.exec('BEGIN');
-    try {
+    const issued = scheduling.transaction(() => {
+      if (db.prepare('SELECT 1 FROM users WHERE email=? COLLATE NOCASE').get(input.email))
+        fail(409, 'An account already exists with this email.');
       insert(db, 'patients', p);
       createUser(db, user, input.password);
-      db.exec('COMMIT');
-    } catch (e) {
-      db.exec('ROLLBACK');
-      throw e;
-    }
-    audit({ ...req, user } as AuthRequest, 'registered', 'user', user.id);
-    res.status(201).json(makeSession(user, res, req));
+      audit({ ...req, user } as AuthRequest, 'registered', 'user', user.id);
+      return issueSession(user, req);
+    });
+    issued.apply(res);
+    res.status(201).json(issued.session);
   });
   app.post('/api/auth/logout', (req: AuthRequest, res) => {
-    if (req.sessionToken)
-      db.prepare('DELETE FROM sessions WHERE tokenHash=?').run(req.sessionToken);
-    if (req.sessionToken)
-      db.prepare('DELETE FROM mfaPending WHERE sessionHash=?').run(req.sessionToken);
+    scheduling.transaction(() => {
+      const session = db
+        .prepare('SELECT userId FROM sessions WHERE tokenHash=? AND expiresAt>?')
+        .get(req.sessionToken ?? '', Date.now());
+      if (!session || session.userId !== req.user?.id) return;
+      const current = get<User>(db, 'users', String(session.userId));
+      db.prepare('DELETE FROM sessions WHERE tokenHash=?').run(req.sessionToken!);
+      db.prepare('DELETE FROM mfaPending WHERE sessionHash=?').run(req.sessionToken!);
+      audit(
+        { ...req, user: current ?? req.user } as AuthRequest,
+        'signed out',
+        'user',
+        String(session.userId),
+      );
+    });
     mfa.clearChallenge(res);
     res.clearCookie('derma_session', {
       httpOnly: true,
@@ -1341,6 +1345,11 @@ export function createApp(options: AppOptions = {}) {
     app.get('/{*splat}', (_req, res) => res.sendFile(resolve(dist, 'index.html')));
   }
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof AuthenticationThrottle)
+      return res
+        .status(429)
+        .setHeader('Retry-After', String(error.retryAfter))
+        .json({ error: error.message });
     if (error instanceof z.ZodError)
       return res.status(400).json({
         error: error.issues.map((e) => `${e.path.join('.') || 'Input'}: ${e.message}`).join('; '),

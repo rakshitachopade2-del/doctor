@@ -764,6 +764,7 @@ export function registerMfa(app: Express, dependencies: Dependencies) {
     res: Response,
     verifiedPasswordHash: string,
     securityVersion: number,
+    onVerified?: () => void,
   ): MfaChallenge | null {
     if (!credential(user.id)) return null;
     configured();
@@ -786,6 +787,7 @@ export function registerMfa(app: Express, dependencies: Dependencies) {
       const current = credential(user.id);
       if (!current) return fail(409, 'MFA settings changed. Sign in again.');
       checkBudget(user.id);
+      onVerified?.();
       db.prepare('DELETE FROM mfaChallenges WHERE userId=? OR expiresAt<=?').run(
         user.id,
         Date.now(),

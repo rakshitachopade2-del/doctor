@@ -958,6 +958,110 @@ try {
     body: JSON.stringify(proofBody),
   });
   assert.equal(proofReplay.status, 401);
+
+  // Use a separate synthetic patient to check registration, logout evidence and
+  // failed-password controls without changing any earlier empty-clinic checks.
+  const registrationBody = {
+    name: 'Synthetic authentication patient',
+    email: 'smoke-auth-patient@example.test',
+    password: randomBytes(24).toString('base64url'),
+    phone: '9000000199',
+    dob: '1994-06-15',
+  };
+  const publicHeaders = { 'Content-Type': 'application/json', Origin: base };
+  const registered = await fetch(`${base}/api/auth/register`, {
+    method: 'POST',
+    headers: publicHeaders,
+    body: JSON.stringify(registrationBody),
+  });
+  assert.equal(registered.status, 201);
+  const registeredSession = await registered.json();
+  assert.equal(registeredSession.user.role, 'patient');
+  const patientCookie = registered.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('derma_session='));
+  assert.match(patientCookie, /; Secure/i);
+  assert.match(patientCookie, /; HttpOnly/i);
+  const patientHeaders = {
+    ...publicHeaders,
+    Cookie: patientCookie.split(';')[0],
+    'X-CSRF-Token': registeredSession.csrfToken,
+  };
+  const duplicateRegistration = await fetch(`${base}/api/auth/register`, {
+    method: 'POST',
+    headers: publicHeaders,
+    body: JSON.stringify({ ...registrationBody, email: registrationBody.email.toUpperCase() }),
+  });
+  assert.equal(duplicateRegistration.status, 409);
+  assert.deepEqual(duplicateRegistration.headers.getSetCookie(), []);
+  const patientLogout = await fetch(`${base}/api/auth/logout`, {
+    method: 'POST',
+    headers: patientHeaders,
+    body: '{}',
+  });
+  assert.equal(patientLogout.status, 200);
+  assert.equal(
+    (await (await fetch(`${base}/api/session`, { headers: patientHeaders })).json()).user,
+    null,
+  );
+  const patientAudit = await fetch(
+    `${base}/api/search/audit?entityType=user&entityId=${registeredSession.user.id}`,
+    { headers: verifiedHeaders },
+  );
+  assert.equal(patientAudit.status, 200);
+  assert.deepEqual((await patientAudit.json()).items.map((entry) => entry.action).sort(), [
+    'registered',
+    'signed out',
+  ]);
+  const failedPassword = 'SyntheticIncorrectPassword2026!';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const rejected = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: publicHeaders,
+      body: JSON.stringify({ email: registrationBody.email, password: failedPassword }),
+    });
+    assert.equal(rejected.status, 401);
+    assert.deepEqual(await rejected.json(), { error: 'Email or password is incorrect.' });
+  }
+  const throttled = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: publicHeaders,
+    body: JSON.stringify({
+      email: registrationBody.email.toUpperCase(),
+      password: registrationBody.password,
+    }),
+  });
+  assert.equal(throttled.status, 429);
+  const retryAfter = Number(throttled.headers.get('retry-after'));
+  assert.ok(Number.isInteger(retryAfter) && retryAfter > 0 && retryAfter <= 900);
+  assert.match((await throttled.json()).error, new RegExp(`Wait at least ${retryAfter} seconds`));
+  assert.deepEqual(throttled.headers.getSetCookie(), []);
+  const securityResponse = await fetch(`${base}/api/search/audit?entityType=auth-security`, {
+    headers: verifiedHeaders,
+  });
+  assert.equal(securityResponse.status, 200);
+  const securityEvidence = await securityResponse.json();
+  assert.equal(securityEvidence.total, 3);
+  assert.deepEqual(
+    securityEvidence.items.map((entry) => entry.action).sort(),
+    [
+      'authentication failed',
+      'authentication failure limit reached',
+      'authentication throttled',
+    ].sort(),
+  );
+  assert.ok(securityEvidence.items.every((entry) => entry.actorName === 'Unauthenticated'));
+  assert.ok(
+    securityEvidence.items.every((entry) => /^identifier:login:[a-f0-9]{64}$/.test(entry.entityId)),
+  );
+  for (const secret of [
+    registrationBody.email,
+    registrationBody.password,
+    failedPassword,
+    '127.0.0.1',
+  ])
+    assert.equal(JSON.stringify(securityEvidence).includes(secret), false);
+
   assert.equal(
     (
       await fetch(`${base}/api/auth/logout`, {
@@ -970,7 +1074,7 @@ try {
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, security headers, logout.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

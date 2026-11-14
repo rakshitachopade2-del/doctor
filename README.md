@@ -94,6 +94,10 @@ In **Accounts & access**, an administrator can suspend access, restore an accoun
 
 Every signed-in person can use **Account & security** to change their password, see their active browser sessions, and end sessions they no longer need. Session labels describe the browser family; they are not verified device identities or locations.
 
+Sign-in protection persists across server restarts. Ten failed password attempts for the same normalized email temporarily block further attempts, including a correct password, until the fifteen-minute window expires. Separate network limits also apply. A blocked response states the remaining wait; successful password authentication before the limit resets that email's failed-password count. Administrators can filter **Audit history** by record type `auth-security` for bounded failure and throttle events. Those events contain keyed digests instead of submitted email addresses or network addresses.
+
+Registration saves the patient, account, audit entry and session together. Logout saves session revocation and its audit entry together. If a database write fails, neither operation partially completes or changes browser cookies.
+
 ## Protect sign-in with an authenticator
 
 When the server has an MFA encryption key configured, open **Account & security** to set up an authenticator. Enter your current password, add the displayed setup key to your authenticator app, and save the recovery codes privately. Setup activates only after you confirm saving the codes and enter a valid authenticator code. Keep the recovery codes separately from the device used for sign-in; each code works once.
