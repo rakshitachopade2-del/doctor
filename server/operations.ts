@@ -6,6 +6,7 @@ import type { Patient, User } from '../shared/types.ts';
 import type { Invoice, KnowledgeArticle, Payment } from '../shared/operations.ts';
 import type { ProcedureRecord } from '../shared/clinical.ts';
 import { notifyPatient } from './activity.ts';
+import { registerKnowledgeAuthoring } from './knowledge-authoring.ts';
 import {
   invoiceDetail,
   invoiceItemSchema,
@@ -106,7 +107,6 @@ export function registerOperations(app: Express, context: OperationsContext) {
     }
   }
   const staff = (req: AuthRequest) => actor(req, ['admin', 'doctor', 'receptionist']);
-  const clinician = (req: AuthRequest) => actor(req, ['admin', 'doctor']);
   const invoiceAccess = (req: AuthRequest, invoiceId: string) => {
     const invoice = get<Invoice>(db, 'invoices', invoiceId);
     if (!invoice) return fail(404, 'Invoice not found.');
@@ -317,74 +317,7 @@ export function registerOperations(app: Express, context: OperationsContext) {
     res.type('json').setHeader('Content-Length', String(Buffer.byteLength(body)));
     res.end(req.method === 'HEAD' ? undefined : body);
   });
-  app.get('/api/knowledge/manage', (req: AuthRequest, res) => {
-    clinician(req);
-    res.json(list<KnowledgeArticle>(db, 'knowledge'));
-  });
-  const articleFields = z.object({
-    title: z.string().trim().min(1).max(300),
-    category: z.string().trim().min(1).max(100),
-    body: z.string().trim().min(1).max(30000),
-  });
-  app.post('/api/knowledge', (req: AuthRequest, res) => {
-    const user = clinician(req);
-    const input = articleFields.parse(req.body);
-    const article: KnowledgeArticle = {
-      ...input,
-      id: id(),
-      status: 'draft',
-      authorName: user.name,
-      updatedAt: nowISO(),
-    };
-    insert(db, 'knowledge', article);
-    audit(req, 'created knowledge draft', 'knowledge', article.id);
-    res.status(201).json(article);
-  });
-  app.patch('/api/knowledge/:id', (req: AuthRequest, res) => {
-    const user = clinician(req);
-    const articleId = String(req.params.id);
-    const original = get<KnowledgeArticle>(db, 'knowledge', articleId);
-    if (!original) return fail(404, 'Article not found.');
-    const input = articleFields
-      .extend({ status: z.enum(['draft', 'published']) })
-      .partial()
-      .strict()
-      .refine((value) => Object.keys(value).length > 0, 'No changes supplied')
-      .parse(req.body);
-    const contentChanged =
-      (input.body !== undefined && input.body !== original.body) ||
-      (input.title !== undefined && input.title !== original.title) ||
-      (input.category !== undefined && input.category !== original.category);
-    const article: KnowledgeArticle = {
-      ...original,
-      ...input,
-      status: input.status ?? (contentChanged ? 'draft' : original.status),
-      authorName: user.name,
-      updatedAt: nowISO(),
-    };
-    db.exec('BEGIN');
-    try {
-      db.prepare('INSERT INTO knowledgeRevisions(id,articleId,data) VALUES (?,?,?)').run(
-        id(),
-        articleId,
-        JSON.stringify(original),
-      );
-      db.prepare('UPDATE knowledge SET data=? WHERE id=?').run(JSON.stringify(article), articleId);
-      audit(
-        req,
-        article.status === 'published'
-          ? 'approved and published knowledge'
-          : 'saved knowledge draft',
-        'knowledge',
-        articleId,
-      );
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
-    res.json(article);
-  });
+  registerKnowledgeAuthoring(app, { db, actor, audit, fail });
   app.post('/api/patients/:id/portal-account', (req: AuthRequest, res) => {
     actor(req, ['admin']);
     const patientId = String(req.params.id);

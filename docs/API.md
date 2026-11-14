@@ -303,6 +303,29 @@ A procedure can have one linked invoice. It must belong to the invoice patient a
 
 Procedure estimates never populate a charge automatically: staff enter the agreed line items and amounts explicitly. Planning/completing a procedure does not create an invoice; creating an invoice does not record a payment. Cancelling a procedure does not change an existing charge or create a refund. Payment collection, refunds, tax calculation and external reconciliation require separate clinic processes.
 
+## Knowledge authoring and version history
+
+All `/knowledge-authoring` routes require an active administrator or doctor session. Current account/session/MFA state is rechecked inside the transaction; temporary-password accounts, patients and reception are denied. Reads are private, uncached and audited. Public article readers never receive these histories, private notes or command identifiers.
+
+- `GET /knowledge-authoring?q=&status=&page=&pageSize=` → `KnowledgeAuthoringPage`. Status is `all` (default), `draft` or `published`; search is a literal substring with ASCII case folding. Pages are positive integers up to 1,000,000 and clamp to the last page. Page size is 10, 25 (default) or 50. Rows omit full bodies and include the current version number and revision.
+- `GET /knowledge-authoring/:id` → `KnowledgeAuthoringDetail`: current article, revision, current version, current attributed publication or null, latest 25 change events and total event/version counts.
+- `GET /knowledge-authoring/:id/versions?page=&pageSize=` → newest-first `KnowledgeVersionPage`.
+- `GET /knowledge-authoring/:id/versions/:versionId` → one same-article `KnowledgeVersion`.
+- `GET /knowledge-authoring/:id/history?page=&pageSize=` → newest-first `KnowledgeHistoryPage`.
+
+Queries are strict. Detail and exact-version reads accept no query parameters. Unknown articles/versions return `404`. Versions distinguish newly attributed saves from `legacy-snapshot`/`legacy-current` imports. Legacy recorded author/date/status are preserved separately; missing action authorship, reasons and timestamps remain null.
+
+New commands use strict JSON bodies. `fields` contains required trimmed `title`, `category` and `body` with limits 300/100/30,000 characters. `requestId` is a UUID; existing-article commands require the current 64-hex `expectedRevision`. Optional ordinary change notes are at most 1,000 characters. Publishing requires `reviewed:true`.
+
+- `POST /knowledge-authoring {fields,publication,reviewed?,reason?,requestId}` → `KnowledgeAuthoringMutation`, `201` new or `200` exact replay. Publication is `draft` or `published`; creation and optional approval commit together.
+- `POST /knowledge-authoring/:id/save {fields,publication,reviewed?,reason?,requestId,expectedRevision}` → mutation. Saves full desired fields and publication state. Content changes create a version; status-only changes reuse the current content version.
+- `POST /knowledge-authoring/:id/publication {published,reviewed?,reason?,requestId,expectedRevision}` → mutation. Explicitly publishes or withdraws the current content without creating a content version.
+- `POST /knowledge-authoring/:id/restore {versionId,confirmed:true,reason,requestId,expectedRevision}` → mutation. Requires a same-article historical version and a 3–1,000-character reason. Always creates a new draft with source attribution, even if its text equals current text; restoring the current version is rejected.
+
+Mutation responses contain `{detail,event,version}`. `event` and `version` identify the exact original accepted command; `detail` is current and may include later changes. Request keys bind actor, operation, target, revision and normalized payload. After checking current permission, exact replay is resolved before stale-state checks. Changed key intent or stale revisions return `409`; no-op commands return `400` except explicit historical restoration. Projection, snapshots, versions/events, receipt and audit commit atomically.
+
+Legacy `/knowledge` and `/knowledge/manage` arrays remain compatible. Legacy creation still ignores extra status fields and creates a draft; PATCH retains partial-field and explicit-status behavior. Both write through the atomic versioned writer, but legacy requests have no automatic retry or stale-edit protection without the new command contract. Existing repeated identical legacy PATCH requests remain accepted and record an attributed action without fabricating a content change.
+
 ## Public clinic library
 
 - `GET /public-library?q=&page=` → `PublicLibraryIndex`: `articles`, normalized `query`, effective `page`, fixed `pageSize:25`, `total` and `totalPages`. Each summary contains only `id`, `title`, `category`, `excerpt`, `authorName` and `updatedAt`. Search is a literal substring match across title/category/body with ASCII case folding; non-ASCII characters match literally. Queries are limited to 200 characters; pages are positive integers up to 1,000,000 and clamp to the last available page. Unknown, duplicate and invalid parameters return `400`.

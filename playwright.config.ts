@@ -92,6 +92,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)public-library\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5197' },
     },
+    {
+      name: 'knowledge-authoring',
+      testMatch: /(?:^|\/)knowledge-authoring\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5198' },
+    },
   ],
   webServer: [
     {
@@ -182,6 +187,12 @@ export default defineConfig({
       command:
         'PUBLIC_SITE_ORIGIN=http://127.0.0.1:5197 PUBLIC_INDEXING_ENABLED=false E2E_API_PORT=3025 E2E_VITE_PORT=5197 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5197',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3026 E2E_VITE_PORT=5198 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5198',
       reuseExistingServer: false,
       timeout: 60000,
     },

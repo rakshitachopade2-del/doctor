@@ -93,6 +93,14 @@ flowchart LR
 
 The permission model is clinic-wide for clinicians. A second organization must use a separate deployment/database until true tenancy and clinic-scoped authorization are implemented.
 
+## Knowledge authoring and private history
+
+`server/knowledge-authoring.ts` owns the versioned authoring workflow while `knowledge` remains the current projection used by public readers and compatibility APIs. `knowledgeAuthoringHeads` points to the current content version and latest/publication events. Append-only `knowledgeVersions`, `knowledgeEvents` and `knowledgeCommands` preserve content, action attribution and exact retry receipts. A revision digest includes the current projection and event identity, so changing text back to an earlier value cannot resurrect an obsolete token.
+
+New commands use an immediate SQLite transaction to recheck the active account, session, role, temporary-password state and MFA binding before examining a retry receipt or source revision. Creation can include explicit publication in one command. Content changes append versions; status-only transitions reuse the content version and append an event. Restore appends a new draft with an immutable source-version link and never publishes automatically. The current projection, previous compatibility snapshot, new evidence, command receipt and audit commit together. A replay returns the original event/version plus current detail, which may have advanced since that command.
+
+Existing snapshots are imported in their retained order with explicit legacy provenance and null inferred actor/action-time fields. Original recorded author/date/status remain available as labels. Migration is additive and repeatable; it creates no fictional publication event. Existing `knowledgeRevisions` remain immutable. Older POST/PATCH clients use the same atomic writer but lack the new interface's revision/idempotency guarantees when they supply no command token. The new editor uses only the guarded commands. Private index, version and event reads use bounded SQL pages; literal search uses SQLite ASCII case folding.
+
 ## Published public library
 
 `server/public-library.ts` serves `/library` and stable `/library/:articleId` documents from explicit SQL projections of currently published knowledge. List queries use a coherent read snapshot, literal substring search with ASCII case folding and fixed 25-row pages. Substring matching scans text; it is not a full-text index. Detail responses include the full plain-text body; list summaries carry only excerpts. Historical revisions and arbitrary stored fields are excluded. Existing authoring/publication rules and private workspace routes remain unchanged.

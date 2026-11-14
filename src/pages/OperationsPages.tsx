@@ -33,6 +33,7 @@ import {
   Modal,
   PageHeader,
 } from '../components/ui';
+import { KnowledgeLibraryManager } from '../components/KnowledgeLibraryManager';
 
 const billingError = (problem: unknown) =>
   problem instanceof Error
@@ -1686,33 +1687,20 @@ function BillingUpdateForm({
 }
 
 export function LibraryPage({ manage = false }: { manage?: boolean }) {
-  const articles = useResource<KnowledgeArticle[]>(
-    manage ? '/api/knowledge/manage' : '/api/knowledge',
-  );
+  return manage ? <KnowledgeLibraryManager /> : <PatientLibraryPage />;
+}
+function PatientLibraryPage() {
+  const articles = useResource<KnowledgeArticle[]>('/api/knowledge');
   const [search, setSearch] = useState('');
-  const [editing, setEditing] = useState<KnowledgeArticle | 'new' | null>(null);
-  const [reading, setReading] = useState<KnowledgeArticle | null>(null);
   const rows = (articles.data || []).filter((a) =>
     `${a.title} ${a.category} ${a.body}`.toLowerCase().includes(search.toLowerCase()),
   );
   return (
-    <div className={manage ? '' : 'library-page'}>
+    <div className="library-page">
       <PageHeader
-        eyebrow={manage ? 'CLINIC KNOWLEDGE' : 'INFORMATION YOU CAN COME BACK TO'}
-        title={manage ? 'Your knowledge library' : 'A little clarity for your care.'}
-        description={
-          manage
-            ? 'Write, review, and publish information for your patients.'
-            : 'Practical information reviewed and shared by your clinic.'
-        }
-        actions={
-          manage ? (
-            <button className="button button-primary" onClick={() => setEditing('new')}>
-              <Plus size={16} />
-              New article
-            </button>
-          ) : undefined
-        }
+        eyebrow="INFORMATION YOU CAN COME BACK TO"
+        title="A little clarity for your care."
+        description="Practical information reviewed and shared by your clinic."
       />
       <div className="library-search">
         <Search size={18} />
@@ -1731,177 +1719,38 @@ export function LibraryPage({ manage = false }: { manage?: boolean }) {
         <Card>
           <EmptyState
             title="No articles yet"
-            description={
-              manage
-                ? 'Create a draft, review it, and publish when it’s ready for patients.'
-                : 'Your clinic will share useful information here. You can contact the clinic with any questions.'
-            }
+            description="Your clinic will share useful information here. You can contact the clinic with any questions."
           />
         </Card>
       ) : (
         <div className="grid-3 knowledge-grid">
-          {rows.map((a) => (
-            <Card key={a.id}>
+          {rows.map((article) => (
+            <Card key={article.id}>
               <div className="row between">
                 <span className="module-icon">
                   <BookOpen size={22} />
                 </span>
-                <Badge tone={a.status === 'published' ? 'green' : 'neutral'}>
-                  {manage ? a.status : a.category}
-                </Badge>
+                <Badge tone="green">{article.category}</Badge>
               </div>
-              <h2>{a.title}</h2>
+              <h2>{article.title}</h2>
               <p className="muted article-preview">
-                {a.body.slice(0, 180)}
-                {a.body.length > 180 ? '…' : ''}
+                {article.body.slice(0, 180)}
+                {article.body.length > 180 ? '…' : ''}
               </p>
-              <small>Updated {formatDate(a.updatedAt)}</small>
+              <small>Updated {formatDate(article.updatedAt)}</small>
               <div className="row">
-                {manage ? (
-                  <button
-                    className="button button-secondary button-small"
-                    onClick={() => setReading(a)}
-                  >
-                    Read article
-                  </button>
-                ) : (
-                  <a
-                    className="button button-secondary button-small"
-                    href={`/library/${encodeURIComponent(a.id)}`}
-                    aria-label={`Read article: ${a.title}`}
-                  >
-                    Read article
-                  </a>
-                )}
-                {manage && a.status === 'published' && (
-                  <a
-                    className="button button-secondary button-small"
-                    href={`/library/${encodeURIComponent(a.id)}`}
-                    aria-label={`Open public article: ${a.title}`}
-                  >
-                    Open public article
-                  </a>
-                )}
-                {manage && (
-                  <button
-                    className="button button-ghost button-small"
-                    onClick={() => setEditing(a)}
-                  >
-                    Edit & review
-                  </button>
-                )}
+                <a
+                  className="button button-secondary button-small"
+                  href={`/library/${encodeURIComponent(article.id)}`}
+                  aria-label={`Read article: ${article.title}`}
+                >
+                  Read article
+                </a>
               </div>
             </Card>
           ))}
         </div>
       )}
-      {editing && (
-        <ArticleEditor
-          article={editing === 'new' ? undefined : editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            articles.reload();
-          }}
-        />
-      )}
-      {reading && (
-        <Modal title={reading.title} onClose={() => setReading(null)}>
-          <div className="article-body">
-            <Badge tone="green">{reading.category}</Badge>
-            <p>{reading.body}</p>
-            <small>
-              {reading.status === 'published' ? 'Reviewed by' : 'Draft by'} {reading.authorName} ·
-              Updated {formatDate(reading.updatedAt)}
-            </small>
-          </div>
-        </Modal>
-      )}
     </div>
-  );
-}
-function ArticleEditor({
-  article,
-  onClose,
-  onSaved,
-}: {
-  article?: KnowledgeArticle;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [publish, setPublish] = useState(false);
-  const savedId = useRef(article?.id);
-  const toast = useToast();
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const body = Object.fromEntries(new FormData(e.currentTarget));
-    setBusy(true);
-    setError('');
-    try {
-      if (savedId.current)
-        await api(`/api/knowledge/${savedId.current}`, {
-          method: 'PATCH',
-          body: { ...body, status: publish ? 'published' : 'draft' },
-        });
-      else {
-        const created = await api<KnowledgeArticle>('/api/knowledge', { method: 'POST', body });
-        savedId.current = created.id;
-        if (publish)
-          await api(`/api/knowledge/${created.id}`, {
-            method: 'PATCH',
-            body: { status: 'published' },
-          });
-      }
-      toast(publish ? 'Article published to your clinic library.' : 'Draft saved for review.');
-      onSaved();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal title={article ? 'Review clinic article' : 'Write a clinic article'} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <Field label="Title">
-          <input name="title" required maxLength={200} defaultValue={article?.title} />
-        </Field>
-        <Field label="Category">
-          <input
-            name="category"
-            required
-            maxLength={100}
-            placeholder="e.g. Visiting the clinic"
-            defaultValue={article?.category}
-          />
-        </Field>
-        <Field label="Article content">
-          <textarea name="body" required maxLength={20000} rows={12} defaultValue={article?.body} />
-        </Field>
-        <label className="checkbox-field">
-          <input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} />
-          <span>
-            I have reviewed this information and approve it for the public clinic library.
-          </span>
-        </label>
-        {article?.status === 'published' && !publish && (
-          <p className="muted">
-            Saving as a draft will remove this article from the public library until it is reviewed
-            again.
-          </p>
-        )}
-        <button className="button button-primary" disabled={busy}>
-          <FileText size={16} />
-          {busy ? 'Saving…' : publish ? 'Approve and publish' : 'Save draft'}
-        </button>
-      </form>
-    </Modal>
   );
 }

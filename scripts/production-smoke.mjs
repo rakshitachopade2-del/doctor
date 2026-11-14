@@ -856,19 +856,36 @@ try {
   const emptyLibrary = await fetch(`${base}/api/public-library`);
   assert.equal(emptyLibrary.status, 200);
   assert.equal((await emptyLibrary.json()).total, 0);
-  const libraryDraft = await visitWrite(
-    '/knowledge',
-    {
+  const privateKnowledgeReason = 'Synthetic private knowledge review note.';
+  const libraryCreateBody = {
+    fields: {
       title: 'Synthetic public clinic guide',
       category: 'Clinic information',
       body: 'Synthetic public reading paragraph.\nSecond line <script>synthetic</script> & details.',
     },
-    201,
-  );
+    publication: 'draft',
+    reason: privateKnowledgeReason,
+    requestId: randomUUID(),
+  };
+  const libraryCreated = await visitWrite('/knowledge-authoring', libraryCreateBody, 201);
+  const libraryDraft = libraryCreated.detail.article;
+  assert.equal(libraryCreated.event.operation, 'created');
+  assert.equal(libraryCreated.version.version, 1);
+  const authoringUrl = `${base}/api/knowledge-authoring/${libraryDraft.id}`;
+  assert.equal((await fetch(authoringUrl)).status, 401);
   const articleUrl = `${base}/library/${libraryDraft.id}`;
   assert.equal((await fetch(articleUrl)).status, 404);
   assert.equal((await fetch(`${base}/api/public-library/${libraryDraft.id}`)).status, 404);
-  await visitWrite(`/knowledge/${libraryDraft.id}`, { status: 'published' }, 200, 'PATCH');
+  const libraryPublished = await visitWrite(`/knowledge-authoring/${libraryDraft.id}/publication`, {
+    published: true,
+    reviewed: true,
+    expectedRevision: libraryCreated.detail.revision,
+    requestId: randomUUID(),
+  });
+  const libraryCreateReplay = await visitWrite('/knowledge-authoring', libraryCreateBody);
+  assert.equal(libraryCreateReplay.event.id, libraryCreated.event.id);
+  assert.equal(libraryCreateReplay.version.id, libraryCreated.version.id);
+  assert.equal(libraryCreateReplay.detail.article.status, 'published');
   const publicArticleResponse = await fetch(articleUrl);
   assert.equal(publicArticleResponse.status, 200);
   assert.match(publicArticleResponse.headers.get('content-type'), /text\/html/);
@@ -893,6 +910,9 @@ try {
     privateDurationReason,
     privateSchedulingReason,
     account.csrfToken,
+    privateKnowledgeReason,
+    libraryCreateBody.requestId,
+    libraryCreated.version.id,
   ])
     assert.equal(articleHtml.includes(value), false);
   const libraryHtmlResponse = await fetch(`${base}/library`);
@@ -909,11 +929,29 @@ try {
     assert.equal(sitemap.includes(privatePath), false);
   const robots = await (await fetch(`${base}/robots.txt`)).text();
   assert.ok(robots.includes(`Sitemap: ${publicOrigin}/sitemap.xml`));
+  const librarySaveBody = {
+    fields: {
+      ...libraryCreateBody.fields,
+      title: 'Synthetic revised public guide',
+      body: 'Synthetic private revision awaiting review.',
+    },
+    publication: 'draft',
+    expectedRevision: libraryPublished.detail.revision,
+    requestId: randomUUID(),
+  };
+  const librarySaved = await visitWrite(
+    `/knowledge-authoring/${libraryDraft.id}/save`,
+    librarySaveBody,
+  );
+  assert.equal(librarySaved.version.version, 2);
   await visitWrite(
-    `/knowledge/${libraryDraft.id}`,
-    { body: 'Synthetic private revision awaiting review.' },
-    200,
-    'PATCH',
+    `/knowledge-authoring/${libraryDraft.id}/save`,
+    {
+      ...librarySaveBody,
+      fields: { ...librarySaveBody.fields, body: 'Stale text must not replace the latest draft.' },
+      requestId: randomUUID(),
+    },
+    409,
   );
   const withdrawn = await fetch(articleUrl, { headers: { 'If-None-Match': '*' } });
   assert.equal(withdrawn.status, 404);
@@ -921,15 +959,61 @@ try {
   assert.ok(!withdrawnHtml.includes('Synthetic private revision'));
   assert.ok(!withdrawnHtml.includes(libraryDraft.title));
   assert.ok(!(await (await fetch(`${base}/sitemap.xml`)).text()).includes(libraryDraft.id));
-  await visitWrite(
-    `/knowledge/${libraryDraft.id}`,
-    { title: 'Synthetic revised public guide', status: 'published' },
-    200,
-    'PATCH',
+  const libraryRepublished = await visitWrite(
+    `/knowledge-authoring/${libraryDraft.id}/publication`,
+    {
+      published: true,
+      reviewed: true,
+      expectedRevision: librarySaved.detail.revision,
+      requestId: randomUUID(),
+    },
   );
   const republished = await fetch(articleUrl);
   assert.equal(republished.status, 200);
   assert.match(await republished.text(), /<h1[^>]*>Synthetic revised public guide<\/h1>/);
+  const libraryRestoreBody = {
+    versionId: libraryCreated.version.id,
+    confirmed: true,
+    reason: 'Synthetic restoration for fresh review.',
+    expectedRevision: libraryRepublished.detail.revision,
+    requestId: randomUUID(),
+  };
+  const libraryRestored = await visitWrite(
+    `/knowledge-authoring/${libraryDraft.id}/restore`,
+    libraryRestoreBody,
+  );
+  assert.equal(libraryRestored.version.version, 3);
+  assert.equal(libraryRestored.version.restoredFromVersionId, libraryCreated.version.id);
+  assert.equal(libraryRestored.detail.article.status, 'draft');
+  assert.equal(libraryRestored.detail.publication, null);
+  assert.deepEqual(libraryRestored.version.fields, libraryCreateBody.fields);
+  assert.equal((await fetch(articleUrl)).status, 404);
+  const libraryRestoreReplay = await visitWrite(
+    `/knowledge-authoring/${libraryDraft.id}/restore`,
+    libraryRestoreBody,
+  );
+  assert.equal(libraryRestoreReplay.event.id, libraryRestored.event.id);
+  const libraryHistoryResponse = await fetch(`${authoringUrl}/history`, { headers: apiHeaders });
+  assert.equal(libraryHistoryResponse.status, 200);
+  assert.match(libraryHistoryResponse.headers.get('cache-control'), /no-store/);
+  const libraryHistory = await libraryHistoryResponse.json();
+  assert.equal(libraryHistory.total, 5);
+  assert.equal(libraryHistory.items[0].operation, 'restored');
+  const libraryVersions = await (
+    await fetch(`${authoringUrl}/versions`, { headers: apiHeaders })
+  ).json();
+  assert.equal(libraryVersions.total, 3);
+  assert.equal(libraryVersions.items[2].id, libraryCreated.version.id);
+  await visitWrite(`/knowledge-authoring/${libraryDraft.id}/publication`, {
+    published: true,
+    reviewed: true,
+    expectedRevision: libraryRestored.detail.revision,
+    requestId: randomUUID(),
+  });
+  assert.match(
+    await (await fetch(articleUrl)).text(),
+    /<h1[^>]*>Synthetic public clinic guide<\/h1>/,
+  );
   assert.equal((await fetch(`${base}/missing-public-page`)).status, 404);
   assert.equal((await fetch(`${base}/assets/missing-test.js`)).status, 404);
   const spa = await fetch(`${base}/clinic/scheduling`);
@@ -987,6 +1071,8 @@ try {
   assert.equal((await fetch(procedureScheduleUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureSchedulingUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(catalogueUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(authoringUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(`${authoringUrl}/history`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(escalationPolicyUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(escalationPreviewUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(escalationHistoryUrl, { headers: apiHeaders })).status, 401);
@@ -1161,7 +1247,7 @@ try {
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, public library HTML/publication/sitemap, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {
