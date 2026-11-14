@@ -559,6 +559,7 @@ test('administrators correct charges and reverse erroneous entries once while pa
           issuedCharges: final.issuedCharges,
           corrections: final.corrections,
           reversals: final.reversals,
+          refunds: final.refunds,
         });
         for (const privateKey of ['requestId', 'createdById', 'revision'])
           expect(JSON.stringify(history)).not.toContain(`"${privateKey}"`);

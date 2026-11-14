@@ -121,15 +121,18 @@ test('administrator reports distinct financial date scopes, appointment states, 
     exact: true,
   });
   await expect(daily.locator('tbody tr')).toHaveCount(1);
-  await expect(daily.locator('tbody tr td').nth(4)).toHaveText(
-    currency(todayReport.totals.invoicedPaise),
-  );
-  await expect(daily.locator('tbody tr td').nth(5)).toHaveText(
-    currency(todayReport.totals.collectionsPaise),
-  );
-  await expect(daily.locator('tbody tr td').nth(6)).toHaveText(
-    currency(todayReport.totals.expensesPaise),
-  );
+  const columns = await daily.locator('thead th').allTextContents();
+  for (const [label, paise] of [
+    ['Invoiced', todayReport.totals.invoicedPaise],
+    ['Collections', todayReport.totals.collectionsPaise],
+    ['Refunds', todayReport.totals.refundsPaise],
+    ['Net collections', todayReport.totals.netCollectionsPaise],
+    ['Expenses', todayReport.totals.expensesPaise],
+  ] as const) {
+    const index = columns.indexOf(label);
+    expect(index).toBeGreaterThan(0);
+    await expect(daily.locator('tbody tr td').nth(index - 1)).toHaveText(currency(paise));
+  }
 
   await page.getByLabel('Report start date', { exact: true }).fill(earlier);
   await page.getByLabel('Report end date', { exact: true }).fill(earlier);

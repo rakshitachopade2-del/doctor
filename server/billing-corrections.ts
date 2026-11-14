@@ -9,10 +9,13 @@ import type {
   InvoiceFinancialSnapshot,
   InvoiceHistory,
   PaymentReversal,
+  PaymentRefund,
+  PaymentRefundMutation,
 } from '../shared/billing-corrections.ts';
 import type { User } from '../shared/types.ts';
 import { get, id, nowISO, type DB } from './db.ts';
 import { notifyPatient } from './activity.ts';
+import { mfaSessionAllowed } from './mfa.ts';
 
 interface BillingContext {
   db: DB;
@@ -23,6 +26,11 @@ interface BillingContext {
 }
 type StoredCorrection = InvoiceCorrection & { createdById: string; requestId: string };
 type StoredReversal = PaymentReversal & { createdById: string; requestId: string };
+type StoredRefund = PaymentRefund & {
+  createdById: string;
+  requestId: string;
+  expectedRevision: string;
+};
 const moneyLimit = 1_000_000_000;
 export const invoiceItemSchema = z.object({
   description: z.string().trim().min(1).max(300),
@@ -52,7 +60,37 @@ const correctionInput = z
     'Confirm removal of all charges only when the corrected invoice has no items.',
   );
 const reversalInput = z.object({ ...commandFields, entryErrorConfirmed: z.literal(true) }).strict();
+const refundInput = z
+  .object({
+    ...commandFields,
+    amountPaise: z.number().int().min(1).max(moneyLimit),
+    method: z.enum(['cash', 'card', 'upi', 'bank']),
+    reference: z.string().trim().max(200).default(''),
+    refundedExternallyConfirmed: z.literal(true),
+  })
+  .strict()
+  .refine(
+    (value) => value.method === 'cash' || value.reference.length > 0,
+    'Record the external refund reference for card, UPI or bank refunds.',
+  );
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+function safeRefund(value: StoredRefund): PaymentRefund {
+  return {
+    id: value.id,
+    invoiceId: value.invoiceId,
+    paymentId: value.paymentId,
+    amountPaise: value.amountPaise,
+    method: value.method,
+    reference: value.reference,
+    reason: value.reason,
+    refundedExternallyConfirmed: true,
+    beforePaidPaise: value.beforePaidPaise,
+    afterPaidPaise: value.afterPaidPaise,
+    createdByName: value.createdByName,
+    createdAt: value.createdAt,
+  };
+}
 
 export function invoicePaymentStatus(totalPaise: number, paidPaise: number): Invoice['status'] {
   return totalPaise === 0
@@ -119,7 +157,17 @@ export function safeInvoiceHistory(db: DB, invoiceId: string): InvoiceHistory {
         createdAt: value.createdAt,
       };
     });
-  return { invoiceId, issuedCharges: issuedInvoiceCharges(db, invoice), corrections, reversals };
+  const refunds = db
+    .prepare('SELECT data FROM paymentRefunds WHERE invoiceId=? ORDER BY rowid DESC')
+    .all(invoiceId)
+    .map((row) => safeRefund(JSON.parse(row.data as string) as StoredRefund));
+  return {
+    invoiceId,
+    issuedCharges: issuedInvoiceCharges(db, invoice),
+    corrections,
+    reversals,
+    refunds,
+  };
 }
 export function invoiceDetail(db: DB, invoice: Invoice): InvoiceDetail {
   const history = safeInvoiceHistory(db, invoice.id);
@@ -148,6 +196,15 @@ export function registerBillingCorrections(app: Express, context: BillingContext
       FOREIGN KEY(paymentId,invoiceId) REFERENCES payments(id,invoiceId)
     );
     CREATE INDEX IF NOT EXISTS payment_reversals_invoice ON paymentReversals(invoiceId);
+    CREATE TABLE IF NOT EXISTS paymentRefunds (
+      id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL REFERENCES invoices(id),
+      paymentId TEXT NOT NULL, amountPaise INTEGER NOT NULL CHECK(amountPaise BETWEEN 1 AND 1000000000),
+      createdAt TEXT NOT NULL, data TEXT NOT NULL,
+      FOREIGN KEY(paymentId,invoiceId) REFERENCES payments(id,invoiceId)
+    );
+    CREATE INDEX IF NOT EXISTS payment_refunds_invoice ON paymentRefunds(invoiceId);
+    CREATE INDEX IF NOT EXISTS payment_refunds_payment ON paymentRefunds(paymentId);
+    CREATE INDEX IF NOT EXISTS payment_refunds_created_at ON paymentRefunds(createdAt);
     CREATE TABLE IF NOT EXISTS billingCorrectionCommands (
       requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id),
       operation TEXT NOT NULL, invoiceId TEXT NOT NULL REFERENCES invoices(id),
@@ -158,6 +215,7 @@ export function registerBillingCorrections(app: Express, context: BillingContext
     'invoiceIssuedCharges',
     'invoiceCorrections',
     'paymentReversals',
+    'paymentRefunds',
     'billingCorrectionCommands',
   ]) {
     db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_update BEFORE UPDATE ON ${table}
@@ -181,6 +239,29 @@ export function registerBillingCorrections(app: Express, context: BillingContext
     if (!invoice) return fail(404, 'Invoice not found.');
     return invoice;
   }
+  /** Revalidate the authenticated account and invoice scope after taking the write lock. */
+  function authorize(req: AuthRequest, invoiceId: string) {
+    const cached = actor(req, ['admin']);
+    const user = get<User>(db, 'users', cached.id);
+    const session = db
+      .prepare('SELECT userId,expiresAt,csrfToken,mfaCredentialId FROM sessions WHERE tokenHash=?')
+      .get(req.sessionToken ?? '');
+    if (
+      !user ||
+      user.active === false ||
+      !session ||
+      session.userId !== user.id ||
+      Number(session.expiresAt) <= Date.now() ||
+      session.csrfToken !== req.csrfToken ||
+      !mfaSessionAllowed(db, user.id, session.mfaCredentialId)
+    )
+      return fail(401, 'Your session changed. Sign in again.');
+    if (user.mustChangePassword || user.role !== 'admin')
+      return fail(403, 'Only an active administrator can change these billing records.');
+    req.user = user;
+    invoiceAccess(req, invoiceId);
+    return user;
+  }
   function replay(
     requestId: string,
     user: User,
@@ -191,10 +272,10 @@ export function registerBillingCorrections(app: Express, context: BillingContext
   ) {
     const prior = db
       .prepare(
-        'SELECT actorId,operation,invoiceId,paymentId,payload FROM billingCorrectionCommands WHERE requestId=?',
+        'SELECT actorId,operation,invoiceId,paymentId,payload,eventId FROM billingCorrectionCommands WHERE requestId=?',
       )
       .get(requestId);
-    if (!prior) return false;
+    if (!prior) return null;
     if (
       prior.actorId !== user.id ||
       prior.operation !== operation ||
@@ -203,7 +284,7 @@ export function registerBillingCorrections(app: Express, context: BillingContext
       prior.payload !== JSON.stringify(payload)
     )
       fail(409, 'This billing correction request was already used with different details.');
-    return true;
+    return String(prior.eventId);
   }
   function remember(
     requestId: string,
@@ -242,8 +323,8 @@ export function registerBillingCorrections(app: Express, context: BillingContext
     });
   }
   app.post('/api/invoices/:id/corrections', (req: AuthRequest, res) => {
-    const user = actor(req, ['admin']),
-      invoiceId = String(req.params.id);
+    const invoiceId = String(req.params.id);
+    actor(req, ['admin']);
     invoiceAccess(req, invoiceId);
     const { expectedRevision, requestId, ...input } = correctionInput.parse(req.body);
     const totalPaise = input.items.reduce(
@@ -254,6 +335,7 @@ export function registerBillingCorrections(app: Express, context: BillingContext
       fail(400, 'Invoice total must be at most ₹1,00,00,000.');
     res.json(
       transaction(() => {
+        const user = authorize(req, invoiceId);
         if (replay(requestId, user, 'charges', invoiceId, null, input))
           return invoiceDetail(db, currentInvoice(invoiceId));
         const invoice = currentInvoice(invoiceId);
@@ -263,7 +345,7 @@ export function registerBillingCorrections(app: Express, context: BillingContext
         if (totalPaise < invoice.paidPaise)
           fail(
             409,
-            'Corrected charges cannot be less than the net recorded payments. Correct an erroneous payment entry first if applicable.',
+            'Corrected charges cannot be less than the net recorded payments. Record a completed external refund or correct an erroneous payment entry first, as applicable.',
           );
         // Existing invoices have never had editable charges before this module. Capture their
         // known original lines lazily, without inventing an issue author or new issue date.
@@ -304,13 +386,14 @@ export function registerBillingCorrections(app: Express, context: BillingContext
     );
   });
   app.post('/api/invoices/:id/payments/:paymentId/reverse', (req: AuthRequest, res) => {
-    const user = actor(req, ['admin']),
-      invoiceId = String(req.params.id),
+    const invoiceId = String(req.params.id),
       paymentId = String(req.params.paymentId);
+    actor(req, ['admin']);
     invoiceAccess(req, invoiceId);
     const { expectedRevision, requestId, ...input } = reversalInput.parse(req.body);
     res.json(
       transaction(() => {
+        const user = authorize(req, invoiceId);
         if (replay(requestId, user, 'payment-entry', invoiceId, paymentId, input))
           return invoiceDetail(db, currentInvoice(invoiceId));
         const invoice = currentInvoice(invoiceId);
@@ -320,6 +403,11 @@ export function registerBillingCorrections(app: Express, context: BillingContext
         requireRevision(invoice, expectedRevision);
         if (db.prepare('SELECT 1 FROM paymentReversals WHERE paymentId=?').get(paymentId))
           fail(409, 'This payment entry has already been reversed.');
+        if (db.prepare('SELECT 1 FROM paymentRefunds WHERE paymentId=? LIMIT 1').get(paymentId))
+          fail(
+            409,
+            'A payment with a recorded external refund cannot be reversed as an erroneous entry.',
+          );
         if (payment!.amountPaise > invoice.paidPaise)
           fail(
             409,
@@ -356,5 +444,98 @@ export function registerBillingCorrections(app: Express, context: BillingContext
         return invoiceDetail(db, invoice);
       }),
     );
+  });
+  app.post('/api/invoices/:id/payments/:paymentId/refunds', (req: AuthRequest, res) => {
+    const invoiceId = String(req.params.id),
+      paymentId = String(req.params.paymentId);
+    const result = transaction(() => {
+      const user = authorize(req, invoiceId);
+      z.object({}).strict().parse(req.query);
+      const { requestId, ...input } = refundInput.parse(req.body);
+      const prior = replay(requestId, user, 'external-refund', invoiceId, paymentId, input);
+      function response(value: StoredRefund): PaymentRefundMutation {
+        return {
+          detail: invoiceDetail(db, currentInvoice(invoiceId)),
+          refund: safeRefund(value),
+          receipt: {
+            requestId: value.requestId,
+            actorId: value.createdById,
+            invoiceId: value.invoiceId,
+            paymentId: value.paymentId,
+            expectedRevision: value.expectedRevision,
+            refundId: value.id,
+          },
+        };
+      }
+      if (prior) {
+        const value = get<StoredRefund>(db, 'paymentRefunds', prior);
+        if (!value) return fail(500, 'The original refund receipt is unavailable.');
+        return { status: 200, value: response(value) };
+      }
+      const invoice = currentInvoice(invoiceId);
+      const payment = get<Payment>(db, 'payments', paymentId);
+      if (!payment || payment.invoiceId !== invoiceId)
+        return fail(404, 'Payment entry not found on this invoice.');
+      requireRevision(invoice, input.expectedRevision);
+      if (db.prepare('SELECT 1 FROM paymentReversals WHERE paymentId=?').get(paymentId))
+        return fail(
+          409,
+          'An erroneous payment entry that was reversed cannot have an external refund recorded.',
+        );
+      const refunded = Number(
+        db
+          .prepare(
+            'SELECT COALESCE(SUM(amountPaise),0) AS total FROM paymentRefunds WHERE paymentId=?',
+          )
+          .get(paymentId)!.total,
+      );
+      if (input.amountPaise > payment.amountPaise - refunded)
+        return fail(409, 'The refund exceeds the remaining refundable amount of this payment.');
+      if (input.amountPaise > invoice.paidPaise)
+        return fail(
+          409,
+          'The recorded balance is inconsistent. Review the invoice before recording a refund.',
+        );
+      const beforePaidPaise = invoice.paidPaise;
+      invoice.paidPaise -= input.amountPaise;
+      invoice.status = invoicePaymentStatus(invoice.totalPaise, invoice.paidPaise);
+      const value: StoredRefund = {
+        id: id(),
+        invoiceId,
+        paymentId,
+        amountPaise: input.amountPaise,
+        method: input.method,
+        reference: input.reference,
+        reason: input.reason,
+        refundedExternallyConfirmed: true,
+        beforePaidPaise,
+        afterPaidPaise: invoice.paidPaise,
+        createdByName: user.name,
+        createdById: user.id,
+        createdAt: nowISO(),
+        requestId,
+        expectedRevision: input.expectedRevision,
+      };
+      db.prepare(
+        'INSERT INTO paymentRefunds(id,invoiceId,paymentId,amountPaise,createdAt,data) VALUES (?,?,?,?,?,?)',
+      ).run(
+        value.id,
+        invoiceId,
+        paymentId,
+        value.amountPaise,
+        value.createdAt,
+        JSON.stringify(value),
+      );
+      remember(requestId, user, 'external-refund', invoiceId, paymentId, input, value.id);
+      publish(
+        req,
+        invoice,
+        value.id,
+        'recorded external payment refund',
+        'Your clinic recorded a refund completed outside the app',
+      );
+      return { status: 201, value: response(value) };
+    });
+    res.status(result.status).json(result.value);
   });
 }

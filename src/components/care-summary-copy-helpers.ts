@@ -97,7 +97,11 @@ function procedureVisit(v: unknown) {
 }
 
 /** Validate every nested collection and displayed value before rendering an archived document. */
-export function checkedCareSummary(value: unknown, patientId: string): CareSummary {
+export function checkedCareSummary(
+  value: unknown,
+  patientId: string,
+  archived = false,
+): CareSummary {
   requireValue(
     object(value) &&
       value.schemaVersion === 1 &&
@@ -272,6 +276,29 @@ export function checkedCareSummary(value: unknown, patientId: string): CareSumma
         integer(row.amountPaise) && integer(row.beforePaidPaise) && integer(row.afterPaidPaise),
       );
     }
+    // Previously saved schema-1 documents predate refund history. Never alter their bytes.
+    const refunds = archived && history.refunds === undefined ? [] : entries(history.refunds);
+    for (const row of refunds) {
+      dated(row, ['reason', 'reference', 'createdByName']);
+      requireValue(
+        row.invoiceId === history.invoiceId &&
+          nonempty(row.paymentId) &&
+          integer(row.amountPaise) &&
+          Number(row.amountPaise) > 0 &&
+          Number(row.amountPaise) <= 1_000_000_000 &&
+          integer(row.beforePaidPaise) &&
+          integer(row.afterPaidPaise) &&
+          Number(row.beforePaidPaise) - Number(row.amountPaise) === row.afterPaidPaise &&
+          row.refundedExternallyConfirmed === true &&
+          ['cash', 'card', 'upi', 'bank'].includes(row.method as string) &&
+          String(row.reference).length <= 200 &&
+          row.reference === String(row.reference).trim() &&
+          (row.method === 'cash' || nonempty(row.reference)) &&
+          nonempty(row.reason) &&
+          String(row.reason).length <= 1000 &&
+          nonempty(row.createdByName),
+      );
+    }
   }
   return value as unknown as CareSummary;
 }
@@ -308,7 +335,7 @@ export function checkedSummaryCopyDetail(
 ): CareSummaryCopyDetail {
   requireValue(object(value));
   const copy = checkedSummaryCopy(value.copy, patientId, copyId),
-    summary = checkedCareSummary(value.summary, patientId);
+    summary = checkedCareSummary(value.summary, patientId, true);
   requireValue(
     copy.sourceRevision === summary.revision &&
       copy.generatedAt === summary.generatedAt &&

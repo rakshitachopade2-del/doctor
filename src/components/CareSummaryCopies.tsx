@@ -362,6 +362,7 @@ function SavedSummaryDetail({
       const summary = checkedCareSummary(
         JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
         patientId,
+        true,
       );
       if (summary.revision !== copy.sourceRevision || summary.generatedAt !== copy.generatedAt)
         throw new Error('The downloaded file did not match this saved copy. Please retry.');

@@ -43,8 +43,13 @@ export interface InsightsTotals {
   /** Current outstanding balance of invoices issued within the selected period. */
   issuedInvoiceOutstandingPaise: number;
   paymentCount: number;
+  refundCount: number;
   /** Manual payment records whose recording timestamp falls within the period. */
   collectionsPaise: number;
+  /** Refund entries recorded in the period, independent of the original receipt date. */
+  refundsPaise: number;
+  /** Recorded collections less recorded refunds; may be negative. */
+  netCollectionsPaise: number;
   expenseCount: number;
   expensesPaise: number;
 }
@@ -57,6 +62,10 @@ export interface InsightsDay {
   noShowAppointments: number;
   invoicedPaise: number;
   collectionsPaise: number;
+  /** Refund entries recorded in the period, independent of the original receipt date. */
+  refundsPaise: number;
+  /** Recorded collections less recorded refunds; may be negative. */
+  netCollectionsPaise: number;
   expensesPaise: number;
 }
 
@@ -70,5 +79,6 @@ export interface ClinicInsights {
   appointmentsByMode: { mode: 'in-person' | 'online'; count: number }[];
   expensesByCategory: { category: ExpenseCategory; count: number; amountPaise: number }[];
   collectionsByMethod: { method: Payment['method']; count: number; amountPaise: number }[];
+  refundsByMethod: { method: Payment['method']; count: number; amountPaise: number }[];
   daily: InsightsDay[];
 }

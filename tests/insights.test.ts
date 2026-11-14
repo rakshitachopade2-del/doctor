@@ -445,7 +445,10 @@ test('insights aggregate exact paise across independent IST issue, recording, in
     invoicedPaise: 30003,
     issuedInvoiceOutstandingPaise: 17000,
     paymentCount: 4,
+    refundCount: 0,
     collectionsPaise: 16002,
+    refundsPaise: 0,
+    netCollectionsPaise: 16002,
     expenseCount: 2,
     expensesPaise: 3003,
   });
@@ -458,6 +461,8 @@ test('insights aggregate exact paise across independent IST issue, recording, in
       noShowAppointments: 0,
       invoicedPaise: 10001,
       collectionsPaise: 0,
+      refundsPaise: 0,
+      netCollectionsPaise: 0,
       expensesPaise: 1001,
     },
     {
@@ -468,6 +473,8 @@ test('insights aggregate exact paise across independent IST issue, recording, in
       noShowAppointments: 1,
       invoicedPaise: 20002,
       collectionsPaise: 7001,
+      refundsPaise: 0,
+      netCollectionsPaise: 7001,
       expensesPaise: 2002,
     },
     {
@@ -478,6 +485,8 @@ test('insights aggregate exact paise across independent IST issue, recording, in
       noShowAppointments: 0,
       invoicedPaise: 0,
       collectionsPaise: 9001,
+      refundsPaise: 0,
+      netCollectionsPaise: 9001,
       expensesPaise: 0,
     },
   ]);
@@ -578,7 +587,7 @@ test('CSV export matches JSON aggregates, explains date bases and excludes all r
     const row = rows.find((row) => row[0] === 'totals' && row[2] === metric)!;
     assert.equal(Number(row[4] || row[5]), value);
   }
-  assert.equal(rows.filter((row) => row[0] === 'daily').length, expected.daily.length * 7);
+  assert.equal(rows.filter((row) => row[0] === 'daily').length, expected.daily.length * 9);
   assert.ok(
     rows.some((row) => row[2] === 'collectionsBasis' && row[3].includes('recording timestamp')),
   );
@@ -620,6 +629,7 @@ test('CSV escaping prevents formula interpretation and preserves delimiters, quo
   const description = 'Comma, quote " and\nline break';
   assert.deepEqual(parseCsv(`${escapeCsvCell(description)}\r\n`), [[description]]);
   assert.equal(escapeCsvCell(12505), '"12505"');
+  assert.equal(escapeCsvCell(-12505), '"-12505"');
 });
 
 test('historical reports use current appointment status, current void decisions and current issued-cohort balances', async () => {
@@ -823,5 +833,100 @@ test('billing corrections update the original invoice cohort and exclude erroneo
   assert.equal(
     app.locals.db.prepare('SELECT count(*) AS n FROM payments WHERE id=?').get(payment.id).n,
     1,
+  );
+});
+
+test('refund reports use their own IST recording dates, preserve gross collections and export negative net amounts', async () => {
+  const invoice = storedInvoice('2012-01-01T06:00:00.000Z', 20000, 15995);
+  const payment = storedPayment(invoice, '2012-01-01T06:00:00.000Z', 20000, 'card');
+  let beforePaidPaise = 20000;
+  const fixtures = [
+    { createdAt: '2012-02-28T18:29:59.999Z', amountPaise: 1, method: 'cash' },
+    { createdAt: '2012-02-28T18:30:00.000Z', amountPaise: 2001, method: 'bank' },
+    { createdAt: '2012-02-29T18:29:59.999Z', amountPaise: 2002, method: 'upi' },
+    { createdAt: '2012-02-29T18:30:00.000Z', amountPaise: 1, method: 'cash' },
+  ];
+  for (const fixture of fixtures) {
+    const value = {
+      ...fixture,
+      id: randomUUID(),
+      invoiceId: invoice.id,
+      paymentId: payment.id,
+      reference: '=Private refund reference',
+      reason: 'Private synthetic refund reason',
+      refundedExternallyConfirmed: true,
+      beforePaidPaise,
+      afterPaidPaise: beforePaidPaise - fixture.amountPaise,
+      createdByName: 'Synthetic private author',
+      createdById: 'user-admin',
+      requestId: randomUUID(),
+    };
+    beforePaidPaise = value.afterPaidPaise;
+    app.locals.db
+      .prepare(
+        'INSERT INTO paymentRefunds(id,invoiceId,paymentId,amountPaise,createdAt,data) VALUES (?,?,?,?,?,?)',
+      )
+      .run(
+        value.id,
+        invoice.id,
+        payment.id,
+        value.amountPaise,
+        value.createdAt,
+        JSON.stringify(value),
+      );
+  }
+  const value = await report('2012-02-29', '2012-02-29');
+  assert.equal(value.totals.invoiceCount, 0);
+  assert.equal(value.totals.paymentCount, 0);
+  assert.equal(value.totals.collectionsPaise, 0);
+  assert.equal(value.totals.refundCount, 2);
+  assert.equal(value.totals.refundsPaise, 4003);
+  assert.equal(value.totals.netCollectionsPaise, -4003);
+  assert.equal(value.daily[0].refundsPaise, 4003);
+  assert.equal(value.daily[0].netCollectionsPaise, -4003);
+  assert.deepEqual(value.refundsByMethod, [
+    { method: 'cash', count: 0, amountPaise: 0 },
+    { method: 'card', count: 0, amountPaise: 0 },
+    { method: 'upi', count: 1, amountPaise: 2002 },
+    { method: 'bank', count: 1, amountPaise: 2001 },
+  ]);
+  const original = await report('2012-01-01', '2012-01-01');
+  assert.equal(original.totals.collectionsPaise, 20000);
+  assert.equal(original.totals.refundsPaise, 0);
+  assert.equal(original.totals.netCollectionsPaise, 20000);
+  assert.equal(original.totals.issuedInvoiceOutstandingPaise, 4005);
+  const all = await report('2012-01-01', '2012-03-01');
+  assert.equal(all.totals.refundCount, 4);
+  assert.equal(all.totals.refundsPaise, 4005);
+  assert.equal(all.totals.netCollectionsPaise, 15995);
+  const csv = await call('/insights/export?from=2012-02-29&to=2012-02-29', admin);
+  assert.equal(csv.status, 200);
+  const rows = parseCsv(csv.data);
+  assert.deepEqual(
+    rows.find((row) => row[0] === 'totals' && row[2] === 'netCollectionsPaise'),
+    ['totals', '', 'netCollectionsPaise', '', '', '-4003'],
+  );
+  assert.deepEqual(
+    rows.find((row) => row[0] === 'refundsByMethod' && row[3] === 'upi'),
+    ['refundsByMethod', '', 'recordedRefunds', 'upi', '1', '2002'],
+  );
+  for (const privateValue of [
+    invoice.id,
+    payment.id,
+    'Private refund reference',
+    'Private synthetic refund reason',
+    'Synthetic private author',
+  ]) {
+    assert.equal(JSON.stringify(value).includes(privateValue), false);
+    assert.equal(csv.data.includes(privateValue), false);
+  }
+  const plan = app.locals.db
+    .prepare(
+      'EXPLAIN QUERY PLAN SELECT data FROM paymentRefunds WHERE createdAt>=? AND createdAt<=? ORDER BY createdAt,id',
+    )
+    .all('2012-02-28T18:30:00.000Z', '2012-02-29T18:29:59.999Z');
+  assert.match(
+    JSON.stringify(plan),
+    /SEARCH paymentRefunds USING INDEX payment_refunds_created_at/,
   );
 });

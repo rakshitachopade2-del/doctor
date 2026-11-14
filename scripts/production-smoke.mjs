@@ -1809,6 +1809,162 @@ try {
   assert.equal(oldPolicyReplay.context.policy.enabled, false);
   assert.deepEqual(oldPolicyReplay.change, enabledReminders.change);
   assert.equal((await reminderRead(`${reminderPolicyPath}/history`)).total, 2);
+  // Refunds record externally returned synthetic money; no payment provider is contacted.
+  const refundInvoice = await reminderWrite(
+    '/invoices',
+    {
+      patientId: registeredSession.user.patientId,
+      requestId: randomUUID(),
+      items: [{ description: 'Synthetic refundable service', quantity: 1, unitAmountPaise: 10000 }],
+    },
+    201,
+  );
+  const refundPayment = await reminderWrite(
+    `/invoices/${refundInvoice.id}/payments`,
+    {
+      amountPaise: 10000,
+      method: 'card',
+      reference: 'Synthetic original receipt',
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const refundPath = `/invoices/${refundInvoice.id}/payments/${refundPayment.payments[0].id}/refunds`;
+  const refundSummaryPath = `/patients/${registeredSession.user.patientId}/care-summary`;
+  const beforeRefundSummary = await reminderRead(refundSummaryPath, patientHeaders);
+  const refundCopiesPath = `${refundSummaryPath}/copies`;
+  const beforeRefundCopy = await reminderWrite(
+    refundCopiesPath,
+    {
+      expectedRevision: beforeRefundSummary.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const beforeRefundCopyUrl = `${base}/api${refundCopiesPath}/${beforeRefundCopy.copy.id}/download`;
+  const beforeRefundBytes = Buffer.from(
+    await (await fetch(beforeRefundCopyUrl, { headers: patientHeaders })).arrayBuffer(),
+  );
+  const refundCommand = {
+    amountPaise: 4001,
+    method: 'bank',
+    reference: 'Synthetic external refund reference',
+    reason: 'Synthetic partial service refund',
+    refundedExternallyConfirmed: true,
+    expectedRevision: refundPayment.revision,
+    requestId: randomUUID(),
+  };
+  const refundRecorded = await reminderWrite(refundPath, refundCommand, 201);
+  assert.equal(refundRecorded.detail.invoice.paidPaise, 5999);
+  assert.equal(refundRecorded.detail.invoice.totalPaise, 10000);
+  assert.equal(refundRecorded.detail.invoice.status, 'partial');
+  assert.equal(refundRecorded.receipt.requestId, refundCommand.requestId);
+  assert.equal(refundRecorded.detail.refunds.length, 1);
+  await reminderWrite(refundPath, { ...refundCommand, requestId: randomUUID() }, 409);
+  await reminderWrite(
+    refundPath,
+    {
+      ...refundCommand,
+      amountPaise: 6000,
+      expectedRevision: refundRecorded.detail.revision,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  await reminderWrite(
+    `/invoices/${refundInvoice.id}/payments/${refundPayment.payments[0].id}/reverse`,
+    {
+      reason: 'Refunded payment is not an entry mistake',
+      entryErrorConfirmed: true,
+      expectedRevision: refundRecorded.detail.revision,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  const refundFinal = await reminderWrite(
+    refundPath,
+    {
+      ...refundCommand,
+      amountPaise: 5999,
+      method: 'cash',
+      reference: '',
+      reason: 'Synthetic remaining refund',
+      expectedRevision: refundRecorded.detail.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  assert.equal(refundFinal.detail.invoice.paidPaise, 0);
+  assert.equal(refundFinal.detail.invoice.status, 'unpaid');
+  const refundedNoCharge = await reminderWrite(`/invoices/${refundInvoice.id}/corrections`, {
+    items: [],
+    reason: 'Synthetic cancelled service charges',
+    removeAllChargesConfirmed: true,
+    expectedRevision: refundFinal.detail.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(refundedNoCharge.invoice.status, 'no-charge');
+  const refundReplay = await reminderWrite(refundPath, refundCommand);
+  assert.deepEqual(refundReplay.refund, refundRecorded.refund);
+  assert.deepEqual(refundReplay.receipt, refundRecorded.receipt);
+  assert.equal(refundReplay.detail.invoice.status, 'no-charge');
+  assert.equal(refundReplay.detail.refunds.length, 2);
+  const patientRefundDetail = await reminderRead(`/invoices/${refundInvoice.id}`, patientHeaders);
+  assert.deepEqual(patientRefundDetail.refunds, refundReplay.detail.refunds);
+  for (const entry of patientRefundDetail.refunds) {
+    assert.equal('createdById' in entry, false);
+    assert.equal('requestId' in entry, false);
+    assert.equal('expectedRevision' in entry, false);
+  }
+  const afterRefundSummary = await reminderRead(refundSummaryPath, patientHeaders);
+  assert.notEqual(afterRefundSummary.revision, beforeRefundSummary.revision);
+  assert.deepEqual(
+    afterRefundSummary.invoiceHistories.find((entry) => entry.invoiceId === refundInvoice.id)
+      .refunds,
+    patientRefundDetail.refunds,
+  );
+  assert.deepEqual(
+    Buffer.from(
+      await (await fetch(beforeRefundCopyUrl, { headers: patientHeaders })).arrayBuffer(),
+    ),
+    beforeRefundBytes,
+  );
+  const refundActivity = await reminderRead('/activity?limit=100', patientHeaders);
+  assert.equal(
+    refundActivity.items.filter(
+      (entry) => entry.title === 'Your clinic recorded a refund completed outside the app',
+    ).length,
+    2,
+  );
+  const refundDate = (timestamp) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(timestamp));
+  const refundRange = `from=${refundDate(refundPayment.payments[0].createdAt)}&to=${refundDate(refundFinal.refund.createdAt)}`;
+  const refundReport = await reminderRead(`/insights?${refundRange}`);
+  assert.equal(refundReport.totals.refundCount, 2);
+  assert.equal(refundReport.totals.refundsPaise, 10000);
+  assert.equal(refundReport.totals.collectionsPaise, 10000);
+  assert.equal(refundReport.totals.netCollectionsPaise, 0);
+  const refundCsv = await fetch(`${base}/api/insights/export?${refundRange}`, {
+    headers: verifiedHeaders,
+  });
+  assert.equal(refundCsv.status, 200);
+  assert.match(await refundCsv.text(), /"refundsPaise","","","10000"/);
+  for (const [headers, status] of [
+    [publicHeaders, 401],
+    [patientHeaders, 403],
+  ]) {
+    const denied = await fetch(`${base}/api${refundPath}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(refundCommand),
+    });
+    assert.equal(denied.status, status);
+  }
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,

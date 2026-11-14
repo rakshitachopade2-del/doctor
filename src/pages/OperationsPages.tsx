@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
   Check,
@@ -22,6 +22,7 @@ import type {
   ProcedureBillingItem,
 } from '../../shared/operations';
 import type { Patient } from '../../shared/types';
+import type { PaymentRefund } from '../../shared/billing-corrections';
 import { api, ApiError, formatDate, money, useResource, useSession, useToast } from '../lib';
 import {
   Badge,
@@ -34,6 +35,10 @@ import {
   PageHeader,
 } from '../components/ui';
 import { KnowledgeLibraryManager } from '../components/KnowledgeLibraryManager';
+import {
+  useCancellationData as useBillingData,
+  useCancellationGuard as useBillingGuard,
+} from '../components/series-cancellation-helpers';
 
 const billingError = (problem: unknown) =>
   problem instanceof Error
@@ -139,6 +144,50 @@ function validFinancialSnapshot(value: unknown): boolean {
 function uniqueBillingIds(values: { id: string }[]) {
   return new Set(values.map((entry) => entry.id)).size === values.length;
 }
+const refundedAmount = (detail: InvoiceDetail, paymentId: string) =>
+  detail.refunds.reduce(
+    (sum, refund) => sum + (refund.paymentId === paymentId ? refund.amountPaise : 0),
+    0,
+  );
+const remainingRefund = (detail: InvoiceDetail, payment: Payment) =>
+  detail.reversals.some((entry) => entry.paymentId === payment.id)
+    ? 0
+    : payment.amountPaise - refundedAmount(detail, payment.id);
+function validRefund(value: unknown, invoiceId: string): value is PaymentRefund {
+  return (
+    billingRecord(value) &&
+    billingText(value.id) &&
+    value.invoiceId === invoiceId &&
+    billingText(value.paymentId) &&
+    billingInteger(value.amountPaise, 1) &&
+    ['cash', 'card', 'upi', 'bank'].includes(value.method as string) &&
+    typeof value.reference === 'string' &&
+    value.reference === value.reference.trim() &&
+    value.reference.length <= 200 &&
+    (value.method === 'cash' || !!value.reference) &&
+    billingText(value.reason, 1000) &&
+    value.reason === value.reason.trim() &&
+    value.refundedExternallyConfirmed === true &&
+    billingInteger(value.beforePaidPaise) &&
+    billingInteger(value.afterPaidPaise) &&
+    value.beforePaidPaise - value.amountPaise === value.afterPaidPaise &&
+    billingText(value.createdByName) &&
+    billingDate(value.createdAt)
+  );
+}
+const sameBillingValue = (a: unknown, b: unknown): boolean => {
+  const canonical = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : billingRecord(value)
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, canonical(value[key])]),
+          )
+        : value;
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+};
 function checkedInvoice(value: unknown, id?: string): Invoice {
   if (
     !billingRecord(value) ||
@@ -194,6 +243,9 @@ function checkedInvoiceDetail(value: unknown, id: string): InvoiceDetail {
     !detail.corrections.every(validCorrection) ||
     !uniqueBillingIds(detail.corrections) ||
     !Array.isArray(detail.reversals) ||
+    !Array.isArray(detail.refunds) ||
+    !detail.refunds.every((refund) => validRefund(refund, id)) ||
+    !uniqueBillingIds(detail.refunds) ||
     !validCharges(detail.issuedCharges)
   ) {
     throw new Error(
@@ -231,10 +283,22 @@ function checkedInvoiceDetail(value: unknown, id: string): InvoiceDetail {
     );
   }
   const reversed = new Set(detail.reversals.map((reversal) => reversal.paymentId));
-  const netPaid = detail.payments.reduce(
-    (sum, payment) => sum + (reversed.has(payment.id) ? 0 : payment.amountPaise),
-    0,
-  );
+  if (
+    detail.refunds.some(
+      (refund) =>
+        reversed.has(refund.paymentId) ||
+        !detail.payments.some((payment) => payment.id === refund.paymentId),
+    ) ||
+    detail.payments.some((payment) => refundedAmount(detail, payment.id) > payment.amountPaise)
+  )
+    throw new Error(
+      'The response did not confirm consistent original payments and refunds. Retry to check its outcome.',
+    );
+  const netPaid =
+    detail.payments.reduce(
+      (sum, payment) => sum + (reversed.has(payment.id) ? 0 : payment.amountPaise),
+      0,
+    ) - detail.refunds.reduce((sum, refund) => sum + refund.amountPaise, 0);
   if (!Number.isSafeInteger(netPaid) || netPaid !== detail.invoice.paidPaise)
     throw new Error(
       'The response did not confirm consistent net payment totals. Retry to check its outcome.',
@@ -260,15 +324,17 @@ const createDraft = (source: ProcedureBillingItem | null = null): CreationDraft 
   error: '',
 });
 type BillingDraft = {
-  kind: 'charges' | 'reversal' | 'payment';
+  kind: 'charges' | 'reversal' | 'payment' | 'refund';
   invoiceId: string;
   source: InvoiceDetail;
   requestId: string;
   paymentId: string | null;
+  actorId: string | null;
   items: LineDraft[];
   reason: string;
   removeAllChargesConfirmed: boolean;
   entryErrorConfirmed: boolean;
+  refundedExternallyConfirmed: boolean;
   amount: string;
   method: Payment['method'];
   reference: string;
@@ -287,10 +353,12 @@ const billingDraft = (
   invoiceId: source.invoice.id,
   requestId: crypto.randomUUID(),
   paymentId,
+  actorId: null,
   items: draftLines(source.invoice.items),
   reason: '',
   removeAllChargesConfirmed: false,
   entryErrorConfirmed: false,
+  refundedExternallyConfirmed: false,
   amount: '',
   method: 'cash',
   reference: '',
@@ -302,12 +370,22 @@ const billingDraft = (
 
 export function BillingPage() {
   const { session } = useSession();
+  const location = useLocation();
   const staff = session.user?.role !== 'patient';
-  const invoices = useResource<Invoice[]>('/api/invoices');
+  const invoices = useBillingData('/api/invoices', (value) => {
+    if (!Array.isArray(value)) throw new Error('The invoice list could not be confirmed.');
+    const rows = value.map((invoice) => checkedInvoice(invoice));
+    if (!uniqueBillingIds(rows)) throw new Error('The invoice list contains duplicate records.');
+    return rows;
+  });
   const [creation, setCreation] = useState<CreationDraft | null>(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<BillingDraft | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ id: string; origin: string } | null>(null);
+  const selected = selection?.origin === location.key ? selection.id : null;
+  function setSelected(id: string | null) {
+    setSelection(id ? { id, origin: location.key } : null);
+  }
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [params, setParams] = useSearchParams();
@@ -315,8 +393,8 @@ export function BillingPage() {
     invoiceId = params.get('invoice');
   const sourceOpened = useRef('');
   useEffect(() => {
-    if (invoiceId) setSelected(invoiceId);
-  }, [invoiceId]);
+    setSelection(invoiceId ? { id: invoiceId, origin: location.key } : null);
+  }, [invoiceId, location.key]);
   const procedures = useResource<ProcedureBillingItem[]>(staff ? '/api/procedure-billing' : null);
   useEffect(() => {
     if (!procedureId) {
@@ -343,7 +421,7 @@ export function BillingPage() {
     }
   }, [staff, invoiceId, procedureId, procedures.data, draft, creation]);
   function closeSource() {
-    setParams({}, { replace: true });
+    if (params.size) setParams({}, { replace: true });
   }
   let allInvoices: Invoice[] = [];
   let invoiceListError = invoices.error;
@@ -371,7 +449,7 @@ export function BillingPage() {
       <PageHeader
         eyebrow={staff ? 'CLINIC OPERATIONS' : 'YOUR CARE'}
         title={staff ? 'Billing & payments' : 'My invoices'}
-        description="Current charges, recorded payments and a preserved history of corrections."
+        description="Current charges, recorded payments, external refunds and preserved correction history."
         actions={
           staff ? (
             <button
@@ -437,7 +515,7 @@ export function BillingPage() {
       <p className="billing-scope">
         {invoiceListError
           ? 'Totals unavailable until the invoice list loads.'
-          : 'Totals cover all accessible invoices. Current charges include corrections; net payments exclude reversed entry errors.'}
+          : 'Totals cover all accessible invoices. Current charges include corrections; net payments exclude reversed entry errors and recorded external refunds.'}
       </p>
       <Card>
         <div className="section-heading">
@@ -543,7 +621,7 @@ export function BillingPage() {
       <div className="notice">
         <CreditCard size={19} />
         <span>
-          Payments record receipt elsewhere. Charge corrections and mistaken-entry reversals
+          Payments and external refunds record money received or returned elsewhere. Corrections
           preserve the original records. No payment, refund, bank transfer or UPI transaction is
           initiated here.
         </span>
@@ -564,8 +642,8 @@ export function BillingPage() {
           onCreated={(id) => {
             setCreating(false);
             setCreation(null);
-            closeSource();
-            setSelected(id);
+            if (params.size) setParams({ invoice: id }, { replace: true });
+            else setSelected(id);
             void invoices.reload();
             void procedures.reload();
           }}
@@ -573,7 +651,7 @@ export function BillingPage() {
       )}
       {selected && (
         <InvoiceView
-          key={selected}
+          key={`${selected}:${location.key}`}
           id={selected}
           staff={staff}
           draft={draft}
@@ -923,7 +1001,8 @@ function InvoiceView({
   onClose: () => void;
   onUpdated: () => void;
 }) {
-  const detail = useResource<InvoiceDetail>(`/api/invoices/${id}`);
+  const detail = useBillingData(`/api/invoices/${id}`, (value) => checkedInvoiceDetail(value, id));
+  const begin = useBillingGuard();
   const { session } = useSession();
   const admin = session.user?.role === 'admin';
   const [busy, setBusy] = useState(false);
@@ -970,13 +1049,14 @@ function InvoiceView({
     }
   }
   async function updated() {
-    if (!mounted.current) return;
+    const current = begin();
+    if (!current()) return;
     onDraftChange(null);
     setReviewedDetail(null);
     await detail.reload();
-    if (mounted.current) onUpdated();
+    if (current()) onUpdated();
   }
-  function start(kind: 'charges' | 'reversal', paymentId?: string) {
+  function start(kind: 'charges' | 'reversal' | 'refund', paymentId?: string) {
     if (admin && data && !draft && !blocked) onDraftChange(billingDraft(kind, data, paymentId));
   }
   return (
@@ -1079,6 +1159,8 @@ function InvoiceView({
               {data.payments.length ? (
                 data.payments.map((payment) => {
                   const reversal = data!.reversals.find((entry) => entry.paymentId === payment.id);
+                  const returned = refundedAmount(data!, payment.id);
+                  const refundable = remainingRefund(data!, payment);
                   return (
                     <article
                       className={`payment-row ${reversal ? 'billing-reversed-payment' : ''}`}
@@ -1110,17 +1192,43 @@ function InvoiceView({
                             excluded from net payments. No money was returned by this entry.
                           </p>
                         </div>
+                      ) : returned > 0 ? (
+                        <div className="billing-refunded-payment">
+                          <Badge tone="amber">
+                            {refundable > 0 ? 'Partially refunded' : 'Fully refunded'}
+                          </Badge>
+                          <p>
+                            Recorded external refunds: {money(returned / 100)}. Available to refund:{' '}
+                            {money(refundable / 100)}.
+                          </p>
+                          <p className="billing-help">
+                            This original payment is retained. A payment with a recorded refund
+                            cannot be reversed as an entry error.
+                          </p>
+                        </div>
                       ) : (
-                        admin && (
+                        <p className="billing-help">
+                          Available to refund: {money(refundable / 100)}
+                        </p>
+                      )}
+                      {admin && (
+                        <div className="billing-payment-actions billing-admin-action">
                           <button
-                            className="button button-ghost button-small billing-admin-action"
-                            disabled={!!draft || blocked || busy}
+                            className="button button-secondary button-small"
+                            disabled={!!draft || blocked || busy || refundable <= 0}
+                            onClick={() => start('refund', payment.id)}
+                          >
+                            Record external refund
+                          </button>
+                          <button
+                            className="button button-ghost button-small"
+                            disabled={!!draft || blocked || busy || !!reversal || returned > 0}
                             onClick={() => start('reversal', payment.id)}
                           >
                             <Undo2 size={14} />
                             Reverse erroneous entry
                           </button>
-                        )
+                        </div>
                       )}
                     </article>
                   );
@@ -1129,6 +1237,32 @@ function InvoiceView({
                 <p className="muted small">No payments have been recorded.</p>
               )}
             </section>
+            {data.refunds.length > 0 && (
+              <section className="billing-refund-history">
+                <h3>Recorded external refunds</h3>
+                <p className="billing-help">
+                  Money staff confirm was returned outside Derma. Reasons, references and
+                  attribution are shared with the patient. Newest first.
+                </p>
+                {data.refunds.map((refund) => (
+                  <article className="billing-refund-entry" key={refund.id}>
+                    <h4>
+                      {money(refund.amountPaise / 100)} · {refund.method.toUpperCase()}
+                    </h4>
+                    <p className="billing-help">
+                      Recorded by {refund.createdByName} · {billingStamp(refund.createdAt)} IST ·
+                      Original payment entry {refund.paymentId.slice(-8)}
+                    </p>
+                    <p className="billing-shared-reason">{refund.reason}</p>
+                    <p>Reference: {refund.reference || 'Not recorded (cash)'}</p>
+                    <p className="billing-help">
+                      Net recorded paid {money(refund.beforePaidPaise / 100)} →{' '}
+                      {money(refund.afterPaidPaise / 100)}. Charges were unchanged.
+                    </p>
+                  </article>
+                ))}
+              </section>
+            )}
             {staff &&
               !blocked &&
               (!currentDraft || currentDraft.kind === 'payment') &&
@@ -1200,8 +1334,10 @@ function InvoiceView({
               </section>
             )}
             <p className="billing-help">
-              This invoice shows current recorded charges and net payment entries. Corrections and
-              mistaken-entry reversals do not move money or record a refund.
+              This invoice shows current charges and net recorded payments after entry reversals and
+              external refunds. Recording a refund leaves charges unchanged, so a balance may
+              reopen. Staff can correct charges separately if intended. Derma does not transfer
+              money.
             </p>
             <button
               className="button button-secondary billing-no-print"
@@ -1236,6 +1372,8 @@ function BillingUpdateForm({
   onReviewed: (detail: InvoiceDetail) => void;
 }) {
   const toast = useToast();
+  const { session } = useSession();
+  const begin = useBillingGuard();
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -1243,11 +1381,13 @@ function BillingUpdateForm({
       mounted.current = false;
     };
   }, []);
-  const locked = busy || draft.phase !== 'editing';
+  const locked = busy || draft.phase !== 'editing' || !!draft.attempt;
   const payment = draft.source.payments.find((entry) => entry.id === draft.paymentId);
   const reversed =
-    draft.kind === 'reversal' &&
+    (draft.kind === 'reversal' || draft.kind === 'refund') &&
     draft.source.reversals.some((entry) => entry.paymentId === draft.paymentId);
+  const returned = payment ? refundedAmount(draft.source, payment.id) : 0;
+  const refundable = payment ? remainingRefund(draft.source, payment) : 0;
   let preview: InvoiceItem[] | null = null;
   try {
     preview = invoiceItems(draft.items, true);
@@ -1279,7 +1419,7 @@ function BillingUpdateForm({
       };
     }
     if (!draft.reason.trim())
-      throw new Error('Enter the correction reason that will be shared with the patient.');
+      throw new Error('Enter the reason that will be shared with the patient.');
     const common = {
       reason: draft.reason.trim(),
       expectedRevision: draft.source.revision,
@@ -1291,7 +1431,7 @@ function BillingUpdateForm({
         throw new Error('Change at least one charge before saving a correction.');
       if (chargeTotal(items) < draft.source.invoice.paidPaise)
         throw new Error(
-          'Corrected charges cannot be less than net recorded payments. This workflow does not record refunds.',
+          'Corrected charges cannot be less than net recorded payments. Record any completed external refund separately before reducing charges.',
         );
       if (!items.length && !draft.removeAllChargesConfirmed)
         throw new Error('Confirm that this invoice should have no charges.');
@@ -1304,6 +1444,30 @@ function BillingUpdateForm({
       throw new Error(
         'This payment is unavailable or already has an entry reversal. Review the current invoice.',
       );
+    if (draft.kind === 'refund') {
+      const amountPaise = paise(draft.amount),
+        reference = draft.reference.trim();
+      if (amountPaise > refundable)
+        throw new Error(
+          'The refund exceeds the remaining amount on this original payment. Review the latest invoice.',
+        );
+      if (draft.method !== 'cash' && !reference)
+        throw new Error('Enter the refund reference for a non-cash refund.');
+      if (!draft.refundedExternallyConfirmed)
+        throw new Error('Confirm that this money has already been returned outside Derma.');
+      return {
+        path: `${base}/payments/${payment.id}/refunds`,
+        body: {
+          ...common,
+          amountPaise,
+          method: draft.method,
+          reference,
+          refundedExternallyConfirmed: true,
+        },
+      };
+    }
+    if (returned > 0)
+      throw new Error('A payment with a recorded refund cannot be reversed as an entry error.');
     if (!draft.entryErrorConfirmed)
       throw new Error('Confirm that the payment entry was recorded in error.');
     return {
@@ -1314,16 +1478,58 @@ function BillingUpdateForm({
   function verifyResponse(
     value: unknown,
     submitted: { path: string; body: Record<string, unknown> },
+    actorId: string,
   ) {
-    const result = checkedInvoiceDetail(value, draft.invoiceId);
+    const result = checkedInvoiceDetail(
+      draft.kind === 'refund' && billingRecord(value) ? value.detail : value,
+      draft.invoiceId,
+    );
     if (
       result.invoice.patientId !== draft.source.invoice.patientId ||
       result.invoice.number !== draft.source.invoice.number ||
-      result.invoice.procedureId !== draft.source.invoice.procedureId
+      result.invoice.procedureId !== draft.source.invoice.procedureId ||
+      result.invoice.procedureTitle !== draft.source.invoice.procedureTitle ||
+      result.invoice.createdAt !== draft.source.invoice.createdAt ||
+      result.invoice.patientName !== draft.source.invoice.patientName ||
+      !sameBillingValue(result.issuedCharges, draft.source.issuedCharges)
     )
       throw new Error(
         'The response did not match the original invoice identity. Retry the same request.',
       );
+    if (draft.kind === 'refund') {
+      if (
+        !billingRecord(value) ||
+        !validRefund(value.refund, draft.invoiceId) ||
+        !billingRecord(value.receipt)
+      )
+        throw new Error(
+          'The response did not confirm the complete external refund receipt. Retry the same request.',
+        );
+      const refund = value.refund,
+        receipt = value.receipt;
+      if (
+        receipt.requestId !== submitted.body.requestId ||
+        receipt.actorId !== actorId ||
+        receipt.invoiceId !== draft.invoiceId ||
+        receipt.paymentId !== draft.paymentId ||
+        receipt.expectedRevision !== submitted.body.expectedRevision ||
+        receipt.refundId !== refund.id ||
+        refund.paymentId !== draft.paymentId ||
+        refund.amountPaise !== submitted.body.amountPaise ||
+        refund.method !== submitted.body.method ||
+        refund.reference !== submitted.body.reference ||
+        refund.reason !== submitted.body.reason ||
+        refund.refundedExternallyConfirmed !== true ||
+        refund.beforePaidPaise !== draft.source.invoice.paidPaise ||
+        refund.afterPaidPaise !== draft.source.invoice.paidPaise - refund.amountPaise ||
+        draft.source.refunds.some((prior) => prior.id === refund.id) ||
+        result.revision === draft.source.revision ||
+        !result.refunds.some((entry) => sameBillingValue(entry, refund))
+      )
+        throw new Error(
+          'The response did not match this exact external refund request and its original payment. Retry the same request.',
+        );
+    }
     if (
       draft.kind === 'payment' &&
       !result.payments.some(
@@ -1377,26 +1583,42 @@ function BillingUpdateForm({
       update({ error: billingError(problem) });
       return;
     }
-    onChange({ ...draft, attempt: submitted, error: '' });
+    const current = begin(),
+      actorId = draft.actorId ?? session.user?.id;
+    if (!current() || !actorId) return;
+    const wasUncertain = draft.phase === 'uncertain';
+    onChange({ ...draft, actorId, attempt: submitted, phase: 'uncertain', error: '' });
     setBusy(true);
     try {
       verifyResponse(
-        await api<unknown>(submitted.path, { method: 'POST', body: submitted.body }),
+        await api<unknown>(submitted.path, {
+          method: 'POST',
+          body: submitted.body,
+          isCurrent: current,
+        }),
         submitted,
+        actorId,
       );
-      if (!mounted.current) return;
+      if (!current()) return;
+      // The saved form unmounts when onSaved clears its draft. Release the parent modal
+      // before that unmount so its close/print controls cannot remain stuck busy.
+      setBusy(false);
       toast(
         draft.kind === 'charges'
           ? 'Charge correction saved and shared with the patient.'
           : draft.kind === 'reversal'
             ? 'Mistaken payment entry reversed. No money was returned.'
-            : 'Received payment recorded.',
+            : draft.kind === 'refund'
+              ? 'External refund recorded and shared with the patient. No money was transferred by Derma.'
+              : 'Received payment recorded.',
       );
       await onSaved();
     } catch (problem) {
-      if (!mounted.current) return;
+      if (!current()) return;
       const error = billingError(problem);
-      if (problem instanceof ApiError && [400, 403, 404, 422].includes(problem.status))
+      if (wasUncertain)
+        onChange({ ...draft, actorId, attempt: submitted, phase: 'uncertain', error });
+      else if (problem instanceof ApiError && [400, 403, 404, 422, 429].includes(problem.status))
         onChange({ ...draft, phase: 'editing', attempt: null, error });
       else if (
         problem instanceof ApiError &&
@@ -1404,27 +1626,29 @@ function BillingUpdateForm({
         !/request.*already used|request ID.*used/i.test(error)
       )
         onChange({ ...draft, attempt: submitted, phase: 'conflict', reviewed: null, error });
-      else onChange({ ...draft, attempt: submitted, phase: 'uncertain', error });
+      else onChange({ ...draft, actorId, attempt: submitted, phase: 'uncertain', error });
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   }
   async function refreshLatest() {
     if (busy) return;
+    const current = begin();
+    update({ reviewed: null, error: '' });
     setBusy(true);
     try {
       const reviewed = checkedInvoiceDetail(
-        await api<unknown>(`/api/invoices/${draft.invoiceId}`),
+        await api<unknown>(`/api/invoices/${draft.invoiceId}`, { isCurrent: current }),
         draft.invoiceId,
       );
-      if (mounted.current) {
+      if (current()) {
         update({ reviewed, error: '' });
         onReviewed(reviewed);
       }
     } catch (problem) {
-      if (mounted.current) update({ error: billingError(problem) });
+      if (current()) update({ error: billingError(problem), reviewed: null });
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   }
   const title =
@@ -1432,10 +1656,12 @@ function BillingUpdateForm({
       ? 'Correct invoice charges'
       : draft.kind === 'reversal'
         ? 'Reverse an erroneous payment entry'
-        : 'Record a received payment';
+        : draft.kind === 'refund'
+          ? 'Record external refund'
+          : 'Record a received payment';
   return (
     <form
-      className={`stack billing-edit-panel ${draft.kind === 'charges' ? 'billing-correction-form' : draft.kind === 'reversal' ? 'billing-reversal-form' : 'payment-form'}`}
+      className={`stack billing-edit-panel ${draft.kind === 'charges' ? 'billing-correction-form' : draft.kind === 'reversal' ? 'billing-reversal-form' : draft.kind === 'refund' ? 'billing-refund-form' : 'payment-form'}`}
       onSubmit={save}
     >
       <h3>{title}</h3>
@@ -1481,8 +1707,8 @@ function BillingUpdateForm({
           )}
           {preview && chargeTotal(preview) < draft.source.invoice.paidPaise && (
             <p className="notice">
-              Corrected charges must cover net recorded payments. This workflow does not record
-              refunds.
+              Corrected charges must cover net recorded payments. If money has been returned, record
+              the external refund on the original payment before reducing these charges.
             </p>
           )}
         </>
@@ -1512,7 +1738,7 @@ function BillingUpdateForm({
               type="checkbox"
               required
               checked={draft.entryErrorConfirmed}
-              disabled={locked || reversed}
+              disabled={locked || reversed || returned > 0}
               onChange={(event) => update({ entryErrorConfirmed: event.target.checked })}
             />
             I confirm this payment was recorded in error; this does not return money.
@@ -1521,6 +1747,96 @@ function BillingUpdateForm({
             <p className="notice">
               This payment entry has already been reversed. Cancel this draft to return to its
               history.
+            </p>
+          )}
+          {returned > 0 && (
+            <p className="notice">
+              This payment has a recorded external refund and cannot be reversed as an entry error.
+            </p>
+          )}
+        </>
+      ) : draft.kind === 'refund' ? (
+        <>
+          <div className="notice billing-refund-boundary">
+            <p>
+              Record only money already returned outside Derma. This action does not send money or
+              initiate a refund. The reason and reference are shared with the patient.
+            </p>
+            <p>
+              Invoice charges stay unchanged and the balance due increases by the recorded refund.
+              Correct charges separately if the clinic intends to reduce them.
+            </p>
+          </div>
+          <div className="billing-refund-source">
+            <h4>Original payment</h4>
+            <strong>
+              {payment
+                ? `${money(payment.amountPaise / 100)} · ${payment.method.toUpperCase()}`
+                : 'Payment unavailable'}
+            </strong>
+            {payment && (
+              <p>
+                {billingStamp(payment.createdAt)} IST ·{' '}
+                {payment.reference || 'No reference recorded'} · Entry {payment.id.slice(-8)}
+              </p>
+            )}
+            <p>Previously refunded: {money(returned / 100)}</p>
+            <p>
+              Available to refund: <strong>{money(refundable / 100)}</strong>
+            </p>
+          </div>
+          <div className="form-grid">
+            <Field label="Refund amount (₹)">
+              <input
+                type="number"
+                required
+                min="0.01"
+                max={refundable / 100}
+                step="0.01"
+                value={draft.amount}
+                disabled={locked || refundable <= 0}
+                onChange={(event) => update({ amount: event.target.value })}
+              />
+            </Field>
+            <Field label="Refund method">
+              <select
+                value={draft.method}
+                disabled={locked}
+                onChange={(event) => update({ method: event.target.value as Payment['method'] })}
+              >
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="card">Card</option>
+                <option value="bank">Bank transfer</option>
+              </select>
+            </Field>
+          </div>
+          <Field
+            label="Refund reference"
+            hint="Required for non-cash refunds. This reference is visible to the patient; do not enter account secrets."
+          >
+            <input
+              required={draft.method !== 'cash'}
+              maxLength={200}
+              value={draft.reference}
+              disabled={locked}
+              onChange={(event) => update({ reference: event.target.value })}
+            />
+          </Field>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              required
+              checked={draft.refundedExternallyConfirmed}
+              disabled={locked || refundable <= 0}
+              onChange={(event) => update({ refundedExternallyConfirmed: event.target.checked })}
+            />
+            I confirm this money has already been returned to the patient outside Derma.
+          </label>
+          {refundable <= 0 && (
+            <p className="notice">
+              No amount remains available to refund on this payment. Cancel this draft to return to
+              its preserved history.
             </p>
           )}
         </>
@@ -1564,8 +1880,8 @@ function BillingUpdateForm({
       )}
       {draft.kind !== 'payment' && (
         <Field
-          label="Reason shared with patient"
-          hint="Explain the correction clearly; this reason becomes part of the shared invoice history."
+          label={draft.kind === 'refund' ? 'Reason for refund' : 'Reason shared with patient'}
+          hint="This reason becomes part of the invoice history shared with the patient."
         >
           <textarea
             required
@@ -1595,7 +1911,10 @@ function BillingUpdateForm({
       {draft.phase === 'conflict' && (
         <div className="notice billing-conflict">
           <strong>Review the current invoice before saving.</strong>
-          <p>Your draft is preserved. Charges, payment entries or reversals may have changed.</p>
+          <p>
+            Your draft is preserved. Charges, payment entries, refunds or reversals may have
+            changed.
+          </p>
           {draft.reviewed ? (
             <>
               <h4>Latest saved invoice</h4>
@@ -1614,6 +1933,32 @@ function BillingUpdateForm({
                 draft.reviewed.reversals.some((entry) => entry.paymentId === draft.paymentId) && (
                   <p>This payment has already been reversed.</p>
                 )}
+              {(draft.kind === 'refund' || draft.kind === 'reversal') && payment && (
+                <div className="billing-refund-reviewed">
+                  <p>
+                    Latest recorded external refunds on this payment:{' '}
+                    {money(refundedAmount(draft.reviewed, payment.id) / 100)}.
+                  </p>
+                  <p>
+                    Available to refund: {money(remainingRefund(draft.reviewed, payment) / 100)}.
+                  </p>
+                  {draft.reviewed.reversals.some((entry) => entry.paymentId === payment.id) && (
+                    <p>This original payment has been reversed and cannot receive a refund.</p>
+                  )}
+                  {draft.reviewed.refunds
+                    .filter(
+                      (entry) =>
+                        entry.paymentId === payment.id &&
+                        !draft.source.refunds.some((old) => old.id === entry.id),
+                    )
+                    .map((entry) => (
+                      <p key={entry.id}>
+                        {entry.createdByName} · {billingStamp(entry.createdAt)} IST ·{' '}
+                        {money(entry.amountPaise / 100)} · {entry.reason}
+                      </p>
+                    ))}
+                </div>
+              )}
               <p>Your draft will be used as shown. Review it before preparing a new request.</p>
               <button
                 className="button button-secondary"
@@ -1628,6 +1973,8 @@ function BillingUpdateForm({
                     requestId: crypto.randomUUID(),
                     removeAllChargesConfirmed: false,
                     entryErrorConfirmed: false,
+                    refundedExternallyConfirmed: false,
+                    actorId: null,
                     error: '',
                   })
                 }
@@ -1654,7 +2001,9 @@ function BillingUpdateForm({
               ? 'Cancel correction'
               : draft.kind === 'reversal'
                 ? 'Cancel reversal'
-                : 'Clear payment draft'}
+                : draft.kind === 'refund'
+                  ? 'Cancel refund draft'
+                  : 'Clear payment draft'}
           </button>
         )}
         <button
@@ -1667,7 +2016,9 @@ function BillingUpdateForm({
                 (!changed ||
                   (!draft.items.length && !draft.removeAllChargesConfirmed) ||
                   (preview !== null && chargeTotal(preview) < draft.source.invoice.paidPaise))) ||
-                (draft.kind === 'reversal' && !draft.entryErrorConfirmed) ||
+                (draft.kind === 'reversal' && (!draft.entryErrorConfirmed || returned > 0)) ||
+                (draft.kind === 'refund' &&
+                  (!draft.refundedExternallyConfirmed || refundable <= 0)) ||
                 reversed))
           }
         >
@@ -1679,7 +2030,9 @@ function BillingUpdateForm({
                 ? 'Save charge correction'
                 : draft.kind === 'reversal'
                   ? 'Confirm entry reversal'
-                  : 'Record received payment'}
+                  : draft.kind === 'refund'
+                    ? 'Record refund'
+                    : 'Record received payment'}
         </button>
       </div>
     </form>

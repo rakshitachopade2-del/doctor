@@ -237,6 +237,41 @@ function SummaryInvoiceHistory({ history }: { history: InvoiceHistory }) {
           ))}
         </>
       )}
+      {(history.refunds ?? []).length > 0 && (
+        <>
+          <h4>Recorded external refunds</h4>
+          <p>
+            These records confirm that staff recorded money returned outside Derma. The application
+            did not transfer money. Invoice charges were unchanged by these refund records.
+          </p>
+          {history.refunds.map((refund) => (
+            <div key={refund.id} className="care-summary-event care-summary-refund">
+              <h5>External refund recorded</h5>
+              <p className="care-summary-source">
+                {refund.createdByName} · {timestamp(refund.createdAt)} IST
+              </p>
+              <Detail label="Reason shared with patient" value={refund.reason} />
+              <div className="care-summary-details">
+                <Detail label="Recorded refund amount" value={money(refund.amountPaise / 100)} />
+                <Detail label="Refund method" value={refund.method.toUpperCase()} />
+                <Detail
+                  label="Refund reference"
+                  value={refund.reference || 'Not recorded (cash)'}
+                />
+                <Detail label="Original payment entry" value={refund.paymentId.slice(-8)} />
+                <Detail
+                  label="Net paid before this refund"
+                  value={money(refund.beforePaidPaise / 100)}
+                />
+                <Detail
+                  label="Net paid after this refund"
+                  value={money(refund.afterPaidPaise / 100)}
+                />
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

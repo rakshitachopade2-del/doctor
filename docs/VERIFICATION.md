@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.26.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.27.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 485 passed                                              |
-| Browser and accessibility tests | 86 passed                                               |
+| API and online-backup tests     | 499 passed                                              |
+| Browser and accessibility tests | 90 passed (full sweep plus targeted checks)             |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -121,3 +121,9 @@ Screenshots use only synthetic demonstration records:
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
 CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling, follow-up-escalation, MFA, procedure-catalogue, authentication-security, public-library, knowledge-authoring, appointment-series, saved-care-summary and series-cancellation workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+
+The 13 external-refund API tests cover positive integer amounts, explicit external-completion confirmation, cash/noncash references, partial/full refunds and per-original-payment caps. They verify charge and payment preservation, reopened balances, subsequent charge corrections/new receipts, mutual exclusion with erroneous-payment reversals, safe patient/staff history, cross-patient isolation, live summary revision changes and frozen saved copies. Exact actor/source/action/payload/revision-bound command receipts survive later state and account-name changes. Forty-two transaction-time account/session/CSRF/MFA race combinations, six injected write failures, independent concurrent connections, stale source races, true restart persistence and legacy database migration are checked. The reporting regression additionally verifies exact IST midnight boundaries, original-payment date independence, gross collections, negative net amounts, signed CSV numbers, aggregate privacy and indexed refund-date lookup.
+
+Four refund browser journeys exercise administrator partial/full recording, unchanged original charges/payments/procedure links, per-payment remaining amounts, patient and reception views, print and shared care summaries. They verify over-refund prevention, explicit stale-draft review, malformed successful responses followed by rejection and wrong-actor receipts, exact retries after later changes, recoverable reads and navigation-away authorization/completion isolation. Mobile invoice/history views and a refund-only negative reporting period receive accessibility checks and screenshots. The compatibility journey serves an authentic saved schema-1 copy with the later refunds field absent and matching retained hash/byte metadata, verifies unchanged rendering and exact downloaded bytes, and confirms that a live summary missing the field fails closed until a valid retry. The 89-test full sweep passed 88 checks and exposed one old report assertion tied to a column position; after changing it to find named financial columns, that report journey and the new compatibility journey both passed. This verifies 90 distinct browser checks on the final application source.
+
+Both local and disposable Docker production smoke checks record synthetic partial and remaining refunds, reject stale/over-limit attempts and erroneous reversal of a refunded payment, explicitly remove charges after the full refund, then replay the original refund against the later invoice. They verify patient history and activity, private receipt-field exclusion, changed live summary with unchanged saved-copy download bytes, separate refund/net report and CSV totals, and anonymous/patient mutation denial. No payment provider is contacted, no money is moved and nothing is deployed.

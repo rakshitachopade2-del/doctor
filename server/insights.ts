@@ -4,6 +4,7 @@ import type { AuthRequest } from './app.ts';
 import { reversedPaymentIds } from './billing-corrections.ts';
 import type { Appointment, AppointmentStatus, User } from '../shared/types.ts';
 import type { Invoice, Payment } from '../shared/operations.ts';
+import type { PaymentRefund } from '../shared/billing-corrections.ts';
 import {
   expenseCategories,
   type ClinicExpense,
@@ -65,7 +66,10 @@ function recordedDate(timestamp: string) {
 export function escapeCsvCell(value: string | number) {
   const text = String(value);
   const safe =
-    /^[\s\u0000-\u001f]*[=+\-@]/u.test(text) || /^[\t\r\n]/u.test(text) ? `'${text}` : text;
+    typeof value === 'string' &&
+    (/^[\s\u0000-\u001f]*[=+\-@]/u.test(text) || /^[\t\r\n]/u.test(text))
+      ? `'${text}`
+      : text;
   return `"${safe.replaceAll('"', '""')}"`;
 }
 
@@ -240,6 +244,8 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
       noShowAppointments: 0,
       invoicedPaise: 0,
       collectionsPaise: 0,
+      refundsPaise: 0,
+      netCollectionsPaise: 0,
       expensesPaise: 0,
     }));
     const byDay = new Map(daily.map((day) => [day.date, day]));
@@ -255,7 +261,10 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
         invoicedPaise: 0,
         issuedInvoiceOutstandingPaise: 0,
         paymentCount: 0,
+        refundCount: 0,
         collectionsPaise: 0,
+        refundsPaise: 0,
+        netCollectionsPaise: 0,
         expenseCount: 0,
         expensesPaise: 0,
       },
@@ -270,6 +279,7 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
         amountPaise: 0,
       })),
       collectionsByMethod: paymentMethods.map((method) => ({ method, count: 0, amountPaise: 0 })),
+      refundsByMethod: paymentMethods.map((method) => ({ method, count: 0, amountPaise: 0 })),
       daily,
     };
     const patients = new Set<string>();
@@ -312,6 +322,25 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
       method.count++;
       method.amountPaise = addMoney(method.amountPaise, payment.amountPaise);
     }
+    // ISO UTC bounds represent inclusive clinic dates without decoding unrelated history.
+    const refundFrom = new Date(`${from}T00:00:00.000+05:30`).toISOString();
+    const refundTo = new Date(`${to}T23:59:59.999+05:30`).toISOString();
+    for (const row of db
+      .prepare(
+        'SELECT data FROM paymentRefunds WHERE createdAt>=? AND createdAt<=? ORDER BY createdAt,id',
+      )
+      .all(refundFrom, refundTo)) {
+      const refund = JSON.parse(String(row.data)) as PaymentRefund;
+      const day = byDay.get(recordedDate(refund.createdAt))!;
+      const method = result.refundsByMethod.find((entry) => entry.method === refund.method)!;
+      result.totals.refundCount++;
+      result.totals.refundsPaise = addMoney(result.totals.refundsPaise, refund.amountPaise);
+      day.refundsPaise = addMoney(day.refundsPaise, refund.amountPaise);
+      method.count++;
+      method.amountPaise = addMoney(method.amountPaise, refund.amountPaise);
+    }
+    result.totals.netCollectionsPaise = result.totals.collectionsPaise - result.totals.refundsPaise;
+    for (const day of daily) day.netCollectionsPaise = day.collectionsPaise - day.refundsPaise;
     for (const entry of expenses(from, to)) {
       if (entry.status === 'voided') continue;
       const day = byDay.get(entry.incurredDate)!;
@@ -354,6 +383,22 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
         '',
         'collectionsBasis',
         'Original manual payment recording timestamp in Asia/Kolkata; erroneous reversed entries excluded; actual receipt date is not separately stored',
+        '',
+        '',
+      ],
+      [
+        'metadata',
+        '',
+        'refundsBasis',
+        'Manual refund recording timestamp in Asia/Kolkata; original payment date does not control inclusion; actual transfer date is not separately stored',
+        '',
+        '',
+      ],
+      [
+        'metadata',
+        '',
+        'netCollectionsBasis',
+        'Period recorded collections less period recorded refunds; may be negative; not profit or bank reconciliation',
         '',
         '',
       ],
@@ -407,6 +452,8 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
         row.count,
         row.amountPaise,
       ]);
+    for (const row of report.refundsByMethod)
+      rows.push(['refundsByMethod', '', 'recordedRefunds', row.method, row.count, row.amountPaise]);
     for (const row of report.expensesByCategory)
       rows.push([
         'expensesByCategory',

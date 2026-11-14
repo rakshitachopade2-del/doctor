@@ -1,4 +1,4 @@
-import type { Invoice, InvoiceItem } from './operations';
+import type { Invoice, InvoiceDetail, InvoiceItem, Payment } from './operations';
 
 export interface InvoiceCharges {
   items: InvoiceItem[];
@@ -31,9 +31,48 @@ export interface PaymentReversal {
   createdByName: string;
   createdAt: string;
 }
+/** A record of money already returned outside this application. */
+export interface PaymentRefund {
+  id: string;
+  invoiceId: string;
+  paymentId: string;
+  amountPaise: number;
+  method: Payment['method'];
+  reference: string;
+  /** Shared with the patient, including the reason for the recorded refund. */
+  reason: string;
+  refundedExternallyConfirmed: true;
+  beforePaidPaise: number;
+  afterPaidPaise: number;
+  createdByName: string;
+  createdAt: string;
+}
+export interface PaymentRefundInput {
+  amountPaise: number;
+  method: Payment['method'];
+  reference: string;
+  reason: string;
+  refundedExternallyConfirmed: true;
+  expectedRevision: string;
+  requestId: string;
+}
+export interface PaymentRefundMutation {
+  detail: InvoiceDetail;
+  refund: PaymentRefund;
+  /** Returned only to the currently authorized administrator executing this command. */
+  receipt: {
+    requestId: string;
+    actorId: string;
+    invoiceId: string;
+    paymentId: string;
+    expectedRevision: string;
+    refundId: string;
+  };
+}
 export interface InvoiceHistory {
   invoiceId: string;
   issuedCharges: InvoiceCharges;
   corrections: InvoiceCorrection[];
   reversals: PaymentReversal[];
+  refunds: PaymentRefund[];
 }

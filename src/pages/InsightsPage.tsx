@@ -59,6 +59,13 @@ const methodLabels: Record<string, string> = {
 };
 const series = [
   { key: 'collectionsPaise', label: 'Recorded collections', currency: true, color: '#286455' },
+  { key: 'refundsPaise', label: 'Recorded refunds', currency: true, color: '#8b5353' },
+  {
+    key: 'netCollectionsPaise',
+    label: 'Net recorded collections',
+    currency: true,
+    color: '#49699b',
+  },
   { key: 'expensesPaise', label: 'Recorded expenses', currency: true, color: '#87622c' },
   { key: 'invoicedPaise', label: 'Invoices issued', currency: true, color: '#4c6284' },
   { key: 'appointmentCount', label: 'Appointments', currency: false, color: '#517440' },
@@ -273,6 +280,7 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
     !totals.appointmentCount &&
     !totals.invoiceCount &&
     !totals.paymentCount &&
+    !totals.refundCount &&
     !totals.expenseCount;
   return (
     <>
@@ -294,8 +302,8 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
       </div>
       {empty && (
         <div className="notice">
-          No appointments, invoices, payment records or recorded expenses match this period. The
-          report shows zero activity.
+          No appointments, invoices, payment records, refunds or recorded expenses match this
+          period. The report shows zero activity.
         </div>
       )}
       <div className="insights-metrics">
@@ -310,6 +318,16 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
           detail={`${number(totals.paymentCount)} non-reversed received-payment entries originally recorded during this period.`}
         />
         <Metric
+          label="Recorded refunds"
+          value={amount(totals.refundsPaise)}
+          detail={`${number(totals.refundCount)} externally completed refunds recorded during this period.`}
+        />
+        <Metric
+          label="Net recorded collections"
+          value={amount(totals.netCollectionsPaise)}
+          detail="Recorded collections less refunds recorded in this period. This may be negative when earlier payments are refunded."
+        />
+        <Metric
           label="Recorded expenses"
           value={amount(totals.expensesPaise)}
           detail={`${number(totals.expenseCount)} expenses incurred during this period; currently voided entries excluded.`}
@@ -317,7 +335,7 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
         <Metric
           label="Outstanding on period invoices"
           value={amount(totals.issuedInvoiceOutstandingPaise)}
-          detail="Current corrected balance of invoices originally issued in this period, including later payment records and reversals of erroneous entries."
+          detail="Current corrected balance of invoices originally issued in this period, including later payment records, refunds and reversals of erroneous entries."
         />
       </div>
       <div className="insights-scope-note">
@@ -326,8 +344,11 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
           Current corrected invoice amounts use the original issue date. Collections exclude
           reversed erroneous entries and use each payment’s original recording date; actual receipt
           dates are not stored separately. A reversal corrects a recorded entry and does not return
-          money. Expenses use incurred dates. Outstanding is a current balance, not a balance at
-          period end. These records do not measure profit or reconcile a bank account.
+          money. Refunds use their own recording date, even when the original payment was recorded
+          earlier; the actual transfer date is not stored separately. Net collections subtract those
+          refunds from period collections. Expenses use incurred dates. Outstanding is a current
+          balance, not a balance at period end. These records do not measure profit or reconcile a
+          bank account.
         </p>
       </div>
       <div className="insights-visit-summary">
@@ -373,6 +394,16 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
           countLabel="Payments"
         />
         <MoneyBreakdown
+          title="Refunds by method"
+          description="Externally completed refunds, by their recording date and return method."
+          rows={data.refundsByMethod.map((row) => ({
+            label: methodLabels[row.method] ?? row.method,
+            count: row.count,
+            amountPaise: row.amountPaise,
+          }))}
+          countLabel="Refunds"
+        />
+        <MoneyBreakdown
           title="Expenses by category"
           description="Incurred dates in the period, excluding currently voided entries."
           rows={data.expensesByCategory.map((row) => ({
@@ -408,14 +439,17 @@ function DailyInsights({ data }: { data: InsightsDay[] }) {
   const [page, setPage] = useState(0);
   const selected = series.find((value) => value.key === metric)!;
   const values = data.map((day) => day[metric]);
-  const maximum = Math.max(0, ...values);
+  const maximum = Math.max(...values);
+  const minimum = Math.min(...values);
+  const lowerBound = Math.min(0, minimum);
+  const span = Math.max(0, maximum) - lowerBound;
   const total = values.reduce((sum, value) => sum + value, 0);
   const formatValue = (value: number) => (selected.currency ? amount(value) : number(value));
   const pageSize = 14;
   const shown = data.slice(page * pageSize, (page + 1) * pageSize);
   const chartId = useId();
   const x = (index: number) => (data.length === 1 ? 300 : 8 + (index / (data.length - 1)) * 584);
-  const y = (value: number) => 172 - (maximum ? (value / maximum) * 160 : 0);
+  const y = (value: number) => 172 - (span ? ((value - lowerBound) / span) * 160 : 0);
   const points = values.map((value, index) => `${x(index)},${y(value)}`).join(' ');
   return (
     <Card className="insights-daily-card">
@@ -443,11 +477,11 @@ function DailyInsights({ data }: { data: InsightsDay[] }) {
         </span>
         <strong>Period total {formatValue(total)}</strong>
       </div>
-      {maximum ? (
+      {span ? (
         <div className="insights-chart">
           <div className="insights-chart-scale">
             <span>Daily maximum {formatValue(maximum)}</span>
-            <span>Baseline {selected.currency ? '₹0' : '0'}</span>
+            <span>Daily minimum {formatValue(minimum)}</span>
           </div>
           <svg
             viewBox="0 0 600 180"
@@ -459,7 +493,8 @@ function DailyInsights({ data }: { data: InsightsDay[] }) {
             <title id={`${chartId}-title`}>{selected.label} by day</title>
             <desc id={`${chartId}-description`}>
               {data.length} days. Period total {formatValue(total)}; highest daily value{' '}
-              {formatValue(maximum)}. Exact daily values follow in the table.
+              {formatValue(maximum)}; lowest daily value {formatValue(minimum)}. Exact daily values
+              follow in the table.
             </desc>
             {[12, 52, 92, 132, 172].map((value) => (
               <line
@@ -472,6 +507,15 @@ function DailyInsights({ data }: { data: InsightsDay[] }) {
                 strokeWidth="1"
               />
             ))}
+            <line
+              x1="0"
+              x2="600"
+              y1={y(0)}
+              y2={y(0)}
+              stroke="#8c9e84"
+              strokeWidth="1"
+              strokeDasharray="4 4"
+            />
             <polyline
               points={points}
               fill="none"
@@ -523,6 +567,8 @@ function DailyInsights({ data }: { data: InsightsDay[] }) {
               <th scope="col">No show</th>
               <th scope="col">Invoiced</th>
               <th scope="col">Collections</th>
+              <th scope="col">Refunds</th>
+              <th scope="col">Net collections</th>
               <th scope="col">Expenses</th>
             </tr>
           </thead>
@@ -536,6 +582,8 @@ function DailyInsights({ data }: { data: InsightsDay[] }) {
                 <td>{number(day.noShowAppointments)}</td>
                 <td>{amount(day.invoicedPaise)}</td>
                 <td>{amount(day.collectionsPaise)}</td>
+                <td>{amount(day.refundsPaise)}</td>
+                <td>{amount(day.netCollectionsPaise)}</td>
                 <td>{amount(day.expensesPaise)}</td>
               </tr>
             ))}

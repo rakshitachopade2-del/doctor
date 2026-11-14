@@ -103,6 +103,7 @@
 .billing-edit-panel,
 .billing-current-charges,
 .billing-correction-history,
+.billing-refund-history,
 .billing-issued-charges {
   min-width: 0;
 }
@@ -228,6 +229,9 @@
   color: #586b52;
 }
 .billing-payment-record,
+.billing-refund-source,
+.billing-refund-entry,
+.billing-refunded-payment,
 .billing-reversal-record,
 .billing-reversal-target,
 .billing-shared-reason {
@@ -252,6 +256,7 @@
   font-size: 12px;
 }
 .billing-issued-charges,
+.billing-refund-history,
 .billing-correction-history {
   border-top: 1px solid #dfe7d9;
   padding-top: 20px;
@@ -261,15 +266,51 @@
   align-items: center;
   gap: 8px;
 }
-.billing-correction-record {
+.billing-correction-record,
+.billing-refund-entry {
   padding: 18px;
   border: 1px solid #dfe7d9;
   border-radius: 9px;
   margin-top: 14px;
 }
-.billing-correction-record h4 {
+.billing-correction-record h4,
+.billing-refund-entry h4 {
   margin: 0;
   overflow-wrap: anywhere;
+}
+.billing-payment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.billing-payment-actions .button {
+  white-space: normal;
+  max-width: 100%;
+  height: auto;
+  min-height: 40px;
+}
+.billing-refund-boundary {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.billing-refund-boundary p:last-child {
+  margin-bottom: 0;
+}
+.billing-refund-source,
+.billing-refund-reviewed {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #dce5d7;
+  border-radius: 8px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.billing-refund-source h4 {
+  margin-top: 0;
+}
+.billing-refund-source p:last-child,
+.billing-refund-reviewed p:last-child {
+  margin-bottom: 0;
 }
 .billing-shared-reason {
   font-size: 13px;
@@ -304,7 +345,8 @@
   .billing-form-actions .button {
     width: 100%;
   }
-  .billing-correction-record {
+  .billing-correction-record,
+  .billing-refund-entry {
     padding: 13px;
   }
 }
