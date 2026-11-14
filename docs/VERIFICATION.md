@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.15.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.16.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 298 passed                                              |
-| Browser and accessibility tests | 53 passed                                               |
+| API and online-backup tests     | 319 passed                                              |
+| Browser and accessibility tests | 56 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -42,6 +42,12 @@ The 18 procedure-scheduling API checks cover attachment/replacement/removal with
 
 Procedure-scheduling browser journeys exercise reception link replacement/removal, patient record and summary updates, preserved bookings/resources/agreements/invoices, current cancelled-visit status, lost or misattributed responses, exact retries after the current association has advanced, explicit source and target conflict review, and refreshed candidate selection. Worklist/candidate fixtures cross the 25-row page boundary, filter and reset dates, open exact records outside the current search, and retain terminal histories. New completion snapshots and explicitly unlinked completion are exercised. Mobile worklist, editor/history, patient procedure and summary views include accessibility checks. The fresh production smoke check verifies an empty private worklist, a synthetic clinician-authored plan, attachment/replay/removal/relink, current versus original association, retained booking and procedure invoice identity, patient-safe summary content and logout guards.
 
+The 21 follow-up escalation API tests cover disabled defaults, strict schemas/queries, role/temporary-session/CSRF guards, actor-bound command replay, policy conflicts and immutable evidence. IST midnight tests verify owner-to-clinic transitions without counting the review date as overdue. Recipient checks exclude inactive, temporary and invalid clinician links, preserve exact snapshots, fall back when the owner is unavailable and leave unroutable plans eligible. Check-ins, read receipts, assignments and policy edits preserve episode identity; clinical/status reviews create new episodes. Tests exercise stale sources/recipients/module flags, unchanged clinical revisions and patient summaries, concurrent commands, notification/audit rollback, additive restart and a second application connection. A 225-plan fixture drains in 200/25 batches in oldest-date order without decoding clinical text. Worker checks verify startup catch-up, one unreferenced 900-second timer, shutdown cleanup, system attribution, bounded empty-poll metadata and truthful failure handling. An external SQLite writer verifies coherent preview/audit snapshots.
+
+Follow-up escalation browser journeys cover disabled defaults, editable owner/clinic thresholds, exact preview recipients, temporary-account exclusion, unavailable-owner fallback, clinic-stage escalation, duplicate suppression and zero-notice receipts. They verify policy conflicts retain drafts, refresh requires acknowledgment, misattributed policy confirmations remain uncertain, and exact retries preserve the original receipt even after later changes. Lost run responses and malformed recipient snapshots cannot create duplicate events or confirm incorrect results. Completed-plan deep links, doctor read-only access, paused-module continuity, patient/reception isolation, unchanged patient summaries/activity/clinical revisions and truthful worklist loading/error metrics are exercised. Desktop and 320-pixel policy, preview, receipt, history and worklist views include accessibility checks and synthetic screenshots. A direct-navigation style dependency discovered in screenshot review was corrected with scoped follow-up table styles.
+
+Fresh local and container production checks additionally verify the disabled initial escalation policy, actual startup worker/heartbeat, a synthetic overdue care plan, enable/preview/run/exact replay, one retained notice per stage, private history/activity and exclusion from patient-facing summaries. No external notice provider is used.
+
 Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout is also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
 
 Screenshots use only synthetic demonstration records:
@@ -54,4 +60,4 @@ Screenshots use only synthetic demonstration records:
 
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
-CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration and procedure-scheduling workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling and follow-up-escalation workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.

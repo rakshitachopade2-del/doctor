@@ -19,58 +19,60 @@ flowchart LR
 
 ## Code map
 
-| Path                                           | Responsibility                                                                            |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `src/App.tsx`                                  | Routing, role guards, public/clinic/patient layouts                                       |
-| `src/lib.tsx`                                  | API client, session context, load/error states, notifications, date/currency helpers      |
-| `src/components/ui.tsx`                        | Shared accessible UI, fields, modal focus handling                                        |
-| `src/components/DocumentsPanel.tsx`            | Private PDF-report list, upload agreement and authenticated downloads                     |
-| `src/components/ImageAnnotations.tsx`          | Versioned clinical overlays, explicit sharing, original images and patient viewer         |
-| `src/pages/CareSummaryPage.tsx`                | Patient-facing print view and revision-checked JSON download                              |
-| `server/image-annotations.ts`                  | Immutable annotation versions/publications, source provenance and private projections     |
-| `server/billing-corrections.ts`                | Immutable charge corrections and mistaken-payment reversals, safe histories and revisions |
-| `server/investigation-worklist.ts`             | Clinical result queues, private responsibility history and source-aware review retries    |
-| `server/care-summary.ts`                       | Authorized shared-care snapshots and stale-export rejection                               |
-| `src/components/PatientWaitlist.tsx`           | Patient request creation, withdrawal, history and booking links                           |
-| `src/pages/PatientPages.tsx`                   | Discovery, booking, intake, patient plans, history, images, messages                      |
-| `src/pages/ClinicPages.tsx`                    | Appointments, patient directory, records and treatment plans                              |
-| `src/pages/FollowUpPages.tsx`                  | Clinical worklist, review history, current check-ins and review submission                |
-| `src/pages/ActivityPage.tsx`                   | Account-scoped activity, cursor pagination and read-state controls                        |
-| `src/pages/ClinicalWorkflowPanel.tsx`          | Investigation orders/results/reviews, procedure records and encounter amendments          |
-| `src/pages/OperationsPages.tsx`                | Invoices, payments, public/managed knowledge                                              |
-| `src/pages/SettingsPages.tsx`                  | Clinic configuration, staff/profiles and patient portal access                            |
-| `src/pages/SchedulingPage.tsx`                 | Weekly availability, consultation modes, appointment lengths, doctor/clinic time off      |
-| `src/pages/WaitlistPage.tsx`                   | Staff waitlist, patient confirmation and booking from available slots                     |
-| `src/pages/IdentityPages.tsx`                  | Account administration, required password rotation, sessions, recovery                    |
-| `server/app.ts`                                | Core API, authorization, security headers, request validation                             |
-| `server/db.ts`                                 | Schema, database utilities, synthetic demo seed                                           |
-| `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                        |
-| `server/scheduling.ts`                         | Schedule/closure storage, duration-aware slot generation, booking validation              |
-| `server/visit-duration.ts`                     | Custom booking, explicit length changes, private immutable events and retry receipts      |
-| `server/procedure-scheduling.ts`               | Procedure worklist, appointment assignments, immutable events and retry receipts          |
-| `server/record-search.ts`                      | SQL-filtered staff directories and appointment/audit pages with bounded results           |
-| `src/record-search.ts`                         | Query-scoped page loading, pagination validation and obsolete-response suppression        |
-| `src/pages/AuditPage.tsx`                      | Administrator history search with actor/action/record/date filters                        |
-| `server/clinic-resources.ts`                   | Single-unit rooms/equipment, maintenance, atomic visit reservations and immutable history |
-| `src/pages/ClinicResourcesPage.tsx`            | Staff reservations diary and administrator catalogue/maintenance controls                 |
-| `src/components/AppointmentResourcesModal.tsx` | Full-set allocation, source review, safe retries and visit resource history               |
-| `server/waitlist.ts`                           | Immutable requests, terminal history, active claims and atomic confirmed booking          |
-| `server/identity.ts`                           | Account lifecycle, session metadata migration/revocation, recovery grants                 |
-| `server/documents.ts`                          | Immutable PDF originals, upload provenance, patient-scoped attachment downloads           |
-| `server/clinical.ts`                           | Investigation review/publication, procedure agreement/completion, encounter amendments    |
-| `server/follow-up.ts`                          | Review snapshots, owner assignments, optimistic revisions, plan state and worklist        |
-| `server/patient-profile.ts`                    | Attributed demographic/allergy corrections, role projections and independent revisions    |
-| `src/pages/PatientProfilePage.tsx`             | Current patient details, staff corrections and shared allergy history                     |
-| `server/inventory.ts`                          | Whole-unit catalogue, immutable stock events, revisions and idempotent operations         |
-| `src/pages/InventoryPage.tsx`                  | Stock catalogue, lots, histories and guarded administrator forms                          |
-| `server/insights.ts`                           | Immutable expenses and voids, administrator aggregates and private CSV exports            |
-| `src/pages/InsightsPage.tsx`                   | Date-range reporting, daily charts/tables and aggregate export                            |
-| `src/pages/ExpensesPage.tsx`                   | Administrator expense creation, filtering and void history                                |
-| `server/attendance.ts`                         | Account-based clocking, immutable corrections, interval guards and private timesheets     |
-| `src/pages/AttendancePage.tsx`                 | Personal attendance, administrator timesheets, correction history and guarded exports     |
-| `server/activity.ts`                           | Transactional recipient notifications, event deduplication and scoped read receipts       |
-| `shared/`                                      | Frontend/backend data contracts                                                           |
-| `tests/`                                       | Isolated API tests and real-browser workflows                                             |
+| Path                                           | Responsibility                                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `src/App.tsx`                                  | Routing, role guards, public/clinic/patient layouts                                        |
+| `src/lib.tsx`                                  | API client, session context, load/error states, notifications, date/currency helpers       |
+| `src/components/ui.tsx`                        | Shared accessible UI, fields, modal focus handling                                         |
+| `src/components/DocumentsPanel.tsx`            | Private PDF-report list, upload agreement and authenticated downloads                      |
+| `src/components/ImageAnnotations.tsx`          | Versioned clinical overlays, explicit sharing, original images and patient viewer          |
+| `src/pages/CareSummaryPage.tsx`                | Patient-facing print view and revision-checked JSON download                               |
+| `server/image-annotations.ts`                  | Immutable annotation versions/publications, source provenance and private projections      |
+| `server/billing-corrections.ts`                | Immutable charge corrections and mistaken-payment reversals, safe histories and revisions  |
+| `server/investigation-worklist.ts`             | Clinical result queues, private responsibility history and source-aware review retries     |
+| `server/care-summary.ts`                       | Authorized shared-care snapshots and stale-export rejection                                |
+| `src/components/PatientWaitlist.tsx`           | Patient request creation, withdrawal, history and booking links                            |
+| `src/pages/PatientPages.tsx`                   | Discovery, booking, intake, patient plans, history, images, messages                       |
+| `src/pages/ClinicPages.tsx`                    | Appointments, patient directory, records and treatment plans                               |
+| `src/pages/FollowUpPages.tsx`                  | Clinical worklist, review history, current check-ins and review submission                 |
+| `src/pages/ActivityPage.tsx`                   | Account-scoped activity, cursor pagination and read-state controls                         |
+| `src/pages/ClinicalWorkflowPanel.tsx`          | Investigation orders/results/reviews, procedure records and encounter amendments           |
+| `src/pages/OperationsPages.tsx`                | Invoices, payments, public/managed knowledge                                               |
+| `src/pages/SettingsPages.tsx`                  | Clinic configuration, staff/profiles and patient portal access                             |
+| `src/pages/SchedulingPage.tsx`                 | Weekly availability, consultation modes, appointment lengths, doctor/clinic time off       |
+| `src/pages/WaitlistPage.tsx`                   | Staff waitlist, patient confirmation and booking from available slots                      |
+| `src/pages/IdentityPages.tsx`                  | Account administration, required password rotation, sessions, recovery                     |
+| `server/app.ts`                                | Core API, authorization, security headers, request validation                              |
+| `server/db.ts`                                 | Schema, database utilities, synthetic demo seed                                            |
+| `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                         |
+| `server/scheduling.ts`                         | Schedule/closure storage, duration-aware slot generation, booking validation               |
+| `server/visit-duration.ts`                     | Custom booking, explicit length changes, private immutable events and retry receipts       |
+| `server/procedure-scheduling.ts`               | Procedure worklist, appointment assignments, immutable events and retry receipts           |
+| `server/record-search.ts`                      | SQL-filtered staff directories and appointment/audit pages with bounded results            |
+| `src/record-search.ts`                         | Query-scoped page loading, pagination validation and obsolete-response suppression         |
+| `src/pages/AuditPage.tsx`                      | Administrator history search with actor/action/record/date filters                         |
+| `server/clinic-resources.ts`                   | Single-unit rooms/equipment, maintenance, atomic visit reservations and immutable history  |
+| `src/pages/ClinicResourcesPage.tsx`            | Staff reservations diary and administrator catalogue/maintenance controls                  |
+| `src/components/AppointmentResourcesModal.tsx` | Full-set allocation, source review, safe retries and visit resource history                |
+| `server/waitlist.ts`                           | Immutable requests, terminal history, active claims and atomic confirmed booking           |
+| `server/identity.ts`                           | Account lifecycle, session metadata migration/revocation, recovery grants                  |
+| `server/documents.ts`                          | Immutable PDF originals, upload provenance, patient-scoped attachment downloads            |
+| `server/clinical.ts`                           | Investigation review/publication, procedure agreement/completion, encounter amendments     |
+| `server/follow-up.ts`                          | Review snapshots, owner assignments, optimistic revisions, plan state and worklist         |
+| `server/follow-up-escalation.ts`               | Operational policies, exact previews, immutable notices, dedupe and local scheduled checks |
+| `src/components/FollowUpEscalations.tsx`       | Policy controls, recipient previews, guarded retries and exact-plan notice histories       |
+| `server/patient-profile.ts`                    | Attributed demographic/allergy corrections, role projections and independent revisions     |
+| `src/pages/PatientProfilePage.tsx`             | Current patient details, staff corrections and shared allergy history                      |
+| `server/inventory.ts`                          | Whole-unit catalogue, immutable stock events, revisions and idempotent operations          |
+| `src/pages/InventoryPage.tsx`                  | Stock catalogue, lots, histories and guarded administrator forms                           |
+| `server/insights.ts`                           | Immutable expenses and voids, administrator aggregates and private CSV exports             |
+| `src/pages/InsightsPage.tsx`                   | Date-range reporting, daily charts/tables and aggregate export                             |
+| `src/pages/ExpensesPage.tsx`                   | Administrator expense creation, filtering and void history                                 |
+| `server/attendance.ts`                         | Account-based clocking, immutable corrections, interval guards and private timesheets      |
+| `src/pages/AttendancePage.tsx`                 | Personal attendance, administrator timesheets, correction history and guarded exports      |
+| `server/activity.ts`                           | Transactional recipient notifications, event deduplication and scoped read receipts        |
+| `shared/`                                      | Frontend/backend data contracts                                                            |
+| `tests/`                                       | Isolated API tests and real-browser workflows                                              |
 
 ## Data and security
 
@@ -190,15 +192,25 @@ Hydration exposes `effectiveStatus`, `effectiveFollowUpDate`, `followUpRevision`
 
 The legacy status endpoint appends a `source:'status-change'` event with factual patient text, while leaving the latest clinical review's acknowledgement boundary intact. It accepts an optional revision for existing-client compatibility and makes a repeated current status a no-op. New clinical reviews and check-ins require the follow-up module; existing history and status-only closure remain accessible when that module is disabled. These workflows support clinician documentation and patient reporting, without automatic diagnosis, risk classification or treatment generation.
 
+## Operational follow-up escalation
+
+`server/follow-up-escalation.ts` projects plan identity, effective status/date, latest review and assignment IDs and eligible clinician accounts directly from SQLite. Evaluation does not decode clinical assessments or check-in text. The episode hash includes plan ID, latest review/status event ID and effective review date. Immutable events enforce uniqueness on episode/stage; a clinic notice suppresses a later owner notice, while an owner notice can precede a clinic notice. Policy edits, assignments, check-ins and activity reads do not reset this boundary.
+
+An administrator policy command retains its before/after values, reason, actor and expected revision. Manual runs bind a UUID to the actor and exact preview/policy revisions; identical retries return the original receipt. Previews bind the clinic date, policy/module state, candidate sources, routing, recipients and totals. Each batch contains at most 200 eligible plans with recipients, oldest due date first. Changed relevant source state returns a conflict before writes. Receipt, immutable notice events, exact-recipient activity and audit commit in one immediate transaction. No-recipient plans consume no dedupe key. Eligible recipients are active doctor/administrator accounts linked to existing doctor profiles and no longer requiring their initial password change.
+
+The local runner uses the same service at startup and every 900 seconds. It starts in `server/index.ts`, not merely when `createApp` is called. Timers are unreferenced and stopped before the database closes. `FOLLOW_UP_ESCALATION_AUTO=false` leaves manual operation available. Automatic runs retain a system actor and only persist a run when notices were created; bounded heartbeat metadata records the latest check/run/error. Unique stage keys plus SQLite transactions prevent concurrent workers from duplicating notices. Policy disable/module pause stops creation, and the worker does not run while the server is stopped.
+
+Only the clinical worklist receives operational escalation state. Exact-plan history includes prior episodes and survives completion and filtering. Patient plan hydration and summaries exclude policy, routing, recipients and event history; operational writes do not change clinical review revisions. The UI retains exact uncertain commands for retry, validates all returned event/recipient snapshots and requires a new preview after a source conflict.
+
 ## Recipient activity and read receipts
 
-`activity` stores one immutable notification per recipient and source-event key, enforced by `UNIQUE(userId,eventKey)`. Appointment, waitlist, care-plan, handover, message, check-in, clinical workflow, invoice and received-payment mutations write their notifications in the same SQLite transaction as the source record. A waitlist booking emits one request-specific booking update, suppressing the duplicate ordinary appointment-created update. A notification failure rolls back the source mutation, so the application does not return a partially saved event. There is no independent delivery worker or external message transport.
+`activity` stores one immutable notification per recipient and source-event key, enforced by `UNIQUE(userId,eventKey)`. Appointment, waitlist, care-plan, handover, message, check-in, clinical workflow, invoice and received-payment mutations write their notifications in the same SQLite transaction as the source record. A waitlist booking emits one request-specific booking update, suppressing the duplicate ordinary appointment-created update. A notification failure rolls back the source mutation, so the application does not return a partially saved event. The follow-up escalation runner creates scheduled in-app notices through the same transactional activity store; there is no external message transport.
 
 Only active accounts receive newly created events. Patient notifications resolve to accounts linked to that patient. Assigned clinical events resolve to active clinician accounts linked to the owning doctor; subsequent check-ins use the latest follow-up owner. If no owner account is active, events fall back to the active linked clinical team. Recipient selection precedes author exclusion, preventing an author's own event from being incorrectly rerouted. General patient messages notify the active clinical team. New or reactivated accounts do not receive historical backfill.
 
 Feed reads are scoped by current account ID and audience, with an additional patient-ID condition for patients. Reception's scope is empty, and current authorization still applies to old entries after a role change. Feed content uses safe server-generated summaries and internal links; message bodies, internal assessments and unpublished interpretations are not copied into notifications.
 
-Pagination resolves an opaque item ID to a recipient-scoped SQLite row position and returns older rows. New arrivals do not shift an existing cursor. `unreadCount` covers the entire permitted feed. Listing has no read side effect. Individual reads preserve the first receipt timestamp; bulk reads mark all eligible older rows through the supplied snapshot ID, including unloaded pages, while preserving newer arrivals. Receipt updates and their audit entries commit together; audit failures leave items unread. Read state is separate from clinical review state and does not clear a follow-up worklist entry. The inbox provides in-app updates only, with no scheduled reminders, email/SMS/push integration or emergency-monitoring service.
+Pagination resolves an opaque item ID to a recipient-scoped SQLite row position and returns older rows. New arrivals do not shift an existing cursor. `unreadCount` covers the entire permitted feed. Listing has no read side effect. Individual reads preserve the first receipt timestamp; bulk reads mark all eligible older rows through the supplied snapshot ID, including unloaded pages, while preserving newer arrivals. Receipt updates and their audit entries commit together; audit failures leave items unread. Read state is separate from clinical review state and does not clear a follow-up worklist entry. The inbox includes operational escalation notices, with no email/SMS/push integration or emergency-monitoring service.
 
 ## Expense evidence and reporting periods
 

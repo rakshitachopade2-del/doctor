@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
   CalendarDays,
@@ -29,6 +29,15 @@ import {
   PageHeader,
 } from '../components/ui';
 import './follow-up.css';
+import {
+  EscalationHistoryModal,
+  EscalationOverview,
+  EscalationPolicyModal,
+  EscalationPreviewModal,
+  EscalationStateBadge,
+} from '../components/FollowUpEscalations';
+import { checkedEscalationPolicyContext } from '../components/follow-up-escalation-helpers';
+import { useVisitData } from '../components/visit-duration-helpers';
 
 const message = (error: unknown) =>
   error instanceof Error ? error.message : 'Unable to save. Please try again.';
@@ -51,9 +60,15 @@ const planLink = (plan: CarePlan) =>
 
 export function FollowUpsPage() {
   const { session } = useSession();
+  const [params, setParams] = useSearchParams();
+  const [escalationAction, setEscalationAction] = useState<'policy' | 'preview' | null>(null);
   const [scope, setScope] = useState(session.user?.role === 'doctor' ? 'mine' : 'all');
   const resource = useResource<FollowUpWorkItem[]>(`/api/follow-up-worklist?scope=${scope}`);
   const settings = useResource<ClinicSettings>('/api/settings');
+  const escalationPolicy = useVisitData(
+    '/api/follow-up-escalation-policy',
+    checkedEscalationPolicyContext,
+  );
   const [filter, setFilter] = useState('due');
   const [search, setSearch] = useState('');
   const [reviewId, setReviewId] = useState<string | null>(null);
@@ -61,6 +76,9 @@ export function FollowUpsPage() {
   const enabled = settings.data?.modules.followUp === true;
   const canReview = !!session.user?.doctorId;
   const data = resource.data ?? [];
+  const refreshAll = async () => {
+    await Promise.all([resource.reload(), escalationPolicy.reload()]);
+  };
   const matches = useMemo(
     () =>
       data
@@ -96,13 +114,29 @@ export function FollowUpsPage() {
         title="Follow-up care"
         description="Turn patient updates into a documented next step."
         actions={
-          <button
-            className="button button-secondary"
-            onClick={resource.reload}
-            disabled={resource.loading}
-          >
-            <RefreshCw size={15} /> Refresh worklist
-          </button>
+          <>
+            <button
+              className="button button-secondary"
+              onClick={refreshAll}
+              disabled={resource.loading || escalationPolicy.loading}
+            >
+              <RefreshCw size={15} /> Refresh worklist
+            </button>
+            <button
+              className="button button-secondary"
+              onClick={() => setEscalationAction('policy')}
+            >
+              {session.user?.role === 'admin' ? 'Escalation policy' : 'View escalation policy'}
+            </button>
+            {session.user?.role === 'admin' && (
+              <button
+                className="button button-primary"
+                onClick={() => setEscalationAction('preview')}
+              >
+                Preview notices
+              </button>
+            )}
+          </>
         }
       />
       <div className="fu-metrics">
@@ -129,11 +163,23 @@ export function FollowUpsPage() {
         ].map(([label, count, detail]) => (
           <Card key={label}>
             <span>{label}</span>
-            <strong>{count}</strong>
+            <strong>
+              {resource.loading
+                ? 'Loading…'
+                : resource.error || !resource.data
+                  ? 'Unavailable'
+                  : count}
+            </strong>
             <p>{detail}</p>
           </Card>
         ))}
       </div>
+      <EscalationOverview
+        context={escalationPolicy.data}
+        loading={escalationPolicy.loading}
+        error={escalationPolicy.error}
+        onRetry={escalationPolicy.reload}
+      />
       {settings.error && <ErrorState message={settings.error} retry={settings.reload} />}
       {settings.data?.modules.followUp === false && (
         <div className="notice">
@@ -200,6 +246,7 @@ export function FollowUpsPage() {
                   <th>Next review</th>
                   <th>Patient-reported updates</th>
                   <th>Last clinical review</th>
+                  <th>Operational notices</th>
                   <th>
                     <span className="sr-only">Actions</span>
                   </th>
@@ -265,6 +312,21 @@ export function FollowUpsPage() {
                         )}
                       </td>
                       <td>
+                        <EscalationStateBadge value={item.escalation} />
+                        <button
+                          className="button button-ghost button-small"
+                          onClick={() =>
+                            setParams((current) => {
+                              const next = new URLSearchParams(current);
+                              next.set('escalation', plan.id);
+                              return next;
+                            })
+                          }
+                        >
+                          Notice history
+                        </button>
+                      </td>
+                      <td>
                         <div className="fu-row-actions">
                           {active && canReview && (
                             <button
@@ -305,6 +367,25 @@ export function FollowUpsPage() {
           reminders.
         </span>
       </div>
+      {escalationAction === 'policy' && (
+        <EscalationPolicyModal onClose={() => setEscalationAction(null)} onSaved={refreshAll} />
+      )}
+      {escalationAction === 'preview' && (
+        <EscalationPreviewModal onClose={() => setEscalationAction(null)} onSaved={refreshAll} />
+      )}
+      {params.get('escalation') && (
+        <EscalationHistoryModal
+          key={params.get('escalation')!}
+          carePlanId={params.get('escalation')!}
+          onClose={() =>
+            setParams((current) => {
+              const next = new URLSearchParams(current);
+              next.delete('escalation');
+              return next;
+            })
+          }
+        />
+      )}
       {assignmentId && (
         <FollowUpAssignmentModal
           carePlanId={assignmentId}

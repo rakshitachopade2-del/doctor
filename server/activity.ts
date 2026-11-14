@@ -28,9 +28,34 @@ function notify(
   input: ActivityContent,
 ) {
   const value: ActivityItem = { ...input, id: id(), createdAt: nowISO(), readAt: null };
-  db.prepare(
-    'INSERT OR IGNORE INTO activity(id,userId,patientId,audience,eventKey,data) VALUES (?,?,?,?,?,?)',
-  ).run(value.id, user.id, patientId, audience, eventKey, JSON.stringify(value));
+  const inserted = db
+    .prepare(
+      'INSERT OR IGNORE INTO activity(id,userId,patientId,audience,eventKey,data) VALUES (?,?,?,?,?,?)',
+    )
+    .run(value.id, user.id, patientId, audience, eventKey, JSON.stringify(value));
+  return Number(inserted.changes) === 1;
+}
+
+/** Explicit delivery only: no fallback, and callers can prove which notices were inserted. */
+export function notifyClinicalRecipients(
+  db: DB,
+  patientId: string,
+  eventKey: string,
+  input: ActivityContent,
+  recipientIds: string[],
+): string[] {
+  const inserted: string[] = [];
+  const lookup =
+    db.prepare(`SELECT u.data FROM users u JOIN doctors d ON d.id=json_extract(u.data,'$.doctorId')
+    WHERE u.id=? AND u.role IN ('doctor','admin') AND COALESCE(json_extract(u.data,'$.active'),1)=1
+    AND COALESCE(json_extract(u.data,'$.mustChangePassword'),0)=0`);
+  for (const userId of [...new Set(recipientIds)].sort()) {
+    const row = lookup.get(userId);
+    if (!row) continue;
+    const user = JSON.parse(row.data as string) as User;
+    if (notify(db, user, patientId, 'clinical', eventKey, input)) inserted.push(userId);
+  }
+  return inserted;
 }
 function activeUsers(db: DB) {
   return db

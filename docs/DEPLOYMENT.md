@@ -59,6 +59,12 @@ The `activity` table preserves notification contents and recipient ownership; on
 
 After restart, confirm account access and review each doctor’s actual hours and planned closures. An upgrade does not automatically reschedule, cancel, or notify patients. Keep the pre-upgrade backup so application code and database state can be restored together if rollback is required.
 
+## Follow-up escalation operation
+
+Escalation policy, command, run and notice tables are additive and begin empty on upgrade. The policy starts disabled with thresholds of 3/7 overdue calendar days. An administrator can enable it in **Follow-up care → Escalation policy** after reviewing a preview. Existing active overdue plans then become eligible for new notices; no past notice is invented. Policy changes and notice history are included in the SQLite backup.
+
+The server checks at startup and every 15 minutes. Set `FOLLOW_UP_ESCALATION_AUTO=false` for manual-only checks; this does not change the saved policy. A process shutdown stops its timer. Startup catches up from current plan state and retained dedupe history. Each run creates notices for at most 200 plans, oldest first; the preview shows the remaining eligible backlog. Pausing the follow-up module or disabling the policy prevents new notices. Plans without eligible clinician recipients remain eligible for future checks. The policy view reports whether this process runs automatic checks and the last check/error time. A recorded notice is in-app activity, not proof of clinical review or delivery to an external device.
+
 ## Account access and password recovery
 
 Use **Accounts & access** to suspend a departing staff member, restore access, change a staff role, or set the linked doctor profile. Suspension and role/profile changes immediately end the affected account’s sessions while retaining patient records and past authorship. An administrator cannot suspend their own account or demote the last active administrator. Keep individual administrator accounts rather than sharing one credential.
@@ -139,7 +145,7 @@ Restoring also restores account access, passwords, scheduling changes, and recov
 
 Booking, clinical documentation, images and PDFs, clinician-authored image annotations and patient-facing summary exports, investigations, procedure records, care plans, check-ins, clinician follow-up reviews, private messaging, confirmed waitlist booking, clinical handovers, activity inboxes, procedure-linked invoice creation, manual payment records, calendar export and approved clinic articles work within the application. Billing records payments already received; it does not charge a card or initiate a UPI payment. Tax calculation, refunds and payment-provider reconciliation are not automated. Administrators can record expenses, void mistaken entries with a reason, review clinic aggregates and export aggregate CSV reports. This does not initiate a payment or provide accounting reconciliation.
 
-Activity updates are visible when the app opens or the inbox refreshes. There is no background external delivery service, email/SMS/WhatsApp dispatch, push subscription or automatic reminder scheduler. Staff should continue their clinic’s existing process for time-sensitive outreach. A clinician’s request for a visit offers the patient a booking link; it does not reserve an appointment.
+Activity updates are visible when the app opens or the inbox refreshes. Enabled follow-up escalation policies create staff notices at startup and every 15 minutes while the server runs. There is no external delivery service, email/SMS/WhatsApp dispatch or push subscription. Staff should continue their clinic’s existing process for time-sensitive outreach. A clinician’s request for a visit offers the patient a booking link; it does not reserve an appointment.
 
 Email, SMS, WhatsApp, video meetings, native mobile packaging, AI diagnosis and voice transcription require separate implementation and provider configuration. Online appointments do not create video rooms. No external delivery is represented as successful when a provider is absent. Clinician-entered instructions and warnings are not validated against a drug-interaction database.
 

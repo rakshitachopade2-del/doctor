@@ -62,6 +62,8 @@ try {
       'ALL',
       '--security-opt',
       'no-new-privileges:true',
+      '-e',
+      'FOLLOW_UP_ESCALATION_AUTO=true',
       '-p',
       '127.0.0.1::3001',
       image,
@@ -100,6 +102,7 @@ try {
       PORT: String(port),
       APP_ORIGIN: '',
       TRUST_PROXY: 'false',
+      FOLLOW_UP_ESCALATION_AUTO: 'true',
     };
     await command(
       process.execPath,
@@ -241,6 +244,26 @@ try {
   const followUps = await fetch(`${base}/api/follow-up-worklist`, { headers: apiHeaders });
   assert.equal(followUps.status, 200);
   assert.deepEqual(await followUps.json(), []);
+  const escalationPolicyUrl = `${base}/api/follow-up-escalation-policy`;
+  const escalationPreviewUrl = `${base}/api/follow-up-escalations/preview`;
+  const escalationPolicyResponse = await fetch(escalationPolicyUrl, { headers: apiHeaders });
+  assert.equal(escalationPolicyResponse.status, 200);
+  assert.match(escalationPolicyResponse.headers.get('cache-control'), /no-store/);
+  const escalationPolicy = await escalationPolicyResponse.json();
+  assert.deepEqual(escalationPolicy.policy, {
+    enabled: false,
+    ownerAfterDays: 3,
+    clinicAfterDays: 7,
+  });
+  assert.deepEqual(escalationPolicy.history, []);
+  assert.equal(escalationPolicy.worker.automaticEnabled, true);
+  assert.equal(escalationPolicy.worker.intervalSeconds, 900);
+  assert.ok(escalationPolicy.worker.lastCheckedAt);
+  const emptyEscalationPreview = await fetch(escalationPreviewUrl, { headers: apiHeaders });
+  assert.equal(emptyEscalationPreview.status, 200);
+  assert.equal((await emptyEscalationPreview.json()).status, 'disabled');
+  assert.equal((await fetch(escalationPolicyUrl)).status, 401);
+  assert.equal((await fetch(escalationPreviewUrl)).status, 401);
   const investigations = await fetch(`${base}/api/investigation-worklist`, { headers: apiHeaders });
   assert.equal(investigations.status, 200);
   const procedureSchedulingUrl = `${base}/api/procedure-scheduling`;
@@ -493,6 +516,67 @@ try {
   assert.equal(clinicianLogin.status, 200);
   apiHeaders.Cookie = clinicianLogin.headers.get('set-cookie').split(';')[0];
   apiHeaders['X-CSRF-Token'] = (await clinicianLogin.json()).csrfToken;
+  const overdueDate = new Date(Date.parse(`${attendanceDay}T12:00:00Z`) - 10 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const escalationPlan = await visitWrite(
+    '/care-plans',
+    {
+      patientId: patient.id,
+      title: 'Synthetic overdue review',
+      instructions: 'Synthetic clinician-entered instructions',
+      startDate: overdueDate,
+      endDate: attendanceDay,
+      followUpDate: overdueDate,
+      medications: [],
+    },
+    201,
+  );
+  const privateEscalationReason = 'Synthetic private escalation policy reason';
+  const enabledPolicy = await visitWrite('/follow-up-escalation-policy', {
+    enabled: true,
+    ownerAfterDays: 3,
+    clinicAfterDays: 7,
+    reason: privateEscalationReason,
+    expectedRevision: escalationPolicy.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(enabledPolicy.context.policy.enabled, true);
+  const noticePreview = await (await fetch(escalationPreviewUrl, { headers: apiHeaders })).json();
+  assert.equal(noticePreview.status, 'ready');
+  assert.equal(noticePreview.items.length, 1);
+  assert.equal(noticePreview.items[0].carePlanId, escalationPlan.id);
+  assert.equal(noticePreview.items[0].stage, 'clinic');
+  assert.deepEqual(
+    noticePreview.items[0].recipients.map((recipient) => recipient.userId),
+    [account.user.id],
+  );
+  const noticeCommand = {
+    expectedPreviewRevision: noticePreview.revision,
+    expectedPolicyRevision: noticePreview.policyRevision,
+    requestId: randomUUID(),
+  };
+  const noticeRun = await visitWrite('/follow-up-escalations/run', noticeCommand);
+  assert.equal(noticeRun.notifiedPlans, 1);
+  assert.equal(noticeRun.recipientCount, 1);
+  assert.equal(noticeRun.events[0].episodeId, noticePreview.items[0].episodeId);
+  const noticeReplay = await visitWrite('/follow-up-escalations/run', noticeCommand);
+  assert.deepEqual(noticeReplay, noticeRun);
+  const recordedPreview = await (await fetch(escalationPreviewUrl, { headers: apiHeaders })).json();
+  assert.equal(recordedPreview.readyTotal, 0);
+  assert.equal(recordedPreview.alreadyNotifiedTotal, 1);
+  const escalationHistoryUrl = `${base}/api/care-plans/${escalationPlan.id}/escalations`;
+  const recordedHistory = await fetch(escalationHistoryUrl, { headers: apiHeaders });
+  assert.equal(recordedHistory.status, 200);
+  assert.equal((await recordedHistory.json()).events.length, 1);
+  const escalationActivity = await (
+    await fetch(`${base}/api/activity`, { headers: apiHeaders })
+  ).json();
+  const recordedNotices = escalationActivity.items.filter(
+    (item) => item.href === `/clinic/follow-ups?escalation=${escalationPlan.id}`,
+  );
+  assert.equal(recordedNotices.length, 1);
+  assert.equal(JSON.stringify(recordedNotices).includes(privateEscalationReason), false);
   const procedurePlan = await visitWrite(
     '/procedures',
     {
@@ -637,7 +721,11 @@ try {
   assert.equal(summary.invoiceHistories[0].issuedCharges.totalPaise, 1000);
   assert.equal(summary.invoices[0].status, 'no-charge');
   assert.deepEqual(summary.imageAnnotations, []);
-  assert.deepEqual(summary.carePlans, []);
+  assert.equal(summary.carePlans.length, 1);
+  assert.equal(summary.carePlans[0].id, escalationPlan.id);
+  assert.equal('escalation' in summary.carePlans[0], false);
+  assert.equal(JSON.stringify(summary).includes(privateEscalationReason), false);
+  assert.equal(JSON.stringify(summary).includes(noticeRun.events[0].id), false);
   assert.equal(JSON.stringify(summary).includes(privateDurationReason), false);
   assert.equal(JSON.stringify(summary).includes(privateSchedulingReason), false);
   assert.equal(JSON.stringify(summary).includes('Synthetic private removal reason'), false);
@@ -680,6 +768,9 @@ try {
   assert.equal((await fetch(durationUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureScheduleUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureSchedulingUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(escalationPolicyUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(escalationPreviewUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(escalationHistoryUrl, { headers: apiHeaders })).status, 401);
   assert.equal(
     (await fetch(`${base}/api/insights/export?${range}`, { headers: apiHeaders })).status,
     401,

@@ -14,6 +14,7 @@ import type {
 } from '../shared/follow-up.ts';
 import { clinicToday, get, id, list, nowISO, type DB } from './db.ts';
 import { notifyPatient, notifyClinicians } from './activity.ts';
+import type { FollowUpEscalationState } from '../shared/follow-up-escalation.ts';
 
 interface FollowUpContext {
   db: DB;
@@ -289,7 +290,7 @@ export function createFollowUp(context: FollowUpContext) {
       return hydratePlan(save(plan, review, req));
     });
   }
-  function register(app: Express) {
+  function register(app: Express, escalationStates?: () => Map<string, FollowUpEscalationState>) {
     app.get('/api/follow-up-owners', (req: AuthRequest, res) => {
       actor(req, ['admin', 'doctor']);
       res.json(eligibleOwners());
@@ -362,27 +363,31 @@ export function createFollowUp(context: FollowUpContext) {
       const query = z.object({ scope: z.enum(['mine', 'all']).optional() }).parse(req.query);
       const scope = query.scope ?? (user.role === 'admin' ? 'all' : 'mine');
       const today = clinicToday();
-      const worklist: FollowUpWorkItem[] = list<CarePlan>(db, 'carePlans')
-        .filter((plan) => scope === 'all' || owner(plan).doctorId === user.doctorId)
-        .map((plan) => {
-          const current = state(plan),
-            patient = get<Patient>(db, 'patients', plan.patientId)!,
-            assignedOwner = owner(plan);
-          return {
-            carePlan: hydratePlan(plan, false, current),
-            patient,
-            ownerDoctorId: assignedOwner.doctorId,
-            ownerDoctorName: assignedOwner.doctorName,
-            revision: current.revision,
-            latestReview: current.latestReview,
-            unreviewedCheckIns: current.unreviewedCheckIns,
-            unreviewedCount: current.unreviewedCheckIns.length,
-            due:
-              current.effectiveStatus === 'active' &&
-              current.effectiveFollowUpDate !== null &&
-              current.effectiveFollowUpDate <= today,
-          };
-        });
+      const worklist: FollowUpWorkItem[] = transaction(() => {
+        const reminders = escalationStates?.();
+        return list<CarePlan>(db, 'carePlans')
+          .filter((plan) => scope === 'all' || owner(plan).doctorId === user.doctorId)
+          .map((plan) => {
+            const current = state(plan),
+              patient = get<Patient>(db, 'patients', plan.patientId)!,
+              assignedOwner = owner(plan);
+            return {
+              escalation: reminders?.get(plan.id),
+              carePlan: hydratePlan(plan, false, current),
+              patient,
+              ownerDoctorId: assignedOwner.doctorId,
+              ownerDoctorName: assignedOwner.doctorName,
+              revision: current.revision,
+              latestReview: current.latestReview,
+              unreviewedCheckIns: current.unreviewedCheckIns,
+              unreviewedCount: current.unreviewedCheckIns.length,
+              due:
+                current.effectiveStatus === 'active' &&
+                current.effectiveFollowUpDate !== null &&
+                current.effectiveFollowUpDate <= today,
+            };
+          });
+      });
       worklist.sort(
         (a, b) =>
           Number(b.due) - Number(a.due) ||

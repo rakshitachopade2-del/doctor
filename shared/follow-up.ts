@@ -1,4 +1,5 @@
 import type { CarePlan, CheckIn, Patient } from './types';
+import type { FollowUpEscalationState } from './follow-up-escalation';
 
 export interface CheckInSnapshot {
   id: string;
@@ -27,6 +28,7 @@ export interface FollowUpSummary {
   latestReview: FollowUpReview | PatientFollowUpReview | null;
 }
 export interface FollowUpWorkItem {
+  escalation?: FollowUpEscalationState;
   carePlan: CarePlan & FollowUpSummary;
   patient: Patient;
   ownerDoctorId: string;

@@ -9,6 +9,7 @@ const env = {
   ...process.env,
   NODE_ENV: 'test',
   DEMO_MODE: 'true',
+  FOLLOW_UP_ESCALATION_AUTO: 'false',
   DATABASE_PATH: join(directory, 'clinic.sqlite'),
   PORT: apiPort,
   API_PORT: apiPort,

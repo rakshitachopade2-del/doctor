@@ -1,6 +1,7 @@
 import { registerOperations } from './operations.ts';
 import { registerClinical } from './clinical.ts';
 import { createFollowUp } from './follow-up.ts';
+import { createFollowUpEscalation } from './follow-up-escalation.ts';
 import { createWaitlist } from './waitlist.ts';
 import { registerInsights } from './insights.ts';
 import { registerInventory } from './inventory.ts';
@@ -346,6 +347,14 @@ export function createApp(options: AppOptions = {}) {
     audit,
     fail,
   });
+  const followUpEscalation = createFollowUpEscalation({ db, actor, audit, fail });
+  app.locals.runFollowUpEscalations = followUpEscalation.runAutomatic;
+  app.locals.startFollowUpEscalations = followUpEscalation.start;
+  app.locals.stopFollowUpEscalations = followUpEscalation.stop;
+  app.locals.close = () => {
+    followUpEscalation.stop();
+    db.close();
+  };
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
   app.get('/api/session', (req: AuthRequest, res) =>
     res.json({ user: req.user ?? null, csrfToken: req.csrfToken, demoMode }),
@@ -1223,7 +1232,8 @@ export function createApp(options: AppOptions = {}) {
   });
   registerInsights(app, { db, actor, audit, fail });
   registerInventory(app, { db, actor, audit, fail });
-  followUp.register(app);
+  followUp.register(app, followUpEscalation.states);
+  followUpEscalation.register(app);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API endpoint not found.' }));
   const dist = resolve('dist');
   if (existsSync(resolve(dist, 'index.html'))) {

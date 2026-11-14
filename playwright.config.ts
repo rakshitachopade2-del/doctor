@@ -67,6 +67,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)procedure-scheduling\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5192' },
     },
+    {
+      name: 'follow-up-escalation',
+      testMatch: /(?:^|\/)follow-up-escalation\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5193' },
+    },
   ],
   webServer: [
     {
@@ -126,6 +131,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3020 E2E_VITE_PORT=5192 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5192',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3021 E2E_VITE_PORT=5193 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5193',
       reuseExistingServer: false,
       timeout: 60000,
     },

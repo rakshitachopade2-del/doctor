@@ -14,6 +14,7 @@ services:
       DATABASE_PATH: /app/data/clinic.sqlite
       APP_ORIGIN: ${APP_ORIGIN:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}
+      FOLLOW_UP_ESCALATION_AUTO: ${FOLLOW_UP_ESCALATION_AUTO:-true}
     volumes:
       - clinic-data:/app/data
     security_opt:

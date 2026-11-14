@@ -92,7 +92,22 @@
   min-width: 150px;
 }
 .fu-table .table-sub {
+  display: block;
+  color: #5e6e60;
+  font-size: 12px;
+  margin-top: 5px;
   line-height: 1.7;
+  max-width: 290px;
+}
+.fu-table .table-name {
+  display: block;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+}
+.fu-table .table-name:hover {
+  color: #286455;
+  text-decoration: underline;
 }
 .fu-row-actions {
   display: flex;
