@@ -147,6 +147,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)weekly-availability\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5208' },
     },
+    {
+      name: 'time-off',
+      testMatch: /(?:^|\/)time-off\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5209' },
+    },
   ],
   webServer: [
     {
@@ -303,6 +308,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3036 E2E_VITE_PORT=5208 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5208',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3037 E2E_VITE_PORT=5209 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5209',
       reuseExistingServer: false,
       timeout: 60000,
     },

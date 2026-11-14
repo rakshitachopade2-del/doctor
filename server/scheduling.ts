@@ -3,8 +3,9 @@ import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
 import type { Appointment, Doctor, User } from '../shared/types.ts';
 import type { DoctorSchedule, ScheduleClosure, SchedulingData } from '../shared/scheduling.ts';
-import { addDays, clinicToday, get, id, list, nowISO, type DB } from './db.ts';
+import { addDays, clinicToday, get, list, type DB } from './db.ts';
 import { registerWeeklyAvailability } from './weekly-availability.ts';
+import { registerTimeOff } from './time-off.ts';
 
 type Fail = (status: number, message: string) => never;
 interface SchedulingContext {
@@ -31,15 +32,6 @@ interface BookingValidationOptions {
 const timeSchema = z
   .string()
   .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, 'Use a real 24-hour time (HH:mm).');
-const dateSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/)
-  .refine(
-    (value) =>
-      !Number.isNaN(Date.parse(`${value}T12:00:00Z`)) &&
-      new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value,
-    'Invalid calendar date.',
-  );
 const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
 const clockTime = (value: number) =>
   `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
@@ -238,15 +230,8 @@ export function createScheduling(context: SchedulingContext) {
     return duration;
   }
   function register(app: Express) {
-    const { actor, audit } = context;
+    const { actor } = context;
     const staff = (req: AuthRequest) => actor(req, ['admin', 'doctor', 'receptionist']);
-    const mayManage = (req: AuthRequest, doctorId: string | null) => {
-      const user = actor(req, ['admin', 'doctor']);
-      if (user.role !== 'admin' && (!doctorId || user.doctorId !== doctorId))
-        return fail(403, 'You may manage availability only for your own doctor profile.');
-      if (doctorId) schedule(doctorId);
-      return user;
-    };
     app.get('/api/scheduling', (req: AuthRequest, res) => {
       staff(req);
       const data: SchedulingData = {
@@ -279,50 +264,10 @@ export function createScheduling(context: SchedulingContext) {
           );
       },
     });
-    app.post('/api/schedule-closures', (req: AuthRequest, res) => {
-      const input = z
-        .object({
-          doctorId: z.string().min(1).nullable(),
-          startDate: dateSchema,
-          endDate: dateSchema,
-          startTime: timeSchema.nullable(),
-          endTime: timeSchema.nullable(),
-          reason: z.string().trim().min(1).max(300),
-        })
-        .superRefine((value, ctx) => {
-          if (value.endDate < value.startDate)
-            ctx.addIssue({
-              code: 'custom',
-              message: 'End date must not precede the start date.',
-              path: ['endDate'],
-            });
-          if (value.endDate < clinicToday())
-            ctx.addIssue({
-              code: 'custom',
-              message: 'Closures must include today or a future date.',
-              path: ['endDate'],
-            });
-          if ((value.startTime === null) !== (value.endTime === null))
-            ctx.addIssue({
-              code: 'custom',
-              message: 'Provide both start and end times or leave both empty.',
-              path: ['endTime'],
-            });
-          if (
-            value.startTime !== null &&
-            value.endTime !== null &&
-            value.startTime >= value.endTime
-          )
-            ctx.addIssue({
-              code: 'custom',
-              message: 'The end time must be after the start time on the same day.',
-              path: ['endTime'],
-            });
-        })
-        .parse(req.body);
-      mayManage(req, input.doctorId);
-      const closure: ScheduleClosure = { ...input, id: id(), createdAt: nowISO() };
-      transaction(() => {
+    registerTimeOff(app, {
+      ...context,
+      transaction,
+      assertPreservesBookings(closure) {
         const affected = pendingFutureAppointments().filter((appointment) =>
           closed(
             appointment.doctorId,
@@ -337,29 +282,7 @@ export function createScheduling(context: SchedulingContext) {
             409,
             `This closure would affect ${affected.length} booked appointment${affected.length === 1 ? '' : 's'}. Reschedule or cancel the affected appointments first.`,
           );
-        db.prepare(
-          'INSERT INTO scheduleClosures(id,doctorId,startDate,endDate,data) VALUES (?,?,?,?,?)',
-        ).run(
-          closure.id,
-          closure.doctorId,
-          closure.startDate,
-          closure.endDate,
-          JSON.stringify(closure),
-        );
-        audit(req, 'created schedule closure', 'scheduleClosure', closure.id);
-      });
-      res.status(201).json(closure);
-    });
-    app.delete('/api/schedule-closures/:id', (req: AuthRequest, res) => {
-      const closureId = String(req.params.id);
-      const closure = get<ScheduleClosure>(db, 'scheduleClosures', closureId);
-      if (!closure) return fail(404, 'Schedule closure not found.');
-      mayManage(req, closure.doctorId);
-      transaction(() => {
-        db.prepare('DELETE FROM scheduleClosures WHERE id=?').run(closureId);
-        audit(req, 'removed schedule closure', 'scheduleClosure', closureId);
-      });
-      res.json({ ok: true });
+      },
     });
   }
   return { schedule, availableSlots, validateBooking, register, transaction };

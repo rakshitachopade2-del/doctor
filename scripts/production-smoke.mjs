@@ -808,6 +808,145 @@ try {
   ).json();
   assert.deepEqual(protectedVisit.appointment, customVisit.appointment);
 
+  const timeOffListUrl = `${base}/api/time-off?doctorId=${visitDoctor.id}&filter=all`;
+  const timeOffCommand = {
+    closure: {
+      doctorId: visitDoctor.id,
+      startDate: visitDay,
+      endDate: visitDay,
+      startTime: '11:00',
+      endTime: '12:00',
+      reason: 'Synthetic staff-visible time-off label',
+    },
+    requestId: randomUUID(),
+  };
+  const createdTimeOff = await visitWrite('/time-off', timeOffCommand, 201);
+  const timeOffPath = `/time-off/${createdTimeOff.context.closure.id}`;
+  const timeOffUrl = `${base}/api${timeOffPath}`;
+  const privateTimeOffReason = 'Synthetic private time-off adjustment';
+  async function timeOffRead(suffix = '') {
+    const response = await fetch(`${timeOffUrl}${suffix}`, { headers: apiHeaders });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('cache-control'), /no-store/);
+    return response.json();
+  }
+  async function timeOffSlots() {
+    const response = await fetch(
+      `${base}/api/slots?doctorId=${visitDoctor.id}&date=${visitDay}&mode=in-person`,
+    );
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+  assert.equal(createdTimeOff.context.status, 'active');
+  assert.equal(createdTimeOff.change.action, 'created');
+  assert.equal(createdTimeOff.change.source, 'reviewed');
+  assert.equal(createdTimeOff.change.before, null);
+  assert.equal(createdTimeOff.change.changeReason, null);
+  assert.equal(createdTimeOff.receipt.actorId, account.user.id);
+  assert.equal(createdTimeOff.receipt.expectedRevision, null);
+  assert.equal((await timeOffSlots()).includes('11:00'), false);
+  const timeOffEdit = {
+    closure: {
+      startDate: visitDay,
+      endDate: visitDay,
+      startTime: '10:40',
+      endTime: '12:00',
+      reason: timeOffCommand.closure.reason,
+    },
+    changeReason: privateTimeOffReason,
+    expectedRevision: createdTimeOff.context.revision,
+    requestId: randomUUID(),
+  };
+  await visitWrite(
+    `${timeOffPath}/changes`,
+    {
+      ...timeOffEdit,
+      closure: { ...timeOffEdit.closure, startTime: '10:20' },
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  assert.deepEqual(await timeOffRead(), createdTimeOff.context);
+  assert.equal((await timeOffRead('/history')).total, 1);
+  const editedTimeOff = await visitWrite(`${timeOffPath}/changes`, timeOffEdit, 201);
+  assert.equal(editedTimeOff.context.closure.id, createdTimeOff.context.closure.id);
+  assert.equal(editedTimeOff.context.closure.createdAt, createdTimeOff.context.closure.createdAt);
+  assert.equal(editedTimeOff.change.changeReason, privateTimeOffReason);
+  assert.deepEqual(editedTimeOff.change.before.closure, createdTimeOff.context.closure);
+  assert.equal((await timeOffSlots()).includes('10:40'), false);
+  await visitWrite(`${timeOffPath}/changes`, { ...timeOffEdit, requestId: randomUUID() }, 409);
+  const overlappingClosure = await visitWrite(
+    '/schedule-closures',
+    {
+      ...timeOffCommand.closure,
+      startTime: '11:40',
+      endTime: '12:20',
+      reason: 'Synthetic overlapping compatibility closure',
+    },
+    201,
+  );
+  const timeOffCancelCommand = {
+    changeReason: 'Synthetic private time-off cancellation',
+    expectedRevision: editedTimeOff.context.revision,
+    requestId: randomUUID(),
+  };
+  const cancelledTimeOff = await visitWrite(`${timeOffPath}/cancel`, timeOffCancelCommand, 201);
+  assert.equal(cancelledTimeOff.context.status, 'cancelled');
+  assert.deepEqual(cancelledTimeOff.context.closure, editedTimeOff.context.closure);
+  const remainingTimeOffSlots = await timeOffSlots();
+  assert.ok(remainingTimeOffSlots.includes('10:40'));
+  assert.equal(remainingTimeOffSlots.includes('11:40'), false);
+  assert.ok(remainingTimeOffSlots.includes('12:20'));
+  const originalTimeOffReplay = await visitWrite('/time-off', timeOffCommand);
+  assert.deepEqual(originalTimeOffReplay.change, createdTimeOff.change);
+  assert.deepEqual(originalTimeOffReplay.receipt, createdTimeOff.receipt);
+  assert.deepEqual(originalTimeOffReplay.context, cancelledTimeOff.context);
+  const editedTimeOffReplay = await visitWrite(`${timeOffPath}/changes`, timeOffEdit);
+  assert.deepEqual(editedTimeOffReplay.change, editedTimeOff.change);
+  assert.deepEqual(editedTimeOffReplay.context, cancelledTimeOff.context);
+  assert.deepEqual(
+    await visitWrite(`${timeOffPath}/cancel`, timeOffCancelCommand),
+    cancelledTimeOff,
+  );
+  const timeOffHistory = await timeOffRead('/history?pageSize=10');
+  assert.equal(timeOffHistory.total, 3);
+  assert.deepEqual(timeOffHistory.items.map((item) => item.action).sort(), [
+    'cancelled',
+    'created',
+    'edited',
+  ]);
+  await visitWrite(`/schedule-closures/${overlappingClosure.id}`, {}, 200, 'DELETE');
+  assert.ok((await timeOffSlots()).includes('11:40'));
+  const legacyTimeOffContext = await (
+    await fetch(`${base}/api/time-off/${overlappingClosure.id}`, { headers: apiHeaders })
+  ).json();
+  assert.equal(legacyTimeOffContext.status, 'cancelled');
+  assert.equal(legacyTimeOffContext.latestChange.source, 'legacy');
+  assert.equal(legacyTimeOffContext.latestChange.changeReason, null);
+  const safeTimeOffList = await (await fetch(timeOffListUrl, { headers: apiHeaders })).json();
+  assert.equal(safeTimeOffList.total, 2);
+  assert.ok(safeTimeOffList.items.every((item) => item.status === 'cancelled'));
+  for (const value of [
+    privateTimeOffReason,
+    timeOffCancelCommand.changeReason,
+    timeOffCommand.requestId,
+    createdTimeOff.change.id,
+  ])
+    assert.equal(JSON.stringify(safeTimeOffList).includes(value), false);
+  const afterTimeOffScheduling = await (
+    await fetch(`${base}/api/scheduling`, { headers: apiHeaders })
+  ).json();
+  assert.equal(afterTimeOffScheduling.closures.length, 0);
+  assert.deepEqual(await availabilityRead(), beforeBlockedAvailability);
+  const timeOffProtectedVisit = await (
+    await fetch(`${base}/api/appointments/${customVisit.appointment.id}/duration`, {
+      headers: apiHeaders,
+    })
+  ).json();
+  assert.deepEqual(timeOffProtectedVisit.appointment, customVisit.appointment);
+  for (const path of [timeOffListUrl, timeOffUrl, `${timeOffUrl}/history`])
+    assert.equal((await fetch(path)).status, 401);
+
   const customReplay = await visitWrite('/visit-duration/bookings', customBookingBody);
   assert.equal(customReplay.event.id, customVisit.event.id);
   const movedVisit = await visitWrite(
@@ -834,6 +973,7 @@ try {
   assert.ok(calendarText.includes(`DTSTART:${calendarStamp(visitStart)}`));
   assert.ok(calendarText.includes(`LOCATION:${profileCommand.profile.address}`));
   assert.equal(calendarText.includes(privateAvailabilityReason), false);
+  assert.equal(calendarText.includes(privateTimeOffReason), false);
   assert.ok(calendarText.includes(`DTEND:${calendarStamp(visitStart + 90 * 60000)}`));
   const durationUrl = `${base}/api/appointments/${movedVisit.id}/duration`;
   const durationResponse = await fetch(durationUrl, { headers: apiHeaders });
@@ -1537,6 +1677,9 @@ try {
   assert.equal(JSON.stringify(summary).includes(privateAvailabilityReason), false);
   assert.equal(JSON.stringify(summary).includes(availabilityCommand.requestId), false);
   assert.equal(JSON.stringify(summary).includes(firstAvailability.change.id), false);
+  assert.equal(JSON.stringify(summary).includes(privateTimeOffReason), false);
+  assert.equal(JSON.stringify(summary).includes(timeOffCommand.requestId), false);
+  assert.equal(JSON.stringify(summary).includes(createdTimeOff.change.id), false);
   assert.equal(JSON.stringify(summary).includes(privateSchedulingReason), false);
   assert.equal(JSON.stringify(summary).includes(privateSeriesNote), false);
   assert.equal(JSON.stringify(summary).includes(privateCancellationReason), false);
@@ -1966,6 +2109,8 @@ try {
   assert.equal((await fetch(durationUrl, { headers: apiHeaders })).status, 401);
   for (const path of [availabilityUrl, `${availabilityUrl}/history`])
     assert.equal((await fetch(path, { headers: apiHeaders })).status, 401);
+  for (const path of [timeOffListUrl, timeOffUrl, `${timeOffUrl}/history`])
+    assert.equal((await fetch(path, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(seriesUrl, { headers: apiHeaders })).status, 401);
   for (const privateCancellationUrl of [cancellationUrl, `${cancellationUrl}/context`])
     assert.equal((await fetch(privateCancellationUrl, { headers: apiHeaders })).status, 401);
@@ -2069,6 +2214,14 @@ try {
   assert.equal((await fetchBundle(patientHeaders)).status, 403);
   for (const path of [availabilityUrl, `${availabilityUrl}/history`])
     assert.equal((await fetch(path, { headers: patientHeaders })).status, 403);
+  for (const path of [timeOffListUrl, timeOffUrl, `${timeOffUrl}/history`])
+    assert.equal((await fetch(path, { headers: patientHeaders })).status, 403);
+  const patientTimeOffWrite = await fetch(`${base}/api/time-off`, {
+    method: 'POST',
+    headers: patientHeaders,
+    body: JSON.stringify(timeOffCommand),
+  });
+  assert.equal(patientTimeOffWrite.status, 403);
   const patientAvailabilityWrite = await fetch(availabilityUrl, {
     method: 'POST',
     headers: patientHeaders,
@@ -2666,7 +2819,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

@@ -164,12 +164,21 @@ test('weekly sessions, consultation modes and duration drive bookings; time off 
     ).json(),
   ).toEqual([]);
   await page
-    .getByRole('button', { name: `Remove time off: ${closureReason}`, exact: true })
+    .locator('.time-off-entry')
+    .filter({ hasText: closureReason })
+    .getByRole('button', { name: 'Cancel time off', exact: true })
     .click();
-  await page
-    .getByRole('dialog')
-    .getByRole('button', { name: 'Remove time off', exact: true })
-    .click();
+  const cancellation = page.getByRole('dialog', { name: 'Cancel time off', exact: true });
+  await cancellation
+    .getByLabel('Reason for change', { exact: true })
+    .fill('Reviewed cancellation of the synthetic time-off entry.');
+  await cancellation
+    .getByLabel(
+      'I understand this cancels the time-off entry while weekly hours and other closures still apply.',
+      { exact: true },
+    )
+    .check();
+  await cancellation.getByRole('button', { name: 'Cancel time off', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeHidden();
   const restored: string[] = await (
     await page.request.get(`/api/slots?doctorId=${doctor.id}&date=${tuesday}&mode=in-person`)

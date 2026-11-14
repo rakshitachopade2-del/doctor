@@ -1,18 +1,24 @@
 # Release verification
 
-Release **1.31.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.32.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 557 passed                                              |
-| Browser and accessibility tests | 106 passed                                              |
+| API and online-backup tests     | 574 passed                                              |
+| Browser and accessibility tests | 110 passed                                              |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
 | Prettier and whitespace checks  | Passed                                                  |
 | Docker Compose configuration    | Valid                                                   |
 | Docker image build/runtime      | Passed: image build and disposable production container |
+
+The 17 time-off API checks cover reviewed creation, edits and retained cancellation; fixed identity/scope; strict date/time schemas; unchanged-value rejection; changes away and back; and actor/operation/record-bound retries after later cancellation, doctor renaming and actual date expiry. Overlapping entries remain independent and partial-day hours repeat on every inclusive date. Full recorded booking intervals, custom lengths and existing current-day active-visit rules are preserved. Sixty-three authentication and seven ownership race combinations revalidate current permissions under the lock. Twenty-six injected mutation failure points plus read failures verify atomic active projection, retained record, event, command and audit writes. Concurrent connections, legacy compatibility, unchanged migrated row bytes, immutable evidence, restart, indexed bounded list/history pagination and coherent count/page snapshots are checked. Closure changes invalidate stale recurring-series previews without rewriting their origins or appointments.
+
+Four time-off browser journeys exercise full-interval conflict rejection, overlapping restrictions, creation/edit/cancellation history and preservation of an unsaved weekly draft. Exact creation and edit retries after later cancellation cannot reactivate an entry. Stale drafts retain their values and private reason for fresh review; an aborted uncommitted request can recover from a definitive stale retry. Operational reception/other-doctor views exclude private history, patients see only slot effects, and private history is paginated. Held save and history authorization responses cannot alter a different doctor or a page revisited through Back. Mobile history and reception list views receive 320-pixel accessibility checks and screenshots. Doctor-switching checks also guard against duplicate weekly editors from colliding sibling component keys.
+
+Local and disposable-container production smoke checks create, edit and cancel synthetic leave; reject an edit clipping a saved 90-minute visit; and verify that cancelling one overlapping entry leaves the other restriction intact. Original create/edit receipts replay against later cancelled context without reactivation. Legacy removal retains cancellation evidence, the operational list excludes private notes/receipts, and active scheduling projections remain empty after both cancellations. Weekly hours and appointment snapshots remain unchanged; care summaries exclude private time-off evidence. Anonymous, patient and logged-out access are denied. No external delivery or deployment occurs.
 
 The 16 weekly-availability API checks cover inherited and existing explicit baselines, first default confirmation, canonical per-doctor revisions, changes away and back, strict reviewed commands, explicit no-op rejection and exact retries against later current hours. Compatibility PUT writes retain their response shape, record actual changes and preserve timestamps on explicit no-ops. Doctor-name changes do not invalidate hours revisions or alter earlier attribution. Both writers protect full recorded appointment intervals and consultation modes, including custom lengths and the existing current-day active-booking rules. Thirty-five authentication and five ownership race combinations revalidate access under the transaction lock. Injected write/read failures, competing connections, immutable events and receipts, restart, indexed heads and bounded 56-event history pagination are checked. Safe current schedules, slots and patient-facing records exclude private reasons and command receipts.
 
