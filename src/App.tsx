@@ -102,6 +102,11 @@ const ProcedureSchedulingPage = lazy(() =>
     default: module.ProcedureSchedulingPage,
   })),
 );
+const ProcedureCataloguePage = lazy(() =>
+  import('./pages/ProcedureCataloguePage').then((module) => ({
+    default: module.ProcedureCataloguePage,
+  })),
+);
 const PatientsPage = lazy(() =>
   import('./pages/ClinicPages').then((module) => ({ default: module.PatientsPage })),
 );
@@ -231,6 +236,12 @@ const staffNav = [
   { to: '/clinic/inventory', label: 'Inventory', icon: Package },
   { to: '/clinic/attendance', label: 'Attendance', icon: Clock3 },
   { to: '/clinic/knowledge', label: 'Knowledge library', icon: BookOpen, clinical: true },
+  {
+    to: '/clinic/procedure-catalogue',
+    label: 'Procedure catalogue',
+    icon: ClipboardList,
+    clinical: true,
+  },
 ];
 const adminPageLabels: Record<string, string> = {
   '/clinic/insights': 'Clinic reports',
@@ -572,6 +583,14 @@ export function App() {
           />
           <Route path="clinic/appointments" element={<AppointmentsPage />} />
           <Route path="clinic/procedures" element={<ProcedureSchedulingPage />} />
+          <Route
+            path="clinic/procedure-catalogue"
+            element={
+              <Guard roles={['admin', 'doctor']}>
+                <ProcedureCataloguePage />
+              </Guard>
+            }
+          />
           <Route path="clinic/patients" element={<PatientsPage />} />
           <Route path="clinic/patients/:id/details" element={<PatientProfilePage />} />
           <Route

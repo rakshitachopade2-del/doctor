@@ -23,6 +23,11 @@ import {
   effectiveProcedureAppointment,
   registerProcedureScheduling,
 } from './procedure-scheduling.ts';
+import {
+  procedureCatalogueRequestId,
+  procedureTemplateSelection,
+  registerProcedureCatalogue,
+} from './procedure-catalogue.ts';
 
 interface ClinicalContext {
   db: DB;
@@ -82,6 +87,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
       CREATE TRIGGER IF NOT EXISTS immutable_${table}_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Clinical documentation is append-only'); END;`);
   }
   registerProcedureScheduling(app, { db, actor, audit, fail });
+  const procedureCatalogue = registerProcedureCatalogue(app, { db, actor, audit, fail });
   function transaction<T>(operation: () => T): T {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -455,11 +461,11 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     res.status(201).json(amendment);
   });
   app.post('/api/procedures', (req: AuthRequest, res) => {
-    const identity = doctorIdentity(req);
+    z.object({}).strict().parse(req.query);
     const input = z
       .object({
         patientId: required,
-        appointmentId: required.nullable().optional(),
+        appointmentId: required.nullable().default(null),
         title: required,
         indication: text.min(1),
         benefits: text.min(1),
@@ -467,19 +473,46 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         alternatives: text.min(1),
         aftercare: text.min(1),
         estimatedCost: z.string().trim().max(300).default(''),
+        requestId: procedureCatalogueRequestId.optional(),
+        templateSelection: procedureTemplateSelection.optional(),
+        reviewedForPatient: z.literal(true).optional(),
       })
+      .strict()
+      .refine(
+        (value) =>
+          value.templateSelection
+            ? !!value.requestId && value.reviewedForPatient === true
+            : value.reviewedForPatient === undefined,
+        'Template use requires a request ID and explicit patient-specific review. The review acknowledgment applies only to a selected template.',
+      )
       .parse(req.body);
-    patientAccess(req, input.patientId);
-    const plan: ProcedurePlan = {
-      ...input,
-      ...identity,
-      id: id(),
-      appointmentId: input.appointmentId ?? null,
-      status: 'planned',
-      cancellationReason: null,
-      createdAt: nowISO(),
-    };
-    transaction(() => {
+    const result = transaction(() => {
+      const { user, doctor } = procedureCatalogue.authorize(req, true);
+      patientAccess(req, input.patientId);
+      const prior = procedureCatalogue.replayPlan(user, input);
+      if (prior)
+        return {
+          procedure: procedureView(get<ProcedurePlan>(db, 'procedures', prior.procedureId)!),
+          receipt: prior,
+          replayed: true,
+        };
+      const {
+        requestId: _requestId,
+        templateSelection,
+        reviewedForPatient: _reviewed,
+        ...fields
+      } = input;
+      const templateSource = procedureCatalogue.resolveSelection(templateSelection, fields);
+      const plan: ProcedurePlan = {
+        ...fields,
+        doctorId: doctor!.id,
+        doctorName: doctor!.name,
+        id: id(),
+        status: 'planned',
+        cancellationReason: null,
+        createdAt: nowISO(),
+        ...(templateSource ? { templateSource } : {}),
+      };
       if (plan.appointmentId) {
         const appointment = get<Appointment>(db, 'appointments', plan.appointmentId);
         if (!appointment || appointment.patientId !== plan.patientId)
@@ -488,6 +521,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
           fail(409, 'Choose an appointment that has not been cancelled or marked as a no-show.');
       }
       insert(db, 'procedures', plan);
+      const receipt = procedureCatalogue.recordPlan(user, input, plan);
       audit(req, 'planned procedure and documented discussion information', 'procedure', plan.id);
       notifyPatient(db, plan.patientId, `procedure-planned:${plan.id}`, {
         kind: 'procedure',
@@ -495,8 +529,15 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         detail: plan.title,
         href: '/my-care/record?tab=workflows',
       });
+      return { procedure: procedureView(plan), receipt, replayed: false };
     });
-    res.status(201).json(procedureView(plan));
+    res
+      .status(result.replayed ? 200 : 201)
+      .json(
+        result.receipt
+          ? { procedure: result.procedure, receipt: result.receipt }
+          : result.procedure,
+      );
   });
   app.post('/api/procedures/:id/agreements', (req: AuthRequest, res) => {
     const user = actor(req),

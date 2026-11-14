@@ -8,6 +8,7 @@ import type { InvoiceHistory } from '../../shared/billing-corrections';
 import type { ProcedureAppointmentSnapshot } from '../../shared/procedure-scheduling';
 import { formatDate, money, useResource, useSession } from '../lib';
 import { Badge, EmptyState, ErrorState, Loading, PageHeader } from '../components/ui';
+import { ProcedureTemplateSource } from '../components/ProcedureTemplateSource';
 import './care-summary.css';
 
 const status = (value: string) => value.replaceAll('-', ' ');
@@ -764,6 +765,7 @@ function SummaryDocument({ data, recordPath }: { data: CareSummary; recordPath: 
             date={entry.createdAt}
             badge={status(entry.status)}
           >
+            <ProcedureTemplateSource source={entry.templateSource} />
             <SummaryProcedureVisit
               appointment={entry.scheduledAppointment}
               linked={

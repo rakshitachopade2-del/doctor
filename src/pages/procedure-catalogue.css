@@ -1,0 +1,270 @@
+.procedure-catalogue-page {
+  min-width: 0;
+}
+.procedure-catalogue-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) minmax(150px, 1fr) minmax(160px, 1fr);
+  gap: 16px;
+  align-items: end;
+}
+.procedure-catalogue-filter-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.procedure-catalogue-list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 28px 0 14px;
+}
+.procedure-catalogue-list-heading h2 {
+  margin: 0;
+}
+.procedure-catalogue-list,
+.procedure-catalogue-history,
+.procedure-catalogue-version-history {
+  display: grid;
+  gap: 14px;
+}
+.procedure-catalogue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, auto) auto;
+  gap: 24px;
+  align-items: center;
+}
+.procedure-catalogue-row-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+.procedure-catalogue-row-title > div {
+  min-width: 0;
+}
+.procedure-catalogue-row-title h3 {
+  margin: 0 0 5px;
+  overflow-wrap: anywhere;
+}
+.procedure-catalogue-row-title p,
+.procedure-catalogue-row-state p {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}
+.procedure-catalogue-row-title .module-icon {
+  flex-shrink: 0;
+}
+.procedure-catalogue-row-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  max-width: 240px;
+}
+.procedure-catalogue-row-state p {
+  flex-basis: 100%;
+}
+.procedure-catalogue-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+.procedure-catalogue-source {
+  padding: 16px;
+  border: 1px solid #dce5df;
+  border-radius: 12px;
+  background: #f3f7f4;
+  overflow-wrap: anywhere;
+}
+.procedure-catalogue-source > strong {
+  display: block;
+  font-size: 17px;
+  color: #244c40;
+}
+.procedure-catalogue-source p {
+  margin: 8px 0 0;
+}
+.procedure-catalogue-summary > .procedure-catalogue-source {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.procedure-catalogue-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.procedure-catalogue-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 24px 0 18px;
+}
+.procedure-catalogue-tabs .button {
+  transition: none;
+}
+.procedure-catalogue-current {
+  display: grid;
+  gap: 18px;
+}
+.procedure-catalogue-current > .card > h2 {
+  margin-bottom: 18px;
+}
+.procedure-catalogue-version h3 {
+  margin: 0;
+}
+.procedure-catalogue-fields {
+  display: grid;
+  gap: 18px;
+  margin: 22px 0;
+}
+.procedure-catalogue-fields dt,
+.procedure-catalogue-event-state dt {
+  color: #50625a;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+.procedure-catalogue-fields dd,
+.procedure-catalogue-event-state dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+.procedure-catalogue-private {
+  padding: 14px 16px;
+  background: #f5f6f4;
+  border-radius: 10px;
+  color: #43574e;
+}
+.procedure-catalogue-private p,
+.procedure-catalogue-history > .card > p {
+  margin: 7px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.procedure-catalogue-history h3 {
+  margin: 0 0 6px;
+}
+.procedure-catalogue-event-state {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  border-top: 1px solid #e1e7e1;
+  padding-top: 14px;
+  margin-top: 16px;
+}
+.procedure-catalogue-version-history summary {
+  cursor: pointer;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.procedure-catalogue-version-history details[open] > summary {
+  margin-bottom: 20px;
+}
+.procedure-catalogue-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.procedure-catalogue-editor {
+  min-width: 0;
+}
+.procedure-catalogue-editor .notice p {
+  margin-bottom: 0;
+}
+.procedure-catalogue-editor input,
+.procedure-catalogue-editor textarea {
+  min-width: 0;
+}
+.procedure-catalogue-conflict {
+  display: grid;
+  gap: 14px;
+}
+.procedure-catalogue-conflict > .button {
+  justify-self: start;
+  white-space: normal;
+}
+.procedure-catalogue-publish-preview {
+  padding: 18px;
+  border: 1px solid #dce5df;
+  border-radius: 12px;
+}
+.procedure-catalogue-publish-preview > h3 {
+  margin-top: 0;
+}
+.procedure-catalogue-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 18px;
+  border-top: 1px solid #e1e7e1;
+}
+@media (max-width: 900px) {
+  .procedure-catalogue-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+  .procedure-catalogue-filters > .field:first-child {
+    grid-column: 1 / -1;
+  }
+  .procedure-catalogue-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+  }
+  .procedure-catalogue-row-title {
+    grid-column: 1 / -1;
+  }
+  .procedure-catalogue-summary {
+    grid-template-columns: 1fr;
+  }
+  .procedure-catalogue-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 560px) {
+  .procedure-catalogue-filters,
+  .procedure-catalogue-row,
+  .procedure-catalogue-event-state {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .procedure-catalogue-filters > *,
+  .procedure-catalogue-row > * {
+    min-width: 0;
+  }
+  .procedure-catalogue-list-heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .procedure-catalogue-row > .button {
+    justify-self: start;
+  }
+  .procedure-catalogue-row-title .module-icon {
+    display: none;
+  }
+  .procedure-catalogue-tabs .button,
+  .procedure-catalogue-actions .button,
+  .procedure-catalogue-modal-actions .button,
+  .procedure-catalogue-page .page-actions .button {
+    white-space: normal;
+  }
+  .procedure-catalogue-source,
+  .procedure-catalogue-publish-preview {
+    padding: 12px;
+  }
+  .procedure-catalogue-version .row {
+    flex-wrap: wrap;
+  }
+  .procedure-catalogue-conflict > .button {
+    width: 100%;
+  }
+}

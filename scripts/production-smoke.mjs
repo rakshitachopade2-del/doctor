@@ -293,6 +293,12 @@ try {
   assert.match(emptyProcedureScheduling.headers.get('cache-control'), /no-store/);
   assert.equal((await emptyProcedureScheduling.json()).total, 0);
   assert.equal((await fetch(procedureSchedulingUrl)).status, 401);
+  const catalogueUrl = `${base}/api/procedure-catalogue`;
+  const emptyCatalogue = await fetch(catalogueUrl, { headers: apiHeaders });
+  assert.equal(emptyCatalogue.status, 200);
+  assert.match(emptyCatalogue.headers.get('cache-control'), /no-store/);
+  assert.equal((await emptyCatalogue.json()).total, 0);
+  assert.equal((await fetch(catalogueUrl)).status, 401);
   assert.match(investigations.headers.get('cache-control'), /no-store/);
   assert.deepEqual(await investigations.json(), []);
   const investigationOwners = await fetch(`${base}/api/investigation-owners`, {
@@ -601,20 +607,86 @@ try {
   );
   assert.equal(recordedNotices.length, 1);
   assert.equal(JSON.stringify(recordedNotices).includes(privateEscalationReason), false);
-  const procedurePlan = await visitWrite(
-    '/procedures',
+  const templateFields = {
+    title: 'Synthetic scheduling plan',
+    benefits: 'Synthetic discussion',
+    risks: 'Synthetic discussion',
+    alternatives: 'Synthetic discussion',
+    aftercare: 'Synthetic aftercare',
+    estimatedCost: 'Not a charge',
+  };
+  const privateCatalogueReason = 'Synthetic private catalogue review reason';
+  const templateCreated = await visitWrite(
+    '/procedure-catalogue',
     {
-      patientId: patient.id,
-      title: 'Synthetic scheduling plan',
-      indication: 'Synthetic clinician-entered indication',
-      benefits: 'Synthetic discussion',
-      risks: 'Synthetic discussion',
-      alternatives: 'Synthetic discussion',
-      aftercare: 'Synthetic aftercare',
-      estimatedCost: 'Not a charge',
+      fields: templateFields,
+      reason: privateCatalogueReason,
+      requestId: randomUUID(),
     },
     201,
   );
+  const templateId = templateCreated.detail.template.id;
+  assert.equal(templateCreated.detail.publishedVersion, null);
+  const publishedTemplate = await visitWrite(`/procedure-catalogue/${templateId}/publish`, {
+    versionId: templateCreated.detail.latestVersion.id,
+    reviewed: true,
+    reason: privateCatalogueReason,
+    expectedRevision: templateCreated.detail.template.revision,
+    requestId: randomUUID(),
+  });
+  const procedureBody = {
+    ...templateFields,
+    patientId: patient.id,
+    indication: 'Synthetic clinician-entered patient-specific indication',
+    risks: 'Synthetic patient-specific discussion',
+    templateSelection: {
+      templateId,
+      versionId: publishedTemplate.detail.publishedVersion.id,
+      expectedSelectionRevision: publishedTemplate.detail.template.selectionRevision,
+    },
+    reviewedForPatient: true,
+    requestId: randomUUID(),
+  };
+  const createdProcedure = await visitWrite('/procedures', procedureBody, 201);
+  const procedurePlan = createdProcedure.procedure;
+  assert.equal(createdProcedure.receipt.requestId, procedureBody.requestId);
+  assert.equal(createdProcedure.receipt.createdById, account.user.id);
+  assert.equal(procedurePlan.templateSource.version, 1);
+  assert.deepEqual(procedurePlan.templateSource.customizedFields, ['risks']);
+  const nextDraft = await visitWrite(`/procedure-catalogue/${templateId}/versions`, {
+    fields: { ...templateFields, risks: 'Synthetic later template wording' },
+    reason: privateCatalogueReason,
+    expectedRevision: publishedTemplate.detail.template.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(
+    nextDraft.detail.template.selectionRevision,
+    publishedTemplate.detail.template.selectionRevision,
+  );
+  const publishedNext = await visitWrite(`/procedure-catalogue/${templateId}/publish`, {
+    versionId: nextDraft.detail.latestVersion.id,
+    reviewed: true,
+    reason: privateCatalogueReason,
+    expectedRevision: nextDraft.detail.template.revision,
+    requestId: randomUUID(),
+  });
+  assert.notEqual(
+    publishedNext.detail.template.selectionRevision,
+    publishedTemplate.detail.template.selectionRevision,
+  );
+  await visitWrite('/procedures', { ...procedureBody, requestId: randomUUID() }, 409);
+  const archivedTemplate = await visitWrite(`/procedure-catalogue/${templateId}/availability`, {
+    active: false,
+    reason: privateCatalogueReason,
+    expectedRevision: publishedNext.detail.template.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(archivedTemplate.detail.template.active, false);
+  const procedureReplay = await visitWrite('/procedures', procedureBody);
+  assert.equal(procedureReplay.procedure.id, procedurePlan.id);
+  assert.equal(procedureReplay.procedure.risks, procedureBody.risks);
+  assert.deepEqual(procedureReplay.procedure.templateSource, procedurePlan.templateSource);
+  assert.equal(JSON.stringify(procedureReplay.procedure).includes(privateCatalogueReason), false);
   const procedureScheduleUrl = `${base}/api/procedures/${procedurePlan.id}/scheduling`;
   const scheduleRead = await fetch(procedureScheduleUrl, { headers: apiHeaders });
   assert.equal(scheduleRead.status, 200);
@@ -757,6 +829,11 @@ try {
   assert.equal(sharedProcedure.appointmentId, null);
   assert.equal(sharedProcedure.effectiveAppointmentId, movedVisit.id);
   assert.equal(sharedProcedure.scheduledAppointment.durationMinutes, 20);
+  assert.equal(sharedProcedure.risks, procedureBody.risks);
+  assert.deepEqual(sharedProcedure.templateSource, procedurePlan.templateSource);
+  assert.equal(JSON.stringify(summary).includes(privateCatalogueReason), false);
+  assert.equal(JSON.stringify(summary).includes(procedureBody.requestId), false);
+  assert.equal(JSON.stringify(summary).includes('Synthetic later template wording'), false);
   assert.equal(summary.invoices[0].procedureId, procedurePlan.id);
   const summaryDownload = await fetch(`${summaryUrl}/download?revision=${summary.revision}`, {
     headers: apiHeaders,
@@ -822,6 +899,7 @@ try {
   assert.equal((await fetch(durationUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureScheduleUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureSchedulingUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(catalogueUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(escalationPolicyUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(escalationPreviewUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(escalationHistoryUrl, { headers: apiHeaders })).status, 401);

@@ -21,6 +21,7 @@ import type { ProcedureAppointmentSnapshot } from '../../shared/procedure-schedu
 import { api, formatDate, useResource, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
 import { DocumentUploadModal } from '../components/DocumentsPanel';
+import { ProcedureTemplateSource } from '../components/ProcedureTemplateSource';
 import './patient-workflows.css';
 
 const errorMessage = (error: unknown) =>
@@ -457,21 +458,24 @@ function InvestigationCard({
 
 function ProcedureDetails({ procedure }: { procedure: ProcedureRecord }) {
   return (
-    <dl className="patient-workflow-details procedure-information">
-      {[
-        ['Reason for the procedure', procedure.indication],
-        ['Expected benefits', procedure.benefits],
-        ['Risks and precautions', procedure.risks],
-        ['Alternatives', procedure.alternatives],
-        ['Planned aftercare', procedure.aftercare],
-        ['Estimated cost', procedure.estimatedCost],
-      ].map(([label, text]) => (
-        <div key={label}>
-          <dt>{label}</dt>
-          <dd>{text || 'Not recorded. Ask your clinician for clarification.'}</dd>
-        </div>
-      ))}
-    </dl>
+    <>
+      <ProcedureTemplateSource source={procedure.templateSource} />
+      <dl className="patient-workflow-details procedure-information">
+        {[
+          ['Reason for the procedure', procedure.indication],
+          ['Expected benefits', procedure.benefits],
+          ['Risks and precautions', procedure.risks],
+          ['Alternatives', procedure.alternatives],
+          ['Planned aftercare', procedure.aftercare],
+          ['Estimated cost', procedure.estimatedCost],
+        ].map(([label, text]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{text || 'Not recorded. Ask your clinician for clarification.'}</dd>
+          </div>
+        ))}
+      </dl>
+    </>
   );
 }
 

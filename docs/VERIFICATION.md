@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.17.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.18.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 341 passed                                              |
-| Browser and accessibility tests | 59 passed                                               |
+| API and online-backup tests     | 357 passed                                              |
+| Browser and accessibility tests | 62 passed                                               |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
@@ -54,6 +54,12 @@ MFA browser journeys cover authenticator enrollment, private recovery-code downl
 
 Production verification uses a randomly generated test-only encryption key, synthetic enrollment and a saved recovery code. It checks private status, exact activation replay, no session from password-only authentication, the scoped Secure/HttpOnly challenge cookie, rejection of private API access before proof, one-use challenge consumption, decremented recovery count and logout. The key and test database are discarded with the local process or disposable container; no real account is enrolled or reset.
 
+The 16 procedure-catalogue API tests cover clinical-role isolation, linked-clinician authorship, administrator availability, strict fields/queries and exclusion of patient indication from templates. Publication is tied to the latest immutable version; saving a draft leaves current selection unchanged, while publication and archive/reactivate cycles invalidate stale selections. Tests preserve tailored patient text, exact source attribution and summary hashes across private catalogue edits; reject source/account/request mismatches; retain exact replay after archival and terminal plan changes; and verify legacy manual responses, atomic audit/activity rollback, immutable evidence, concurrent changes, restart and bounded SQL list/history/version reads. Current publication attribution remains accessible after it leaves the latest 25 history events. External SQLite writers exercise revoked sessions and changed source state under the transaction lock.
+
+Catalogue browser journeys exercise create/review/publish, newer-draft separation, explicit overwrite confirmation, patient-specific review, template source refresh with preserved edits, patient decisions and unchanged patient summaries after later publication/archive. They cover stale catalogue edits, current-field review before keeping a draft, malformed or lost command responses, exact retries after subsequent rejection, and late responses after navigation. Bounded picker/history pages, old publication attribution, manual planning and unlinked-administrator/read-only roles are checked. Desktop versions and 320-pixel plan, history and patient-summary views include screenshots and accessibility checks.
+
+The local and container production checks start with an empty private catalogue, publish a synthetic template, create a tailored plan, save and publish a later version, reject stale selection and archive the template. Retrying the original plan keeps its ID, text and version without duplicate creation. Existing scheduling/billing checks then operate on that same plan. Patient summaries retain safe provenance and exclude private catalogue reasons, command UUIDs and later unpublished or unused wording. These checks use only disposable synthetic records and require no external provider.
+
 Axe checks in the browser suite report no detectable WCAG 2 A/AA and 2.1 AA violations on public discovery/sign-in, the clinic dashboard/booking dialog, mobile patient care/records, account security, and desktop/mobile scheduling, clinical workup and amendments, and mobile patient investigations/procedures/PDF reports, follow-up reviews and assignments, activity, waitlist workflows, procedure-linked invoices, administrator reports, expense history, image annotation editing/viewing and patient care summaries and inventory history/stock forms and staff/patient correction records at 320 pixels. The patient record layout is also checked at 320 pixels wide. Additional development checks covered clinic records, follow-ups, billing, knowledge, settings, and invoice/article/check-in dialogs. Automated checks are bounded to those rendered states; they do not establish comprehensive accessibility certification.
 
 Screenshots use only synthetic demonstration records:
@@ -66,4 +72,4 @@ Screenshots use only synthetic demonstration records:
 
 No deployment or hosted publication was performed. All release results above are from local runs with synthetic data.
 
-CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling, follow-up-escalation and MFA workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.
+CI repeats formatting checks, type checks, API tests, build, the local production smoke check, and Chromium browser checks after pushes. Browser tests use independent temporary databases for care, operations, reporting, records, investigation, resource, record-search, attendance, visit-duration, procedure-scheduling, follow-up-escalation, MFA and procedure-catalogue workflows; authentication rate limits remain enabled. Its remote result is separate from the local results above.

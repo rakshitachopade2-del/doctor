@@ -1,0 +1,109 @@
+.procedure-plan-form,
+.procedure-template-picker {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.procedure-template-picker {
+  padding: 1rem;
+  background: var(--surface-soft, #f4f7f4);
+  border: 1px solid var(--line, #dce4df);
+  border-radius: 12px;
+  margin-bottom: 1.25rem;
+}
+.procedure-template-search {
+  display: flex;
+  align-items: end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.procedure-template-search .field {
+  flex: 1;
+  min-width: 0;
+}
+.procedure-template-results {
+  display: grid;
+  gap: 0.65rem;
+}
+.procedure-template-option {
+  border: 1px solid var(--line, #dce4df);
+  border-radius: 9px;
+  padding: 0.8rem;
+  min-width: 0;
+  background: #fff;
+}
+.procedure-template-option h4,
+.procedure-template-option p {
+  margin: 0 0 0.45rem;
+  overflow-wrap: anywhere;
+}
+.procedure-template-preview,
+.procedure-template-source,
+.procedure-template-refresh {
+  padding: 1rem;
+  border-left: 3px solid #286455;
+  background: #f1f6f2;
+  border-radius: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.procedure-template-source {
+  margin: 0.8rem 0;
+  font-size: 0.88rem;
+}
+.procedure-template-source p {
+  margin: 0.35rem 0;
+  color: #43594e;
+}
+.procedure-template-preview dl,
+.procedure-template-refresh dl {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+.procedure-template-preview dt,
+.procedure-template-refresh dt {
+  font-weight: 650;
+  font-size: 0.8rem;
+  color: #43594e;
+}
+.procedure-template-preview dd,
+.procedure-template-refresh dd {
+  margin: 0.2rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.procedure-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.7rem;
+}
+.procedure-plan-form input,
+.procedure-plan-form textarea,
+.procedure-plan-form select {
+  min-width: 0;
+  max-width: 100%;
+}
+@media (max-width: 480px) {
+  .procedure-template-picker {
+    padding: 0.75rem;
+  }
+  .procedure-template-search > * {
+    width: 100%;
+  }
+  .procedure-plan-actions .button {
+    flex: 1 1 100%;
+  }
+}
+@media print {
+  .procedure-template-source {
+    break-inside: avoid;
+    background: none;
+    border-color: #555;
+    color: #000;
+  }
+  .procedure-template-source p {
+    color: #000;
+  }
+}

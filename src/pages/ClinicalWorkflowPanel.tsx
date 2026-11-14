@@ -29,6 +29,8 @@ import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../c
 import { DocumentUploadModal } from '../components/DocumentsPanel';
 import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
 import { ProcedureAppointmentModal } from '../components/ProcedureAppointmentModal';
+import { ProcedurePlanModal } from '../components/ProcedurePlanModal';
+import { ProcedureTemplateSource } from '../components/ProcedureTemplateSource';
 import './clinical-workflows.css';
 
 type ClinicalResource = {
@@ -534,6 +536,7 @@ export function ClinicalWorkflowPanel({
                       {statusText[procedure.status]}
                     </Badge>
                   </div>
+                  <ProcedureTemplateSource source={procedure.templateSource} />
                   {linkedAppointment ? (
                     <div className="cw-detail">
                       <span>Current linked appointment</span>
@@ -717,7 +720,7 @@ export function ClinicalWorkflowPanel({
         />
       )}
       {action?.kind === 'procedure' && (
-        <ProcedureModal
+        <ProcedurePlanModal
           patientId={patientId}
           appointments={appointments}
           onClose={() => setAction(null)}
@@ -965,70 +968,6 @@ function ResultModal({
       <div className="notice">
         Result entries are preserved in the record. Sharing clinician findings requires a separate
         review and publication step.
-      </div>
-    </ClinicalForm>
-  );
-}
-
-function ProcedureModal({
-  patientId,
-  appointments,
-  ...callbacks
-}: ModalCallbacks & { patientId: string; appointments: Appointment[] }) {
-  return (
-    <ClinicalForm
-      title="Plan a procedure"
-      endpoint="/api/procedures"
-      payload={(form) => ({
-        ...Object.fromEntries(form),
-        patientId,
-        appointmentId: form.get('appointmentId') || undefined,
-      })}
-      label="Save procedure plan"
-      {...callbacks}
-    >
-      <Field label="Procedure name">
-        <input name="title" required maxLength={300} />
-      </Field>
-      <Field label="Linked appointment">
-        <select name="appointmentId">
-          <option value="">No linked appointment</option>
-          {appointments
-            .filter((a) => !['cancelled', 'no-show'].includes(a.status))
-            .map((a) => (
-              <option key={a.id} value={a.id}>
-                {formatDate(a.date)} · {a.time} IST · {a.durationMinutes ?? 30} minutes ·{' '}
-                {a.doctorName} · {a.reason}
-              </option>
-            ))}
-        </select>
-      </Field>
-      <Field label="Indication / reason">
-        <textarea name="indication" required rows={3} maxLength={8000} />
-      </Field>
-      <Field label="Expected benefits">
-        <textarea name="benefits" required rows={2} maxLength={8000} />
-      </Field>
-      <Field label="Risks to discuss">
-        <textarea name="risks" required rows={3} maxLength={8000} />
-      </Field>
-      <Field label="Alternatives to discuss">
-        <textarea name="alternatives" required rows={2} maxLength={8000} />
-      </Field>
-      <Field label="Planned aftercare instructions">
-        <textarea name="aftercare" required rows={3} maxLength={8000} />
-      </Field>
-      <Field label="Estimated cost">
-        <input
-          name="estimatedCost"
-          required
-          maxLength={300}
-          placeholder="Amount or range discussed with the patient"
-        />
-      </Field>
-      <div className="notice">
-        This saves an immutable plan for discussion. Record the patient’s decision separately before
-        documenting completion. It does not reserve a procedure room or create an invoice.
       </div>
     </ClinicalForm>
   );

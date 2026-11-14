@@ -57,6 +57,8 @@ Investigation worklists derive from existing orders and results; no historical r
 
 The `activity` table preserves notification contents and recipient ownership; only read status can change. The inbox starts empty after an upgrade and records supported events that occur afterward. It does not reconstruct notifications from existing records or send historical updates to newly created accounts. Clinical records remain the source of truth. Marking activity read does not record a clinician review, book a visit, or change treatment.
 
+The procedure catalogue also starts empty on upgrade. Its current projection, immutable content versions, publication/availability history and retry receipts are included in the database backup. Existing procedure plans retain their original wording without invented template provenance. No catalogue examples or medical wording are automatically seeded. Linked clinicians explicitly author and publish templates in the application; no new environment variable or provider is required.
+
 After restart, confirm account access and review each doctor’s actual hours and planned closures. An upgrade does not automatically reschedule, cancel, or notify patients. Keep the pre-upgrade backup so application code and database state can be restored together if rollback is required.
 
 ## Follow-up escalation operation

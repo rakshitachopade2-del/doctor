@@ -1,5 +1,6 @@
 import type { Role } from './types';
 import type { ProcedureAppointmentSnapshot } from './procedure-scheduling';
+import type { ProcedureTemplateSource } from './procedure-catalogue';
 
 export interface InvestigationResult {
   id: string;
@@ -75,6 +76,8 @@ export interface ProcedureRecord {
   /** Original appointmentId is immutable. Explicit null here means the current link was removed. */
   effectiveAppointmentId?: string | null;
   scheduledAppointment?: ProcedureAppointmentSnapshot | null;
+  /** Safe immutable source of an explicitly reviewed patient-specific plan. */
+  templateSource?: ProcedureTemplateSource;
   doctorId: string;
   doctorName: string;
   title: string;

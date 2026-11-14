@@ -57,6 +57,7 @@ flowchart LR
 | `server/waitlist.ts`                           | Immutable requests, terminal history, active claims and atomic confirmed booking           |
 | `server/identity.ts`                           | Account lifecycle, session metadata migration/revocation, recovery grants                  |
 | `server/documents.ts`                          | Immutable PDF originals, upload provenance, patient-scoped attachment downloads            |
+| `server/procedure-catalogue.ts`                | Private versioned procedure templates, publication, availability and creation receipts     |
 | `server/clinical.ts`                           | Investigation review/publication, procedure agreement/completion, encounter amendments     |
 | `server/follow-up.ts`                          | Review snapshots, owner assignments, optimistic revisions, plan state and worklist         |
 | `server/follow-up-escalation.ts`               | Operational policies, exact previews, immutable notices, dedupe and local scheduled checks |
@@ -153,6 +154,16 @@ Status is derived from those events: an order with no result is `ordered`; a lat
 `procedureCompletions` and `procedureCancellations` are separate terminal events. Completion requires the latest decision to be agreed and records outcome, aftercare and the responsible doctor. A linked visit cannot be cancelled/no-show or have a start time still in the future. Decision, cancellation and completion checks use immediate transactions so a concurrent withdrawal cannot leave a completed record whose latest decision is declined. Completion or cancellation leaves the linked appointment unchanged.
 
 These events record communication and reported decisions; they are not an electronic signature system or an assurance that all consent requirements have been met. Medication safety checks, clinical protocol validation, pathology interpretation and external laboratory connections remain outside this implementation.
+
+### Procedure catalogue and patient snapshots
+
+`server/procedure-catalogue.ts` owns a private clinical catalogue with a current-state projection, immutable content versions, immutable lifecycle events and actor-bound command receipts. The catalogue, version and history reads apply SQL filters and page bounds before decoding content. Detail returns the current publication, latest draft and recent history; older versions and events remain available through paginated endpoints. Reads and their audit evidence use one coherent transaction.
+
+Draft creation never changes an existing publication. Publication requires a linked clinician's explicit review of the exact latest version. Archive/reactivation requires an administrator and preserves all content/history. The management revision tracks every lifecycle change, while the selection revision tracks publication and availability changes only. An archive/reactivate cycle changes the selection revision even if it restores the same published version. No catalogue mutation creates patient activity.
+
+Procedure creation accepts an optional retry UUID and explicit template selection. Template use requires patient-specific review acknowledgment; the indication always comes from the clinician's patient form. The backend verifies the active current publication and selection revision in the same transaction as the independent patient plan, receipt, audit and notification. The server derives a safe source snapshot and changed-field names. Private catalogue reasons, command IDs and concurrency tokens remain outside the patient-facing plan. Updating a template cannot change a saved plan, its decision history or its summary revision.
+
+UUID requests return a creation receipt with the original request/account/patient/source association and the current view of the same immutable plan. Exact retries resolve before later source or appointment eligibility checks, so a lost response followed by archival cannot create a duplicate plan. Legacy manual clients without a UUID retain the original response shape. The new plan form retains uncertain attempts, validates the receipt and immutable fields, and requires source review after a conflict while preserving patient-specific edits.
 
 ### Procedure appointment assignments
 
