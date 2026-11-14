@@ -1,18 +1,24 @@
 # Release verification
 
-Release **1.30.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.31.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 541 passed                                              |
-| Browser and accessibility tests | 102 passed                                              |
+| API and online-backup tests     | 557 passed                                              |
+| Browser and accessibility tests | 106 passed                                              |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
 | Prettier and whitespace checks  | Passed                                                  |
 | Docker Compose configuration    | Valid                                                   |
 | Docker image build/runtime      | Passed: image build and disposable production container |
+
+The 16 weekly-availability API checks cover inherited and existing explicit baselines, first default confirmation, canonical per-doctor revisions, changes away and back, strict reviewed commands, explicit no-op rejection and exact retries against later current hours. Compatibility PUT writes retain their response shape, record actual changes and preserve timestamps on explicit no-ops. Doctor-name changes do not invalidate hours revisions or alter earlier attribution. Both writers protect full recorded appointment intervals and consultation modes, including custom lengths and the existing current-day active-booking rules. Thirty-five authentication and five ownership race combinations revalidate access under the transaction lock. Injected write/read failures, competing connections, immutable events and receipts, restart, indexed heads and bounded 56-event history pagination are checked. Safe current schedules, slots and patient-facing records exclude private reasons and command receipts.
+
+Four weekly-availability browser journeys cover first confirmation, booked-length protection, patient booking against changed hours, private paginated history and role-specific access. Stale drafts retain hours and reason for explicit refreshed review. Lost or malformed responses, later rejection and wrong-actor receipts keep one exact request; an uncommitted attempt can recover after a definitive stale response. Late saves and history authorization responses cannot affect a different doctor or a page revisited through Back. Editor and history views receive 320-pixel accessibility checks and screenshots. The existing scheduling journeys continue to cover sessions, modes, time off and read-only access.
+
+Local and disposable-container production checks verify inherited confirmation, legacy changes and no-op stability, changes away and back, original-event replay with later current context, private history and anonymous/patient/logout denial. An attempted change that clips a saved 90-minute visit is rejected without altering its appointment, current hours or history. Public schedules, calendars and care summaries omit private availability evidence. All accounts and data are synthetic; nothing is deployed.
 
 Saved-summary bundle API checks verify unchanged frozen JSON and exact selected original image/PDF bytes, deterministic ZIP output, manifest and archive hashes, safe generated paths, historical fingerprint handling and Python standard-library ZIP interoperability. Authorization includes patient ownership, clinical access, reception denial and fresh session/role/MFA checks under the transaction lock. Selection and source checks reject foreign/current-only/duplicate references, missing or mismatched originals, invalid signatures, stale revisions and size-limit violations without partial archives. Attachment pagination reads only the selected page's source metadata/lengths; original file bytes are retrieved only for explicit preview/download selection. Audit failures prevent file response headers.
 

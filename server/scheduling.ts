@@ -4,6 +4,7 @@ import type { AuthRequest } from './app.ts';
 import type { Appointment, Doctor, User } from '../shared/types.ts';
 import type { DoctorSchedule, ScheduleClosure, SchedulingData } from '../shared/scheduling.ts';
 import { addDays, clinicToday, get, id, list, nowISO, type DB } from './db.ts';
+import { registerWeeklyAvailability } from './weekly-availability.ts';
 
 type Fail = (status: number, message: string) => never;
 interface SchedulingContext {
@@ -47,48 +48,6 @@ const overlaps = (start: number, end: number, otherStart: number, otherEnd: numb
 const appointmentDuration = (appointment: Appointment) => appointment.durationMinutes ?? 30;
 const modeMatches = (windowMode: 'in-person' | 'online' | 'both', mode?: 'in-person' | 'online') =>
   !mode || windowMode === 'both' || windowMode === mode;
-const windowSchema = z.object({
-  day: z.number().int().min(0).max(6),
-  start: timeSchema,
-  end: timeSchema,
-  mode: z.enum(['in-person', 'online', 'both']),
-});
-const scheduleSchema = z
-  .object({
-    durationMinutes: z.union([
-      z.literal(15),
-      z.literal(20),
-      z.literal(30),
-      z.literal(45),
-      z.literal(60),
-    ]),
-    windows: z.array(windowSchema).max(70),
-  })
-  .superRefine((value, context) => {
-    const windows = [...value.windows].sort(
-      (a, b) => a.day - b.day || a.start.localeCompare(b.start),
-    );
-    for (let index = 0; index < windows.length; index++) {
-      const window = windows[index];
-      if (minutes(window.end) - minutes(window.start) < value.durationMinutes)
-        context.addIssue({
-          code: 'custom',
-          message: 'Every session must end after it starts and fit at least one appointment.',
-          path: ['windows'],
-        });
-      if (
-        index > 0 &&
-        windows[index - 1].day === window.day &&
-        windows[index - 1].end > window.start
-      )
-        context.addIssue({
-          code: 'custom',
-          message:
-            'Sessions on the same day cannot overlap, including sessions for different modes.',
-          path: ['windows'],
-        });
-    }
-  });
 
 export function createScheduling(context: SchedulingContext) {
   const { db, fail } = context;
@@ -304,31 +263,21 @@ export function createScheduling(context: SchedulingContext) {
       staff(req);
       res.json(schedule(String(req.params.doctorId)));
     });
-    app.put('/api/schedules/:doctorId', (req: AuthRequest, res) => {
-      const doctorId = String(req.params.doctorId);
-      mayManage(req, doctorId);
-      const input = scheduleSchema.parse(req.body);
-      const value: DoctorSchedule = {
-        ...input,
-        doctorId,
-        windows: input.windows.sort((a, b) => a.day - b.day || a.start.localeCompare(b.start)),
-        updatedAt: nowISO(),
-      };
-      transaction(() => {
+    registerWeeklyAvailability(app, {
+      ...context,
+      transaction,
+      schedule,
+      assertPreservesBookings(value) {
         const affected = pendingFutureAppointments().filter(
-          (appointment) => appointment.doctorId === doctorId && !fitsSchedule(value, appointment),
+          (appointment) =>
+            appointment.doctorId === value.doctorId && !fitsSchedule(value, appointment),
         );
         if (affected.length)
           fail(
             409,
             `This schedule would invalidate ${affected.length} booked appointment${affected.length === 1 ? '' : 's'}. Reschedule or cancel the affected appointments first.`,
           );
-        db.prepare(
-          'INSERT INTO doctorSchedules(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',
-        ).run(doctorId, JSON.stringify(value));
-        audit(req, 'updated doctor availability', 'doctorSchedule', doctorId);
-      });
-      res.json(value);
+      },
     });
     app.post('/api/schedule-closures', (req: AuthRequest, res) => {
       const input = z

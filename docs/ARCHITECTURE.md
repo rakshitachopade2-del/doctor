@@ -130,6 +130,14 @@ Availability uses Asia/Kolkata and a 180-day booking horizon. Slot generation ex
 
 Schedule updates and closures run transactionally and reject changes that would invalidate active future bookings. Changing the default visit length does not rewrite existing appointments. Public clinic-hours text is separate from these bookable schedules.
 
+## Weekly availability revisions and history
+
+`server/weekly-availability.ts` registers private doctor-scoped context, reviewed saves and paginated history from `server/scheduling.ts`. The existing canonical schedule validator, effective-default reader, transaction and protected-appointment interval checks are reused. `doctorSchedules` remains the current source for booking, custom visits, recurring series and public duration/slot calculations.
+
+`weeklyAvailabilityChanges` retains immutable before/after snapshots with doctor/history indexes; `weeklyAvailabilityCommands` retains actor-bound retry identities. Revisions bind the doctor ID, normalized sessions/duration, inherited/explicit status and latest event identity. Existing saved schedules and inherited defaults start without invented author/history. The compatibility PUT records actual changes as legacy events; an explicit no-op preserves its saved timestamp. Reviewed saves and compatibility writes authorize and validate under the same lock, and atomically retain their event/audit evidence.
+
+The weekly editor captures its source independently of closure refreshes, preserves stale drafts for explicit review, validates exact command receipts against the selected doctor and allows later-current replay context. Its private history is available only to administrators and the owning doctor. Reception and other doctors keep the existing current-hours view. Doctor selection and route guards prevent obsolete requests from changing a different editor. Weekly changes do not alter appointment snapshots, closure behavior or public clinic-hours text.
+
 ## Custom visit duration
 
 `Appointment.durationPolicy` separates schedule-based consultations from explicit custom lengths. An absent legacy policy means `schedule`; absent duration remains 30 minutes. Custom visits retain their saved minutes through generic staff and patient rescheduling. Ordinary visits still adopt the selected doctor's current schedule duration. Shared scheduling resolves one effective duration for slot generation and write validation, using five-minute starts for custom visits and the existing schedule cadence for ordinary visits.

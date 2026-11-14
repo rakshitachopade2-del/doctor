@@ -60,6 +60,12 @@ test('weekly sessions, consultation modes and duration drive bookings; time off 
     .getByRole('combobox', { name: 'Monday session 2 consultation mode', exact: true })
     .selectOption('in-person');
   await page.getByRole('checkbox', { name: 'Open Wednesday', exact: true }).uncheck();
+  await page
+    .getByLabel('Reason for availability change', { exact: true })
+    .fill('Reviewed synthetic weekly sessions, modes and appointment length.');
+  await page
+    .getByLabel('I reviewed these weekly hours and appointment length.', { exact: true })
+    .check();
   await page.getByRole('button', { name: 'Save availability', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Save availability', exact: true })).toBeDisabled();
   await expect(

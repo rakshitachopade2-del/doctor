@@ -1,23 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
-import {
-  CalendarClock,
-  CalendarOff,
-  Check,
-  Clock3,
-  Globe2,
-  Plus,
-  Save,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { CalendarClock, CalendarOff, Globe2, Plus, Trash2 } from 'lucide-react';
 import type { Doctor } from '../../shared/types';
-import type {
-  DoctorSchedule,
-  ScheduleClosure,
-  ScheduleWindow,
-  SchedulingData,
-} from '../../shared/scheduling';
+import type { ScheduleClosure, SchedulingData } from '../../shared/scheduling';
 import { ApiError, api, formatDate, today, useResource, useSession, useToast } from '../lib';
 import {
   Avatar,
@@ -31,31 +16,13 @@ import {
   PageHeader,
 } from '../components/ui';
 import './scheduling.css';
+import {
+  WeeklyAvailabilityEditor,
+  WeeklyAvailabilityReadonly,
+} from '../components/WeeklyAvailabilityEditor';
 
-const weekdays = [
-  { day: 1, name: 'Monday' },
-  { day: 2, name: 'Tuesday' },
-  { day: 3, name: 'Wednesday' },
-  { day: 4, name: 'Thursday' },
-  { day: 5, name: 'Friday' },
-  { day: 6, name: 'Saturday' },
-  { day: 0, name: 'Sunday' },
-];
-const minutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
-const clock = (value: number) =>
-  `${Math.floor(value / 60)
-    .toString()
-    .padStart(2, '0')}:${(value % 60).toString().padStart(2, '0')}`;
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.';
-const sortedWindows = (windows: ScheduleWindow[]) =>
-  [...windows].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
-function scheduleSignature(schedule: Pick<DoctorSchedule, 'windows' | 'durationMinutes'>) {
-  return JSON.stringify({
-    durationMinutes: schedule.durationMinutes,
-    windows: sortedWindows(schedule.windows),
-  });
-}
 function ClosurePeriod({ closure }: { closure: ScheduleClosure }) {
   return (
     <>
@@ -72,14 +39,12 @@ function ClosurePeriod({ closure }: { closure: ScheduleClosure }) {
 
 export function SchedulingPage() {
   const { session } = useSession();
+  const location = useLocation();
   const scheduling = useResource<SchedulingData>('/api/scheduling');
   const doctors = useResource<Doctor[]>('/api/doctors');
   const toast = useToast();
   const [doctorId, setDoctorId] = useState(session.user?.doctorId || '');
-  const [draft, setDraft] = useState<DoctorSchedule | null>(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [conflict, setConflict] = useState(false);
   const [addingClosure, setAddingClosure] = useState(false);
   const [removing, setRemoving] = useState<ScheduleClosure | null>(null);
   const [removalBusy, setRemovalBusy] = useState(false);
@@ -89,19 +54,9 @@ export function SchedulingPage() {
     isAdmin || (session.user?.role === 'doctor' && session.user.doctorId === doctorId);
   const selectedDoctor = doctors.data?.find((d) => d.id === doctorId);
   const savedSchedule = scheduling.data?.schedules.find((s) => s.doctorId === doctorId);
-  const savedSignature = savedSchedule
-    ? `${savedSchedule.doctorId}:${scheduleSignature(savedSchedule)}`
-    : '';
-  const dirty =
-    !!draft && !!savedSchedule && scheduleSignature(draft) !== scheduleSignature(savedSchedule);
   useEffect(() => {
     if (!doctorId && doctors.data?.length) setDoctorId(doctors.data[0].id);
   }, [doctorId, doctors.data]);
-  useEffect(() => {
-    setDraft(savedSchedule ? structuredClone(savedSchedule) : null);
-    setError('');
-    setConflict(false);
-  }, [savedSignature]);
   const closures = useMemo(
     () =>
       (scheduling.data?.closures || [])
@@ -113,84 +68,6 @@ export function SchedulingPage() {
         ),
     [scheduling.data, doctorId],
   );
-  const openDays = new Set(draft?.windows.map((w) => w.day) || []).size;
-  const weeklyMinutes = (draft?.windows || []).reduce(
-    (sum, w) => sum + Math.max(0, minutes(w.end) - minutes(w.start)),
-    0,
-  );
-  function updateWindow(index: number, changes: Partial<ScheduleWindow>) {
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            windows: current.windows.map((window, i) =>
-              i === index ? { ...window, ...changes } : window,
-            ),
-          }
-        : current,
-    );
-  }
-  function addWindow(day: number) {
-    setDraft((current) => {
-      if (!current) return current;
-      const windows = current.windows.filter((w) => w.day === day);
-      const start = windows.length
-        ? Math.min(22 * 60, Math.max(...windows.map((w) => minutes(w.end))) + 60)
-        : 9 * 60;
-      return {
-        ...current,
-        windows: [
-          ...current.windows,
-          {
-            day,
-            start: clock(start),
-            end: clock(windows.length ? Math.min(23 * 60 + 59, start + 120) : 18 * 60),
-            mode: 'both',
-          },
-        ],
-      };
-    });
-  }
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (!draft || !canEdit) return;
-    setError('');
-    setConflict(false);
-    for (const weekday of weekdays) {
-      const sessions = sortedWindows(draft.windows.filter((w) => w.day === weekday.day));
-      if (
-        sessions.some(
-          (w) => !w.start || !w.end || minutes(w.end) - minutes(w.start) < draft.durationMinutes,
-        )
-      ) {
-        setError(
-          `${weekday.name}: each session must have room for at least one ${draft.durationMinutes}-minute appointment.`,
-        );
-        return;
-      }
-      if (sessions.some((w, i) => i > 0 && minutes(w.start) < minutes(sessions[i - 1].end))) {
-        setError(
-          `${weekday.name}: sessions must not overlap. Leave a gap between sessions for a break.`,
-        );
-        return;
-      }
-    }
-    setSaving(true);
-    try {
-      await api(`/api/schedules/${doctorId}`, {
-        method: 'PUT',
-        body: { durationMinutes: draft.durationMinutes, windows: sortedWindows(draft.windows) },
-      });
-      await scheduling.reload();
-      await doctors.reload();
-      toast('Availability saved. New bookings now use this schedule.');
-    } catch (e) {
-      setError(errorMessage(e));
-      setConflict(e instanceof ApiError && e.status === 409);
-    } finally {
-      setSaving(false);
-    }
-  }
   async function removeClosure() {
     if (!removing) return;
     setRemovalBusy(true);
@@ -208,7 +85,7 @@ export function SchedulingPage() {
   }
   if ((scheduling.loading && !scheduling.data) || (doctors.loading && !doctors.data))
     return <Loading />;
-  if (scheduling.error || doctors.error)
+  if ((!scheduling.data && scheduling.error) || (!doctors.data && doctors.error))
     return (
       <ErrorState
         message={scheduling.error || doctors.error}
@@ -236,6 +113,15 @@ export function SchedulingPage() {
           ) : undefined
         }
       />
+      {(scheduling.error || doctors.error) && (
+        <ErrorState
+          message={scheduling.error || doctors.error}
+          retry={() => {
+            void scheduling.reload();
+            void doctors.reload();
+          }}
+        />
+      )}
       {!doctors.data?.length ? (
         <Card>
           <EmptyState
@@ -258,7 +144,9 @@ export function SchedulingPage() {
               <Field label="Doctor schedule">
                 <select
                   value={doctorId}
-                  onChange={(e) => setDoctorId(e.target.value)}
+                  onChange={(e) => {
+                    if (!saving) setDoctorId(e.target.value);
+                  }}
                   disabled={saving}
                 >
                   {doctors.data.map((d) => (
@@ -288,275 +176,26 @@ export function SchedulingPage() {
               </span>
             </div>
           )}
-          <div className="schedule-workspace">
-            <Card className="weekly-schedule">
-              <form onSubmit={save}>
-                <div className="schedule-editor-heading">
-                  <div>
-                    <h2>Weekly availability</h2>
-                    <p>Patients can book only within these hours.</p>
-                  </div>
-                  {dirty ? (
-                    <Badge tone="amber">Unsaved changes</Badge>
-                  ) : (
-                    <Badge tone="green">
-                      <Check size={12} /> Current schedule
-                    </Badge>
-                  )}
-                </div>
-                {draft ? (
-                  <>
-                    <div className="schedule-duration">
-                      <Field label="Appointment length">
-                        <select
-                          disabled={!canEdit || saving}
-                          value={draft.durationMinutes}
-                          onChange={(e) =>
-                            setDraft({
-                              ...draft,
-                              durationMinutes: Number(
-                                e.target.value,
-                              ) as DoctorSchedule['durationMinutes'],
-                            })
-                          }
-                        >
-                          {[15, 20, 30, 45, 60].map((duration) => (
-                            <option key={duration} value={duration}>
-                              {duration} minutes
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <p>
-                        Applies to new appointments. Existing bookings keep their recorded duration.
-                      </p>
-                    </div>
-                    <div className="schedule-weekdays">
-                      {weekdays.map((weekday) => {
-                        const windows = draft.windows
-                          .map((w, index) => ({ ...w, index }))
-                          .filter((w) => w.day === weekday.day);
-                        return (
-                          <section
-                            className={`schedule-day ${windows.length ? '' : 'schedule-day-closed'}`}
-                            key={weekday.day}
-                            aria-label={`${weekday.name} availability`}
-                          >
-                            <div className="schedule-day-heading">
-                              <label>
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Open ${weekday.name}`}
-                                  checked={windows.length > 0}
-                                  disabled={!canEdit || saving}
-                                  onChange={(e) =>
-                                    e.target.checked
-                                      ? addWindow(weekday.day)
-                                      : setDraft({
-                                          ...draft,
-                                          windows: draft.windows.filter(
-                                            (w) => w.day !== weekday.day,
-                                          ),
-                                        })
-                                  }
-                                />
-                                <span>{weekday.name}</span>
-                              </label>
-                              {!windows.length && (
-                                <span className="schedule-closed-label">Closed</span>
-                              )}
-                            </div>
-                            <div className="schedule-day-windows">
-                              {windows.map((window, position) => (
-                                <div className="schedule-window" key={window.index}>
-                                  <div className="schedule-time-range">
-                                    <Field label={`${weekday.name} session ${position + 1} start`}>
-                                      <input
-                                        type="time"
-                                        step="60"
-                                        value={window.start}
-                                        required
-                                        disabled={!canEdit || saving}
-                                        onChange={(e) =>
-                                          updateWindow(window.index, { start: e.target.value })
-                                        }
-                                      />
-                                    </Field>
-                                    <span aria-hidden="true">–</span>
-                                    <Field label={`${weekday.name} session ${position + 1} end`}>
-                                      <input
-                                        type="time"
-                                        step="60"
-                                        value={window.end}
-                                        required
-                                        disabled={!canEdit || saving}
-                                        onChange={(e) =>
-                                          updateWindow(window.index, { end: e.target.value })
-                                        }
-                                      />
-                                    </Field>
-                                  </div>
-                                  <Field
-                                    label={`${weekday.name} session ${position + 1} consultation mode`}
-                                  >
-                                    <select
-                                      disabled={!canEdit || saving}
-                                      value={window.mode}
-                                      onChange={(e) =>
-                                        updateWindow(window.index, {
-                                          mode: e.target.value as ScheduleWindow['mode'],
-                                        })
-                                      }
-                                    >
-                                      <option value="both">In clinic & online</option>
-                                      <option value="in-person">In clinic only</option>
-                                      <option value="online">Online only</option>
-                                    </select>
-                                  </Field>
-                                  {canEdit && (
-                                    <button
-                                      disabled={saving}
-                                      type="button"
-                                      className="icon-button"
-                                      aria-label={`Remove ${weekday.name} session ${position + 1}`}
-                                      onClick={() =>
-                                        setDraft({
-                                          ...draft,
-                                          windows: draft.windows.filter(
-                                            (_, index) => index !== window.index,
-                                          ),
-                                        })
-                                      }
-                                    >
-                                      <X size={16} />
-                                    </button>
-                                  )}
-                                </div>
-                              ))}
-                              {canEdit && windows.length > 0 && (
-                                <button
-                                  type="button"
-                                  className="button button-ghost button-small schedule-add-session"
-                                  disabled={saving}
-                                  onClick={() => addWindow(weekday.day)}
-                                  aria-label={`Add ${weekday.name} session`}
-                                >
-                                  <Plus size={14} /> Add session
-                                </button>
-                              )}
-                            </div>
-                          </section>
-                        );
-                      })}
-                    </div>
-                    {error && (
-                      <div className="notice notice-error schedule-error" role="alert">
-                        <strong>{error}</strong>
-                        {conflict && (
-                          <p>
-                            Reschedule or cancel affected future appointments before changing these
-                            hours. Existing bookings have not been changed.{' '}
-                            <Link to="/clinic/appointments">Review appointments</Link>
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    {canEdit && (
-                      <div className="schedule-save">
-                        <span>
-                          {dirty
-                            ? 'Your changes are not yet available to patients.'
-                            : 'Your weekly hours are up to date.'}
-                        </span>
-                        <div>
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            disabled={!dirty || saving}
-                            onClick={() => {
-                              setDraft(savedSchedule ? structuredClone(savedSchedule) : null);
-                              setError('');
-                              setConflict(false);
-                            }}
-                          >
-                            Reset changes
-                          </button>
-                          <button className="button button-primary" disabled={!dirty || saving}>
-                            <Save size={16} />
-                            {saving ? 'Saving…' : 'Save availability'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <EmptyState
-                    title="No schedule available"
-                    description="Refresh to load this doctor’s availability."
-                    action={
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={scheduling.reload}
-                      >
-                        Refresh schedule
-                      </button>
-                    }
-                  />
-                )}
-              </form>
-            </Card>
-            <aside className="schedule-aside">
-              <Card className="availability-summary">
-                <span className="availability-summary-icon">
-                  <Clock3 size={23} />
-                </span>
-                <h2>A week with intention.</h2>
-                <p>
-                  Give each visit the time it needs. Keep breaks and non-clinical work outside
-                  bookable sessions.
-                </p>
-                <dl>
-                  <div>
-                    <dt>Open days</dt>
-                    <dd>
-                      {openDays}
-                      <span> / week</span>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Weekly bookable hours</dt>
-                    <dd>
-                      {Number((weeklyMinutes / 60).toFixed(1))}
-                      <span> hours</span>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Appointment length</dt>
-                    <dd>
-                      {draft?.durationMinutes || 30}
-                      <span> minutes</span>
-                    </dd>
-                  </div>
-                </dl>
-                {dirty && <small>Summary reflects your unsaved draft.</small>}
-              </Card>
-              <Card className="schedule-principles">
-                <h3>Every booking stays protected</h3>
-                <p>
-                  Hours and time off cannot be changed in a way that invalidates existing future
-                  appointments.
-                </p>
-                <p>
-                  Online sessions reserve a time only. Your clinic still shares the joining details
-                  separately.
-                </p>
-                <Link className="text-link" to="/clinic/appointments">
-                  Review appointments <CalendarClock size={15} />
-                </Link>
-              </Card>
-            </aside>
-          </div>
+          {!selectedDoctor ? (
+            <Loading />
+          ) : canEdit ? (
+            <WeeklyAvailabilityEditor
+              key={`${doctorId}:${location.key}`}
+              doctorId={doctorId}
+              onLockChange={setSaving}
+              onSaved={() => {
+                void scheduling.reload();
+                void doctors.reload();
+              }}
+            />
+          ) : savedSchedule ? (
+            <WeeklyAvailabilityReadonly schedule={savedSchedule} />
+          ) : (
+            <EmptyState
+              title="No schedule available"
+              description="Refresh to load this doctor's availability."
+            />
+          )}
           <Card className="schedule-closures">
             <div className="schedule-editor-heading">
               <div>

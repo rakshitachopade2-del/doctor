@@ -650,19 +650,124 @@ try {
     },
     201,
   );
-  await visitWrite(
-    `/schedules/${visitDoctor.id}`,
-    {
-      durationMinutes: 20,
-      windows: Array.from({ length: 7 }, (_, day) => ({
-        day,
-        start: '09:00',
-        end: '18:00',
-        mode: 'both',
-      })),
+  const availabilityPath = `/schedules/${visitDoctor.id}/availability`;
+  const availabilityUrl = `${base}/api${availabilityPath}`;
+  const privateAvailabilityReason = 'Synthetic private weekly availability review';
+  async function availabilityRead(suffix = '') {
+    const response = await fetch(`${availabilityUrl}${suffix}`, { headers: apiHeaders });
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+  const inheritedAvailability = await availabilityRead();
+  assert.equal(inheritedAvailability.source, 'inherited');
+  assert.equal(inheritedAvailability.latestChange, null);
+  assert.equal(inheritedAvailability.schedule.updatedAt, '');
+  assert.equal((await availabilityRead('/history')).total, 0);
+  const availabilityCommand = {
+    schedule: {
+      durationMinutes: inheritedAvailability.schedule.durationMinutes,
+      windows: inheritedAvailability.schedule.windows,
     },
+    reason: privateAvailabilityReason,
+    expectedRevision: inheritedAvailability.revision,
+    requestId: randomUUID(),
+  };
+  const firstAvailability = await visitWrite(availabilityPath, availabilityCommand, 201);
+  assert.equal(firstAvailability.change.before.source, 'inherited');
+  assert.equal(firstAvailability.change.after.source, 'explicit');
+  assert.equal(firstAvailability.context.source, 'explicit');
+  assert.equal(firstAvailability.receipt.actorId, account.user.id);
+  assert.equal(firstAvailability.receipt.doctorId, visitDoctor.id);
+  await visitWrite(
+    availabilityPath,
+    {
+      ...availabilityCommand,
+      expectedRevision: firstAvailability.context.revision,
+      requestId: randomUUID(),
+    },
+    400,
+  );
+  const weeklyValues = {
+    durationMinutes: 20,
+    windows: Array.from({ length: 7 }, (_, day) => ({
+      day,
+      start: '09:00',
+      end: '18:00',
+      mode: 'both',
+    })),
+  };
+  const legacyAvailability = await visitWrite(
+    `/schedules/${visitDoctor.id}`,
+    weeklyValues,
     200,
     'PUT',
+  );
+  const legacyAvailabilityContext = await availabilityRead();
+  assert.deepEqual(legacyAvailabilityContext.schedule, legacyAvailability);
+  assert.equal(legacyAvailabilityContext.latestChange.source, 'legacy');
+  assert.equal(legacyAvailabilityContext.latestChange.reason, null);
+  assert.deepEqual(
+    await visitWrite(`/schedules/${visitDoctor.id}`, weeklyValues, 200, 'PUT'),
+    legacyAvailability,
+  );
+  assert.deepEqual(await availabilityRead(), legacyAvailabilityContext);
+  const alternateAvailability = await visitWrite(
+    availabilityPath,
+    {
+      schedule: { ...weeklyValues, durationMinutes: 30 },
+      reason: privateAvailabilityReason,
+      expectedRevision: legacyAvailabilityContext.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const restoredAvailability = await visitWrite(
+    availabilityPath,
+    {
+      schedule: weeklyValues,
+      reason: 'Synthetic return to reviewed twenty-minute weekly sessions',
+      expectedRevision: alternateAvailability.context.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  assert.notEqual(restoredAvailability.context.revision, legacyAvailabilityContext.revision);
+  await visitWrite(
+    availabilityPath,
+    {
+      schedule: { ...weeklyValues, durationMinutes: 30 },
+      reason: privateAvailabilityReason,
+      expectedRevision: legacyAvailabilityContext.revision,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  const availabilityReplay = await visitWrite(availabilityPath, availabilityCommand);
+  assert.deepEqual(availabilityReplay.change, firstAvailability.change);
+  assert.deepEqual(availabilityReplay.receipt, firstAvailability.receipt);
+  assert.deepEqual(availabilityReplay.context, restoredAvailability.context);
+  const availabilityHistory = await availabilityRead('/history?pageSize=10');
+  assert.equal(availabilityHistory.total, 4);
+  assert.equal(availabilityHistory.items.filter((item) => item.source === 'legacy').length, 1);
+  for (const path of [availabilityUrl, `${availabilityUrl}/history`])
+    assert.equal((await fetch(path)).status, 401);
+  const operationalAvailability = await (
+    await fetch(`${base}/api/scheduling`, { headers: apiHeaders })
+  ).json();
+  assert.equal(JSON.stringify(operationalAvailability).includes(privateAvailabilityReason), false);
+  assert.equal(
+    JSON.stringify(operationalAvailability).includes(firstAvailability.change.id),
+    false,
+  );
+  const publicDoctorsAfterAvailability = await (await fetch(`${base}/api/doctors`)).json();
+  assert.equal(
+    publicDoctorsAfterAvailability.find((item) => item.id === visitDoctor.id)
+      .appointmentDurationMinutes,
+    20,
+  );
+  assert.equal(
+    JSON.stringify(publicDoctorsAfterAvailability).includes(privateAvailabilityReason),
+    false,
   );
   const visitDay = new Date(Date.parse(`${attendanceDay}T12:00:00Z`) + 7 * 86400000)
     .toISOString()
@@ -680,6 +785,29 @@ try {
   const customVisit = await visitWrite('/visit-duration/bookings', customBookingBody, 201);
   assert.equal(customVisit.appointment.durationPolicy, 'custom');
   assert.equal(customVisit.appointment.durationMinutes, 90);
+  const beforeBlockedAvailability = await availabilityRead();
+  await visitWrite(
+    availabilityPath,
+    {
+      schedule: {
+        ...weeklyValues,
+        windows: weeklyValues.windows.map((window) => ({ ...window, end: '10:00' })),
+      },
+      reason: 'Synthetic rejected change that would shorten a booked ninety-minute visit',
+      expectedRevision: beforeBlockedAvailability.revision,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  assert.deepEqual(await availabilityRead(), beforeBlockedAvailability);
+  assert.equal((await availabilityRead('/history')).total, 4);
+  const protectedVisit = await (
+    await fetch(`${base}/api/appointments/${customVisit.appointment.id}/duration`, {
+      headers: apiHeaders,
+    })
+  ).json();
+  assert.deepEqual(protectedVisit.appointment, customVisit.appointment);
+
   const customReplay = await visitWrite('/visit-duration/bookings', customBookingBody);
   assert.equal(customReplay.event.id, customVisit.event.id);
   const movedVisit = await visitWrite(
@@ -705,6 +833,7 @@ try {
   const visitStart = Date.parse(`${visitDay}T09:10:00+05:30`);
   assert.ok(calendarText.includes(`DTSTART:${calendarStamp(visitStart)}`));
   assert.ok(calendarText.includes(`LOCATION:${profileCommand.profile.address}`));
+  assert.equal(calendarText.includes(privateAvailabilityReason), false);
   assert.ok(calendarText.includes(`DTEND:${calendarStamp(visitStart + 90 * 60000)}`));
   const durationUrl = `${base}/api/appointments/${movedVisit.id}/duration`;
   const durationResponse = await fetch(durationUrl, { headers: apiHeaders });
@@ -1405,6 +1534,9 @@ try {
   assert.equal(JSON.stringify(summary).includes(privateEscalationReason), false);
   assert.equal(JSON.stringify(summary).includes(noticeRun.events[0].id), false);
   assert.equal(JSON.stringify(summary).includes(privateDurationReason), false);
+  assert.equal(JSON.stringify(summary).includes(privateAvailabilityReason), false);
+  assert.equal(JSON.stringify(summary).includes(availabilityCommand.requestId), false);
+  assert.equal(JSON.stringify(summary).includes(firstAvailability.change.id), false);
   assert.equal(JSON.stringify(summary).includes(privateSchedulingReason), false);
   assert.equal(JSON.stringify(summary).includes(privateSeriesNote), false);
   assert.equal(JSON.stringify(summary).includes(privateCancellationReason), false);
@@ -1832,6 +1964,8 @@ try {
   assert.equal((await fetch(`${base}/api/search/patients`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(attendanceUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(durationUrl, { headers: apiHeaders })).status, 401);
+  for (const path of [availabilityUrl, `${availabilityUrl}/history`])
+    assert.equal((await fetch(path, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(seriesUrl, { headers: apiHeaders })).status, 401);
   for (const privateCancellationUrl of [cancellationUrl, `${cancellationUrl}/context`])
     assert.equal((await fetch(privateCancellationUrl, { headers: apiHeaders })).status, 401);
@@ -1933,6 +2067,14 @@ try {
     assert.equal((await fetch(`${base}${path}`, { headers: patientHeaders })).status, 403);
   assert.equal((await fetch(`${bundleUrl}/attachments`, { headers: patientHeaders })).status, 403);
   assert.equal((await fetchBundle(patientHeaders)).status, 403);
+  for (const path of [availabilityUrl, `${availabilityUrl}/history`])
+    assert.equal((await fetch(path, { headers: patientHeaders })).status, 403);
+  const patientAvailabilityWrite = await fetch(availabilityUrl, {
+    method: 'POST',
+    headers: patientHeaders,
+    body: JSON.stringify(availabilityCommand),
+  });
+  assert.equal(patientAvailabilityWrite.status, 403);
   const patientConfigurationWrite = await fetch(`${base}${configurationPath}/profile`, {
     method: 'POST',
     headers: patientHeaders,
@@ -2524,7 +2666,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

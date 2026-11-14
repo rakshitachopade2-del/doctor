@@ -1,0 +1,115 @@
+.weekly-availability-form,
+.weekly-availability-history {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.weekly-availability-source {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f5f8f3;
+  margin-bottom: 15px;
+}
+.weekly-availability-source p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 5px 0 0;
+}
+.weekly-history-button {
+  margin-bottom: 20px;
+}
+.weekly-availability-notice {
+  display: block;
+  margin-bottom: 18px;
+}
+.weekly-availability-review {
+  margin: 20px 0;
+}
+.weekly-availability-confirm {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  line-height: 1.6;
+}
+.weekly-availability-confirm input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin: 4px 0 0;
+}
+.weekly-availability-conflict,
+.weekly-availability-latest {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 15px;
+  margin-bottom: 20px;
+  background: #f7f9f5;
+  min-width: 0;
+}
+.weekly-availability-conflict h3 {
+  margin: 0;
+}
+.weekly-availability-snapshot dl {
+  margin: 0;
+}
+.weekly-availability-snapshot dl > div {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.weekly-availability-snapshot dt {
+  font-size: 12px;
+  font-weight: 600;
+}
+.weekly-availability-snapshot dd {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.weekly-availability-change {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 15px;
+  min-width: 0;
+}
+.weekly-availability-change > p {
+  margin: 10px 0;
+}
+.weekly-availability-reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.weekly-availability-change summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--green);
+  padding: 8px 0;
+}
+.weekly-availability-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.weekly-availability-comparison h3 {
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+.weekly-availability-form .button,
+.weekly-availability-history .button {
+  white-space: normal;
+}
+@media (max-width: 600px) {
+  .weekly-availability-comparison {
+    grid-template-columns: 1fr;
+  }
+  .weekly-availability-change > .row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .weekly-availability-form .schedule-save > div {
+    flex-direction: column;
+  }
+  .weekly-availability-form .schedule-save .button {
+    width: 100%;
+  }
+}
