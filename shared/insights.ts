@@ -46,7 +46,7 @@ export interface InsightsTotals {
   refundCount: number;
   /** Manual payment records whose recording timestamp falls within the period. */
   collectionsPaise: number;
-  /** Refund entries recorded in the period, independent of the original receipt date. */
+  /** Nonvoided refund entries by their original recording date, independent of the receipt date. */
   refundsPaise: number;
   /** Recorded collections less recorded refunds; may be negative. */
   netCollectionsPaise: number;
@@ -62,7 +62,7 @@ export interface InsightsDay {
   noShowAppointments: number;
   invoicedPaise: number;
   collectionsPaise: number;
-  /** Refund entries recorded in the period, independent of the original receipt date. */
+  /** Nonvoided refund entries by their original recording date, independent of the receipt date. */
   refundsPaise: number;
   /** Recorded collections less recorded refunds; may be negative. */
   netCollectionsPaise: number;

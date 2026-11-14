@@ -1965,6 +1965,138 @@ try {
     });
     assert.equal(denied.status, status);
   }
+  // A mistaken refund is corrected without deleting the recorded return or moving money.
+  const afterRefundCopy = await reminderWrite(
+    refundCopiesPath,
+    {
+      expectedRevision: afterRefundSummary.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const afterRefundCopyUrl = `${base}/api${refundCopiesPath}/${afterRefundCopy.copy.id}/download`;
+  const afterRefundBytes = Buffer.from(
+    await (await fetch(afterRefundCopyUrl, { headers: patientHeaders })).arrayBuffer(),
+  );
+  const refundVoidPath = `/invoices/${refundInvoice.id}/refunds/${refundRecorded.refund.id}/void`;
+  const blockedVoid = {
+    reason: 'Synthetic refund entered in error',
+    entryErrorConfirmed: true,
+    expectedRevision: refundedNoCharge.revision,
+    requestId: randomUUID(),
+  };
+  await reminderWrite(refundVoidPath, blockedVoid, 409);
+  const unchangedAfterBlockedVoid = await reminderRead(
+    `/invoices/${refundInvoice.id}`,
+    patientHeaders,
+  );
+  assert.equal(unchangedAfterBlockedVoid.invoice.paidPaise, 0);
+  assert.deepEqual(unchangedAfterBlockedVoid.refundVoids, []);
+  const restoredCharges = await reminderWrite(`/invoices/${refundInvoice.id}/corrections`, {
+    items: refundInvoice.items,
+    reason: 'Synthetic restoration of charges before correcting refund',
+    expectedRevision: unchangedAfterBlockedVoid.revision,
+    requestId: randomUUID(),
+  });
+  const refundVoidCommand = {
+    ...blockedVoid,
+    expectedRevision: restoredCharges.revision,
+    requestId: randomUUID(),
+  };
+  const firstVoid = await reminderWrite(refundVoidPath, refundVoidCommand, 201);
+  assert.equal(firstVoid.detail.invoice.paidPaise, 4001);
+  assert.equal(firstVoid.detail.invoice.totalPaise, 10000);
+  assert.equal(firstVoid.detail.invoice.status, 'partial');
+  assert.deepEqual(firstVoid.detail.refunds, patientRefundDetail.refunds);
+  assert.equal(firstVoid.detail.refundVoids.length, 1);
+  assert.equal(firstVoid.void.amountPaise, 4001);
+  assert.equal(firstVoid.receipt.requestId, refundVoidCommand.requestId);
+  await reminderWrite(refundVoidPath, { ...refundVoidCommand, requestId: randomUUID() }, 409);
+  const afterFirstVoidReport = await reminderRead(`/insights?${refundRange}`);
+  assert.equal(afterFirstVoidReport.totals.collectionsPaise, 10000);
+  assert.equal(afterFirstVoidReport.totals.refundsPaise, 5999);
+  assert.equal(afterFirstVoidReport.totals.refundCount, 1);
+  assert.equal(afterFirstVoidReport.totals.netCollectionsPaise, 4001);
+  const secondVoid = await reminderWrite(
+    `/invoices/${refundInvoice.id}/refunds/${refundFinal.refund.id}/void`,
+    {
+      reason: 'Synthetic second erroneous refund',
+      entryErrorConfirmed: true,
+      expectedRevision: firstVoid.detail.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  assert.equal(secondVoid.detail.invoice.paidPaise, 10000);
+  assert.equal(secondVoid.detail.invoice.status, 'paid');
+  assert.equal(secondVoid.detail.refundVoids.length, 2);
+  const refundPaymentReversed = await reminderWrite(
+    `/invoices/${refundInvoice.id}/payments/${refundPayment.payments[0].id}/reverse`,
+    {
+      reason: 'Synthetic original receipt also entered by mistake',
+      entryErrorConfirmed: true,
+      expectedRevision: secondVoid.detail.revision,
+      requestId: randomUUID(),
+    },
+  );
+  assert.equal(refundPaymentReversed.invoice.paidPaise, 0);
+  assert.equal(refundPaymentReversed.invoice.status, 'unpaid');
+  const voidReplay = await reminderWrite(refundVoidPath, refundVoidCommand);
+  assert.deepEqual(voidReplay.void, firstVoid.void);
+  assert.deepEqual(voidReplay.receipt, firstVoid.receipt);
+  assert.equal(voidReplay.detail.invoice.paidPaise, 0);
+  assert.equal(voidReplay.detail.refundVoids.length, 2);
+  const originalRefundReplayAfterVoid = await reminderWrite(refundPath, refundCommand);
+  assert.deepEqual(originalRefundReplayAfterVoid.refund, refundRecorded.refund);
+  assert.equal(originalRefundReplayAfterVoid.detail.refundVoids.length, 2);
+  await reminderWrite(
+    refundPath,
+    {
+      ...refundCommand,
+      expectedRevision: refundPaymentReversed.revision,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  const voidedPatientDetail = await reminderRead(`/invoices/${refundInvoice.id}`, patientHeaders);
+  assert.deepEqual(voidedPatientDetail.refundVoids, secondVoid.detail.refundVoids);
+  for (const entry of voidedPatientDetail.refundVoids) {
+    assert.equal('createdById' in entry, false);
+    assert.equal('requestId' in entry, false);
+    assert.equal('expectedRevision' in entry, false);
+  }
+  const voidedSummary = await reminderRead(refundSummaryPath, patientHeaders);
+  assert.notEqual(voidedSummary.revision, afterRefundSummary.revision);
+  assert.deepEqual(
+    voidedSummary.invoiceHistories.find((entry) => entry.invoiceId === refundInvoice.id)
+      .refundVoids,
+    voidedPatientDetail.refundVoids,
+  );
+  assert.deepEqual(
+    Buffer.from(await (await fetch(afterRefundCopyUrl, { headers: patientHeaders })).arrayBuffer()),
+    afterRefundBytes,
+  );
+  const voidedReport = await reminderRead(`/insights?${refundRange}`);
+  assert.equal(voidedReport.totals.refundCount, 0);
+  assert.equal(voidedReport.totals.refundsPaise, 0);
+  assert.equal(voidedReport.totals.collectionsPaise, 0);
+  assert.equal(voidedReport.totals.netCollectionsPaise, 0);
+  const voidedCsv = await fetch(`${base}/api/insights/export?${refundRange}`, {
+    headers: verifiedHeaders,
+  });
+  assert.equal(voidedCsv.status, 200);
+  assert.match(await voidedCsv.text(), /currently voided erroneous entries excluded/);
+  for (const [headers, status] of [
+    [publicHeaders, 401],
+    [patientHeaders, 403],
+  ]) {
+    const denied = await fetch(`${base}/api${refundVoidPath}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(refundVoidCommand),
+    });
+    assert.equal(denied.status, status);
+  }
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -2053,7 +2185,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

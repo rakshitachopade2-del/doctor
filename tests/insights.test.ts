@@ -922,11 +922,141 @@ test('refund reports use their own IST recording dates, preserve gross collectio
   }
   const plan = app.locals.db
     .prepare(
-      'EXPLAIN QUERY PLAN SELECT data FROM paymentRefunds WHERE createdAt>=? AND createdAt<=? ORDER BY createdAt,id',
+      'EXPLAIN QUERY PLAN SELECT data FROM paymentRefunds WHERE createdAt>=? AND createdAt<=? AND NOT EXISTS (SELECT 1 FROM paymentRefundVoids v WHERE v.refundId=paymentRefunds.id) ORDER BY createdAt,id',
     )
     .all('2012-02-28T18:30:00.000Z', '2012-02-29T18:29:59.999Z');
   assert.match(
     JSON.stringify(plan),
     /SEARCH paymentRefunds USING INDEX payment_refunds_created_at/,
+  );
+});
+
+test('voiding a mistaken refund corrects its original reporting period without recording new cash flow', async () => {
+  const invoice = storedInvoice('2013-01-02T06:00:00.000Z', 20000, 12000);
+  const payment = storedPayment(invoice, '2013-02-02T06:00:00.000Z', 20000, 'card');
+  const refund = {
+    id: randomUUID(),
+    invoiceId: invoice.id,
+    paymentId: payment.id,
+    amountPaise: 8000,
+    method: 'bank',
+    reference: 'PRIVATE_RETURN_REFERENCE',
+    reason: 'PRIVATE_ORIGINAL_REFUND_REASON',
+    refundedExternallyConfirmed: true,
+    beforePaidPaise: 20000,
+    afterPaidPaise: 12000,
+    createdByName: 'Private synthetic refund recorder',
+    createdById: 'user-admin',
+    requestId: randomUUID(),
+    expectedRevision: 'a'.repeat(64),
+    createdAt: '2013-02-28T18:30:00.000Z',
+  };
+  app.locals.db
+    .prepare(
+      'INSERT INTO paymentRefunds(id,invoiceId,paymentId,amountPaise,createdAt,data) VALUES (?,?,?,?,?,?)',
+    )
+    .run(
+      refund.id,
+      invoice.id,
+      payment.id,
+      refund.amountPaise,
+      refund.createdAt,
+      JSON.stringify(refund),
+    );
+  const before = await report('2013-03-01', '2013-03-01');
+  assert.equal(before.totals.refundCount, 1);
+  assert.equal(before.totals.refundsPaise, 8000);
+  assert.equal(before.totals.netCollectionsPaise, -8000);
+  const todayBefore = await report(clinicToday(), clinicToday());
+  const detail = await call(`/invoices/${invoice.id}`, admin);
+  const input = {
+    reason: 'PRIVATE_VOID_REASON',
+    entryErrorConfirmed: true,
+    expectedRevision: detail.data.revision,
+    requestId: randomUUID(),
+  };
+  const voided = await call(
+    `/invoices/${invoice.id}/refunds/${refund.id}/void`,
+    admin,
+    'POST',
+    input,
+  );
+  assert.equal(voided.status, 201, JSON.stringify(voided.data));
+  assert.equal(voided.data.detail.invoice.paidPaise, 20000);
+  const originalPeriod = await report('2013-03-01', '2013-03-01');
+  assert.equal(originalPeriod.totals.refundCount, 0);
+  assert.equal(originalPeriod.totals.refundsPaise, 0);
+  assert.equal(originalPeriod.totals.netCollectionsPaise, 0);
+  assert.equal(originalPeriod.daily[0].refundsPaise, 0);
+  assert.equal(originalPeriod.refundsByMethod.find((row) => row.method === 'bank')!.count, 0);
+  assert.ok(originalPeriod.refundsByMethod.every((row) => row.amountPaise === 0));
+  assert.equal((await report('2013-01-01', '2013-01-31')).totals.issuedInvoiceOutstandingPaise, 0);
+  const receiptPeriod = await report('2013-02-01', '2013-02-28');
+  assert.equal(receiptPeriod.totals.collectionsPaise, 20000);
+  assert.equal(receiptPeriod.totals.refundsPaise, 0);
+  assert.equal(receiptPeriod.totals.netCollectionsPaise, 20000);
+  const todayAfter = await report(clinicToday(), clinicToday());
+  assert.deepEqual(todayAfter.totals, todayBefore.totals);
+  assert.deepEqual(todayAfter.daily, todayBefore.daily);
+  const replay = await call(
+    `/invoices/${invoice.id}/refunds/${refund.id}/void`,
+    admin,
+    'POST',
+    input,
+  );
+  assert.equal(replay.status, 200);
+  assert.deepEqual(replay.data.void, voided.data.void);
+  const csv = await call('/insights/export?from=2013-03-01&to=2013-03-01', admin);
+  assert.equal(csv.status, 200);
+  const rows = parseCsv(csv.data);
+  assert.deepEqual(
+    rows.find((row) => row[0] === 'totals' && row[2] === 'refundsPaise'),
+    ['totals', '', 'refundsPaise', '', '', '0'],
+  );
+  assert.ok(
+    rows.some(
+      (row) =>
+        row[2] === 'refundsBasis' && row[3].includes('currently voided erroneous entries excluded'),
+    ),
+  );
+  for (const secret of [
+    refund.id,
+    invoice.id,
+    payment.id,
+    input.requestId,
+    refund.reason,
+    input.reason,
+    refund.reference,
+  ]) {
+    assert.equal(csv.data.includes(secret), false);
+    assert.equal(JSON.stringify(originalPeriod).includes(secret), false);
+  }
+  const reversed = await call(
+    `/invoices/${invoice.id}/payments/${payment.id}/reverse`,
+    admin,
+    'POST',
+    {
+      reason: 'Synthetic original payment also entered in error',
+      entryErrorConfirmed: true,
+      expectedRevision: voided.data.detail.revision,
+      requestId: randomUUID(),
+    },
+  );
+  assert.equal(reversed.status, 200, JSON.stringify(reversed.data));
+  const final = await report('2013-01-01', '2013-03-01');
+  assert.equal(final.totals.paymentCount, 0);
+  assert.equal(final.totals.refundCount, 0);
+  assert.equal(final.totals.collectionsPaise, 0);
+  assert.equal(final.totals.refundsPaise, 0);
+  assert.equal(final.totals.netCollectionsPaise, 0);
+  assert.equal(
+    app.locals.db.prepare('SELECT count(*) n FROM paymentRefunds WHERE id=?').get(refund.id)!.n,
+    1,
+  );
+  assert.equal(
+    app.locals.db
+      .prepare('SELECT count(*) n FROM paymentRefundVoids WHERE refundId=?')
+      .get(refund.id)!.n,
+    1,
   );
 });

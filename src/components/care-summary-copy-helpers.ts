@@ -299,6 +299,35 @@ export function checkedCareSummary(
           nonempty(row.createdByName),
       );
     }
+    const refundVoids =
+      archived && history.refundVoids === undefined ? [] : entries(history.refundVoids);
+    requireValue(new Set(refundVoids.map((row) => row.refundId)).size === refundVoids.length);
+    for (const row of refundVoids) {
+      dated(row, ['reason', 'createdByName']);
+      requireValue(
+        row.invoiceId === history.invoiceId &&
+          nonempty(row.refundId) &&
+          nonempty(row.paymentId) &&
+          integer(row.amountPaise) &&
+          Number(row.amountPaise) > 0 &&
+          Number(row.amountPaise) <= 1_000_000_000 &&
+          integer(row.beforePaidPaise) &&
+          integer(row.afterPaidPaise) &&
+          Number(row.afterPaidPaise) <= 1_000_000_000 &&
+          Number(row.beforePaidPaise) + Number(row.amountPaise) === row.afterPaidPaise &&
+          row.entryErrorConfirmed === true &&
+          nonempty(row.reason) &&
+          String(row.reason).length <= 1000 &&
+          row.reason === String(row.reason).trim() &&
+          nonempty(row.createdByName) &&
+          refunds.some(
+            (refund) =>
+              refund.id === row.refundId &&
+              refund.paymentId === row.paymentId &&
+              refund.amountPaise === row.amountPaise,
+          ),
+      );
+    }
   }
   return value as unknown as CareSummary;
 }

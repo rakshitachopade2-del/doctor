@@ -261,6 +261,7 @@ test('corrections preserve initial charges, identity snapshots and original issu
     corrections: second.data.corrections,
     reversals: [],
     refunds: [],
+    refundVoids: [],
   });
 });
 

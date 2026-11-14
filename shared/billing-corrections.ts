@@ -69,10 +69,45 @@ export interface PaymentRefundMutation {
     refundId: string;
   };
 }
+/** Corrects an erroneous refund record; it does not record or move money. */
+export interface PaymentRefundVoid {
+  id: string;
+  invoiceId: string;
+  refundId: string;
+  paymentId: string;
+  amountPaise: number;
+  beforePaidPaise: number;
+  afterPaidPaise: number;
+  entryErrorConfirmed: true;
+  /** Shared with the patient and authorized invoice readers. */
+  reason: string;
+  createdByName: string;
+  createdAt: string;
+}
+export interface PaymentRefundVoidInput {
+  reason: string;
+  entryErrorConfirmed: true;
+  expectedRevision: string;
+  requestId: string;
+}
+export interface PaymentRefundVoidMutation {
+  detail: InvoiceDetail;
+  void: PaymentRefundVoid;
+  /** Private confirmation for the administrator executing this exact command. */
+  receipt: {
+    requestId: string;
+    actorId: string;
+    invoiceId: string;
+    refundId: string;
+    expectedRevision: string;
+    voidId: string;
+  };
+}
 export interface InvoiceHistory {
   invoiceId: string;
   issuedCharges: InvoiceCharges;
   corrections: InvoiceCorrection[];
   reversals: PaymentReversal[];
   refunds: PaymentRefund[];
+  refundVoids: PaymentRefundVoid[];
 }

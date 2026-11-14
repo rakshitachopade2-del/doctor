@@ -320,7 +320,7 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
         <Metric
           label="Recorded refunds"
           value={amount(totals.refundsPaise)}
-          detail={`${number(totals.refundCount)} externally completed refunds recorded during this period.`}
+          detail={`${number(totals.refundCount)} nonvoided refund entries originally recorded during this period.`}
         />
         <Metric
           label="Net recorded collections"
@@ -335,7 +335,7 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
         <Metric
           label="Outstanding on period invoices"
           value={amount(totals.issuedInvoiceOutstandingPaise)}
-          detail="Current corrected balance of invoices originally issued in this period, including later payment records, refunds and reversals of erroneous entries."
+          detail="Current corrected balance of invoices originally issued in this period, including later payment records, refunds and corrections of erroneous payment/refund entries."
         />
       </div>
       <div className="insights-scope-note">
@@ -344,11 +344,12 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
           Current corrected invoice amounts use the original issue date. Collections exclude
           reversed erroneous entries and use each payment’s original recording date; actual receipt
           dates are not stored separately. A reversal corrects a recorded entry and does not return
-          money. Refunds use their own recording date, even when the original payment was recorded
-          earlier; the actual transfer date is not stored separately. Net collections subtract those
-          refunds from period collections. Expenses use incurred dates. Outstanding is a current
-          balance, not a balance at period end. These records do not measure profit or reconcile a
-          bank account.
+          money. Refunds exclude currently voided erroneous entries and use their original recording
+          date, even when the original payment was recorded earlier; the actual transfer date is not
+          stored separately. Net collections subtract those refunds from period collections. Voiding
+          a mistaken refund corrects its original period and does not create a new receipt or money
+          transfer. Expenses use incurred dates. Outstanding is a current balance, not a balance at
+          period end. These records do not measure profit or reconcile a bank account.
         </p>
       </div>
       <div className="insights-visit-summary">
@@ -395,7 +396,7 @@ function InsightsReport({ data }: { data: ClinicInsights }) {
         />
         <MoneyBreakdown
           title="Refunds by method"
-          description="Externally completed refunds, by their recording date and return method."
+          description="Nonvoided refund entries, by their original recording date and return method."
           rows={data.refundsByMethod.map((row) => ({
             label: methodLabels[row.method] ?? row.method,
             count: row.count,

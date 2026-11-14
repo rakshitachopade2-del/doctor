@@ -11,6 +11,8 @@ import type {
   PaymentReversal,
   PaymentRefund,
   PaymentRefundMutation,
+  PaymentRefundVoid,
+  PaymentRefundVoidMutation,
 } from '../shared/billing-corrections.ts';
 import type { User } from '../shared/types.ts';
 import { get, id, nowISO, type DB } from './db.ts';
@@ -27,6 +29,11 @@ interface BillingContext {
 type StoredCorrection = InvoiceCorrection & { createdById: string; requestId: string };
 type StoredReversal = PaymentReversal & { createdById: string; requestId: string };
 type StoredRefund = PaymentRefund & {
+  createdById: string;
+  requestId: string;
+  expectedRevision: string;
+};
+type StoredRefundVoid = PaymentRefundVoid & {
   createdById: string;
   requestId: string;
   expectedRevision: string;
@@ -87,6 +94,21 @@ function safeRefund(value: StoredRefund): PaymentRefund {
     refundedExternallyConfirmed: true,
     beforePaidPaise: value.beforePaidPaise,
     afterPaidPaise: value.afterPaidPaise,
+    createdByName: value.createdByName,
+    createdAt: value.createdAt,
+  };
+}
+function safeRefundVoid(value: StoredRefundVoid): PaymentRefundVoid {
+  return {
+    id: value.id,
+    invoiceId: value.invoiceId,
+    refundId: value.refundId,
+    paymentId: value.paymentId,
+    amountPaise: value.amountPaise,
+    beforePaidPaise: value.beforePaidPaise,
+    afterPaidPaise: value.afterPaidPaise,
+    entryErrorConfirmed: true,
+    reason: value.reason,
     createdByName: value.createdByName,
     createdAt: value.createdAt,
   };
@@ -161,12 +183,17 @@ export function safeInvoiceHistory(db: DB, invoiceId: string): InvoiceHistory {
     .prepare('SELECT data FROM paymentRefunds WHERE invoiceId=? ORDER BY rowid DESC')
     .all(invoiceId)
     .map((row) => safeRefund(JSON.parse(row.data as string) as StoredRefund));
+  const refundVoids = db
+    .prepare('SELECT data FROM paymentRefundVoids WHERE invoiceId=? ORDER BY rowid DESC')
+    .all(invoiceId)
+    .map((row) => safeRefundVoid(JSON.parse(row.data as string) as StoredRefundVoid));
   return {
     invoiceId,
     issuedCharges: issuedInvoiceCharges(db, invoice),
     corrections,
     reversals,
     refunds,
+    refundVoids,
   };
 }
 export function invoiceDetail(db: DB, invoice: Invoice): InvoiceDetail {
@@ -205,6 +232,16 @@ export function registerBillingCorrections(app: Express, context: BillingContext
     CREATE INDEX IF NOT EXISTS payment_refunds_invoice ON paymentRefunds(invoiceId);
     CREATE INDEX IF NOT EXISTS payment_refunds_payment ON paymentRefunds(paymentId);
     CREATE INDEX IF NOT EXISTS payment_refunds_created_at ON paymentRefunds(createdAt);
+    CREATE UNIQUE INDEX IF NOT EXISTS payment_refund_source_identity ON paymentRefunds(id,invoiceId,paymentId);
+    CREATE TABLE IF NOT EXISTS paymentRefundVoids (
+      id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL REFERENCES invoices(id),
+      refundId TEXT NOT NULL UNIQUE, paymentId TEXT NOT NULL, createdAt TEXT NOT NULL, data TEXT NOT NULL,
+      FOREIGN KEY(refundId,invoiceId,paymentId) REFERENCES paymentRefunds(id,invoiceId,paymentId),
+      FOREIGN KEY(paymentId,invoiceId) REFERENCES payments(id,invoiceId)
+    );
+    CREATE INDEX IF NOT EXISTS payment_refund_voids_invoice ON paymentRefundVoids(invoiceId);
+    CREATE INDEX IF NOT EXISTS payment_refund_voids_payment ON paymentRefundVoids(paymentId);
+    CREATE INDEX IF NOT EXISTS payment_refund_voids_created_at ON paymentRefundVoids(createdAt);
     CREATE TABLE IF NOT EXISTS billingCorrectionCommands (
       requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id),
       operation TEXT NOT NULL, invoiceId TEXT NOT NULL REFERENCES invoices(id),
@@ -216,6 +253,7 @@ export function registerBillingCorrections(app: Express, context: BillingContext
     'invoiceCorrections',
     'paymentReversals',
     'paymentRefunds',
+    'paymentRefundVoids',
     'billingCorrectionCommands',
   ]) {
     db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_update BEFORE UPDATE ON ${table}
@@ -403,10 +441,17 @@ export function registerBillingCorrections(app: Express, context: BillingContext
         requireRevision(invoice, expectedRevision);
         if (db.prepare('SELECT 1 FROM paymentReversals WHERE paymentId=?').get(paymentId))
           fail(409, 'This payment entry has already been reversed.');
-        if (db.prepare('SELECT 1 FROM paymentRefunds WHERE paymentId=? LIMIT 1').get(paymentId))
+        if (
+          db
+            .prepare(
+              `SELECT 1 FROM paymentRefunds r WHERE r.paymentId=?
+          AND NOT EXISTS (SELECT 1 FROM paymentRefundVoids v WHERE v.refundId=r.id) LIMIT 1`,
+            )
+            .get(paymentId)
+        )
           fail(
             409,
-            'A payment with a recorded external refund cannot be reversed as an erroneous entry.',
+            'A payment with an active recorded external refund cannot be reversed as an erroneous entry.',
           );
         if (payment!.amountPaise > invoice.paidPaise)
           fail(
@@ -485,7 +530,8 @@ export function registerBillingCorrections(app: Express, context: BillingContext
       const refunded = Number(
         db
           .prepare(
-            'SELECT COALESCE(SUM(amountPaise),0) AS total FROM paymentRefunds WHERE paymentId=?',
+            `SELECT COALESCE(SUM(r.amountPaise),0) AS total FROM paymentRefunds r WHERE r.paymentId=?
+              AND NOT EXISTS (SELECT 1 FROM paymentRefundVoids v WHERE v.refundId=r.id)`,
           )
           .get(paymentId)!.total,
       );
@@ -533,6 +579,86 @@ export function registerBillingCorrections(app: Express, context: BillingContext
         value.id,
         'recorded external payment refund',
         'Your clinic recorded a refund completed outside the app',
+      );
+      return { status: 201, value: response(value) };
+    });
+    res.status(result.status).json(result.value);
+  });
+  app.post('/api/invoices/:id/refunds/:refundId/void', (req: AuthRequest, res) => {
+    const invoiceId = String(req.params.id),
+      refundId = String(req.params.refundId);
+    const result = transaction(() => {
+      const user = authorize(req, invoiceId);
+      z.object({}).strict().parse(req.query);
+      const { requestId, ...input } = reversalInput.parse(req.body);
+      // A void targets a refund, rather than a payment. Bind its ID in the canonical payload.
+      const payload = { refundId, ...input };
+      const prior = replay(requestId, user, 'refund-entry', invoiceId, null, payload);
+      function response(value: StoredRefundVoid): PaymentRefundVoidMutation {
+        return {
+          detail: invoiceDetail(db, currentInvoice(invoiceId)),
+          void: safeRefundVoid(value),
+          receipt: {
+            requestId: value.requestId,
+            actorId: value.createdById,
+            invoiceId: value.invoiceId,
+            refundId: value.refundId,
+            expectedRevision: value.expectedRevision,
+            voidId: value.id,
+          },
+        };
+      }
+      if (prior) {
+        const value = get<StoredRefundVoid>(db, 'paymentRefundVoids', prior);
+        if (!value) return fail(500, 'The original refund correction receipt is unavailable.');
+        return { status: 200, value: response(value) };
+      }
+      const invoice = currentInvoice(invoiceId),
+        refund = get<StoredRefund>(db, 'paymentRefunds', refundId);
+      if (!refund || refund.invoiceId !== invoiceId)
+        return fail(404, 'Refund entry not found on this invoice.');
+      requireRevision(invoice, input.expectedRevision);
+      if (db.prepare('SELECT 1 FROM paymentRefundVoids WHERE refundId=?').get(refundId))
+        return fail(409, 'This erroneous refund entry has already been voided.');
+      if (db.prepare('SELECT 1 FROM paymentReversals WHERE paymentId=?').get(refund.paymentId))
+        return fail(
+          409,
+          'The source payment was reversed. Review the billing records before correcting this refund.',
+        );
+      const afterPaidPaise = invoice.paidPaise + refund.amountPaise;
+      if (afterPaidPaise > invoice.totalPaise)
+        return fail(
+          409,
+          'Restoring this refund would exceed the current invoice charges. Review and separately correct charges or an erroneous later payment first.',
+        );
+      const value: StoredRefundVoid = {
+        id: id(),
+        invoiceId,
+        refundId,
+        paymentId: refund.paymentId,
+        amountPaise: refund.amountPaise,
+        beforePaidPaise: invoice.paidPaise,
+        afterPaidPaise,
+        entryErrorConfirmed: true,
+        reason: input.reason,
+        createdByName: user.name,
+        createdAt: nowISO(),
+        createdById: user.id,
+        requestId,
+        expectedRevision: input.expectedRevision,
+      };
+      db.prepare(
+        'INSERT INTO paymentRefundVoids(id,invoiceId,refundId,paymentId,createdAt,data) VALUES (?,?,?,?,?,?)',
+      ).run(value.id, invoiceId, refundId, value.paymentId, value.createdAt, JSON.stringify(value));
+      invoice.paidPaise = afterPaidPaise;
+      invoice.status = invoicePaymentStatus(invoice.totalPaise, invoice.paidPaise);
+      remember(requestId, user, 'refund-entry', invoiceId, null, payload, value.id);
+      publish(
+        req,
+        invoice,
+        value.id,
+        'voided erroneous refund entry',
+        'Your clinic corrected a refund record',
       );
       return { status: 201, value: response(value) };
     });

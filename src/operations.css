@@ -104,6 +104,7 @@
 .billing-current-charges,
 .billing-correction-history,
 .billing-refund-history,
+.billing-refund-void-history,
 .billing-issued-charges {
   min-width: 0;
 }
@@ -231,6 +232,8 @@
 .billing-payment-record,
 .billing-refund-source,
 .billing-refund-entry,
+.billing-refund-void-entry,
+.billing-refund-void-record,
 .billing-refunded-payment,
 .billing-reversal-record,
 .billing-reversal-target,
@@ -257,6 +260,7 @@
 }
 .billing-issued-charges,
 .billing-refund-history,
+.billing-refund-void-history,
 .billing-correction-history {
   border-top: 1px solid #dfe7d9;
   padding-top: 20px;
@@ -267,14 +271,16 @@
   gap: 8px;
 }
 .billing-correction-record,
-.billing-refund-entry {
+.billing-refund-entry,
+.billing-refund-void-entry {
   padding: 18px;
   border: 1px solid #dfe7d9;
   border-radius: 9px;
   margin-top: 14px;
 }
 .billing-correction-record h4,
-.billing-refund-entry h4 {
+.billing-refund-entry h4,
+.billing-refund-void-entry h4 {
   margin: 0;
   overflow-wrap: anywhere;
 }
@@ -289,7 +295,8 @@
   height: auto;
   min-height: 40px;
 }
-.billing-refund-boundary {
+.billing-refund-boundary,
+.billing-refund-void-blocked {
   display: block;
   overflow-wrap: anywhere;
 }
@@ -297,6 +304,7 @@
   margin-bottom: 0;
 }
 .billing-refund-source,
+.billing-refund-void-source,
 .billing-refund-reviewed {
   min-width: 0;
   padding: 14px;
@@ -305,12 +313,28 @@
   background: #fff;
   overflow-wrap: anywhere;
 }
-.billing-refund-source h4 {
+.billing-refund-source h4,
+.billing-refund-void-source h4 {
   margin-top: 0;
 }
 .billing-refund-source p:last-child,
+.billing-refund-void-source p:last-child,
 .billing-refund-reviewed p:last-child {
   margin-bottom: 0;
+}
+.billing-refund-void-record {
+  border-left: 3px solid #afbaab;
+  padding-left: 13px;
+  margin: 14px 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.billing-refund-void-blocked .button,
+.billing-refund-entry > .button {
+  max-width: 100%;
+  white-space: normal;
+  height: auto;
+  min-height: 40px;
 }
 .billing-shared-reason {
   font-size: 13px;
@@ -346,7 +370,8 @@
     width: 100%;
   }
   .billing-correction-record,
-  .billing-refund-entry {
+  .billing-refund-entry,
+  .billing-refund-void-entry {
     padding: 13px;
   }
 }

@@ -241,12 +241,19 @@ function SummaryInvoiceHistory({ history }: { history: InvoiceHistory }) {
         <>
           <h4>Recorded external refunds</h4>
           <p>
-            These records confirm that staff recorded money returned outside Derma. The application
-            did not transfer money. Invoice charges were unchanged by these refund records.
+            These original entries record money staff reported as returned outside Derma. A voided
+            entry is an attributed correction of a recording mistake and is excluded from refund
+            totals. The application did not transfer money or change charges.
           </p>
           {history.refunds.map((refund) => (
             <div key={refund.id} className="care-summary-event care-summary-refund">
               <h5>External refund recorded</h5>
+              {(history.refundVoids ?? []).some((entry) => entry.refundId === refund.id) && (
+                <p className="care-summary-refund-void-label">
+                  <strong>Refund entry voided</strong> — original preserved; excluded from recorded
+                  refund totals. The correction appears below.
+                </p>
+              )}
               <p className="care-summary-source">
                 {refund.createdByName} · {timestamp(refund.createdAt)} IST
               </p>
@@ -266,6 +273,40 @@ function SummaryInvoiceHistory({ history }: { history: InvoiceHistory }) {
                 <Detail
                   label="Net paid after this refund"
                   value={money(refund.afterPaidPaise / 100)}
+                />
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+      {(history.refundVoids ?? []).length > 0 && (
+        <>
+          <h4>Refund entry void history</h4>
+          <p>
+            These corrections restore recorded paid amounts for refunds entered by mistake. They do
+            not collect or return money, and charges stay unchanged.
+          </p>
+          {history.refundVoids.map((entry) => (
+            <div key={entry.id} className="care-summary-event care-summary-refund-void">
+              <h5>Erroneous refund entry voided</h5>
+              <p className="care-summary-source">
+                {entry.createdByName} · {timestamp(entry.createdAt)} IST
+              </p>
+              <Detail label="Reason shared with patient" value={entry.reason} />
+              <div className="care-summary-details">
+                <Detail
+                  label="Amount restored to net recorded paid"
+                  value={money(entry.amountPaise / 100)}
+                />
+                <Detail label="Original refund entry" value={entry.refundId.slice(-8)} />
+                <Detail label="Original payment entry" value={entry.paymentId.slice(-8)} />
+                <Detail
+                  label="Net paid before this void"
+                  value={money(entry.beforePaidPaise / 100)}
+                />
+                <Detail
+                  label="Net paid after this void"
+                  value={money(entry.afterPaidPaise / 100)}
                 />
               </div>
             </div>

@@ -327,7 +327,7 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
     const refundTo = new Date(`${to}T23:59:59.999+05:30`).toISOString();
     for (const row of db
       .prepare(
-        'SELECT data FROM paymentRefunds WHERE createdAt>=? AND createdAt<=? ORDER BY createdAt,id',
+        'SELECT data FROM paymentRefunds WHERE createdAt>=? AND createdAt<=? AND NOT EXISTS (SELECT 1 FROM paymentRefundVoids v WHERE v.refundId=paymentRefunds.id) ORDER BY createdAt,id',
       )
       .all(refundFrom, refundTo)) {
       const refund = JSON.parse(String(row.data)) as PaymentRefund;
@@ -390,7 +390,7 @@ export function registerInsights(app: Express, { db, actor, audit, fail }: Insig
         'metadata',
         '',
         'refundsBasis',
-        'Manual refund recording timestamp in Asia/Kolkata; original payment date does not control inclusion; actual transfer date is not separately stored',
+        'Original manual refund recording timestamp in Asia/Kolkata; currently voided erroneous entries excluded; original payment date does not control inclusion; actual transfer date is not separately stored',
         '',
         '',
       ],
