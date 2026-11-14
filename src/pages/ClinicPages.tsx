@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   ArrowRight,
@@ -38,6 +38,7 @@ import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPa
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import { AppointmentResourcesModal } from '../components/AppointmentResourcesModal';
 import { VisitDurationModal } from '../components/VisitDurationModal';
+import { AppointmentSeriesModal } from '../components/AppointmentSeriesModal';
 import {
   checkedCustomBooking,
   checkedVisitSlots,
@@ -172,9 +173,14 @@ function validAppointmentRow(value: unknown): value is Appointment {
 
 export function AppointmentsPage() {
   const { session } = useSession();
+  const navigate = useNavigate();
+  const [seriesBooking, setSeriesBooking] = useState<string | null>(null);
   const clinician = session.user?.role === 'doctor' || session.user?.role === 'admin';
   const [params, setParams] = useSearchParams();
   const location = useLocation();
+  useLayoutEffect(() => {
+    setSeriesBooking((origin) => (origin === location.key ? origin : null));
+  }, [location.key]);
   const date = safeQueryDate(params.get('date'));
   const allDates = params.get('allDates') === '1';
   // Keep the native control responsive while the router commits its transition.
@@ -351,6 +357,16 @@ export function AppointmentsPage() {
             <Link className="button button-secondary" to="/clinic/procedures">
               Procedure appointments
             </Link>
+            <Link className="button button-secondary" to="/clinic/appointment-series">
+              Appointment series
+            </Link>
+            <button
+              className="button button-secondary"
+              disabled={!!pendingCustomBooking}
+              onClick={() => setSeriesBooking(location.key)}
+            >
+              Book recurring visits
+            </button>
             <button
               className="button button-primary"
               disabled={!!pendingCustomBooking}
@@ -784,6 +800,17 @@ export function AppointmentsPage() {
               patientId: null,
             });
             void latestReload.current();
+          }}
+        />
+      )}
+      {seriesBooking === location.key && (
+        <AppointmentSeriesModal
+          initialDate={date}
+          onClose={() => setSeriesBooking(null)}
+          onSaved={(detail) => {
+            setSeriesBooking(null);
+            toast(`${detail.series.input.count} recurring visits booked.`);
+            navigate(`/clinic/appointment-series?series=${encodeURIComponent(detail.series.id)}`);
           }}
         />
       )}

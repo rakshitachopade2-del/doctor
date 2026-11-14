@@ -193,7 +193,7 @@ function metadata(data: PublicLibraryBootstrap) {
 const KNOWN_SPA = [
   /^\/$/,
   /^\/(?:login|register|recover|book|intake|account)$/,
-  /^\/clinic(?:\/(?:scheduling|resources|accounts|billing|inventory|attendance|waitlist|insights|expenses|activity|knowledge|appointments|procedures|procedure-catalogue|patients|investigations|follow-ups|settings|audit))?$/,
+  /^\/clinic(?:\/(?:scheduling|resources|accounts|billing|inventory|attendance|waitlist|insights|expenses|activity|knowledge|appointments|appointment-series|procedures|procedure-catalogue|patients|investigations|follow-ups|settings|audit))?$/,
   /^\/clinic\/patients\/[A-Za-z0-9_-]{1,100}(?:\/(?:details|summary))?$/,
   /^\/my-care(?:\/(?:invoices|library|record|details|summary|messages|activity))?$/,
 ];

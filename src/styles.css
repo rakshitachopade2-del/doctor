@@ -1412,6 +1412,13 @@ select {
   padding: 35px 33px;
   box-shadow: 0 10px 50px #384b2806;
 }
+/* Authentication steps can reuse a button with another colour variant.
+   Change foreground and background together to preserve text contrast. */
+.auth-card .button {
+  transition:
+    box-shadow 0.18s,
+    transform 0.18s;
+}
 .auth-icon {
   display: flex;
   align-items: center;

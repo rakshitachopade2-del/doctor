@@ -1,0 +1,107 @@
+.appointment-series-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.appointment-series-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.appointment-series-preview,
+.appointment-series-visits,
+.appointment-series-list {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.appointment-series-preview-card,
+.appointment-series-visit,
+.appointment-series-source {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-series-source {
+  background: #f0f5ef;
+}
+.appointment-series-preview-card h3,
+.appointment-series-visit h3,
+.appointment-series-row h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.appointment-series-preview-card p,
+.appointment-series-source p,
+.appointment-series-visit p {
+  margin: 7px 0 0;
+}
+.appointment-series-preview-card ul {
+  margin-bottom: 0;
+  padding-left: 20px;
+}
+.appointment-series-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.appointment-series-actions .button {
+  max-width: 100%;
+  white-space: normal;
+}
+.appointment-series-filter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.appointment-series-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+.appointment-series-row > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-series-row p {
+  margin-bottom: 6px;
+}
+.appointment-series-visit-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 12px 0;
+}
+.appointment-series-visit-columns h4 {
+  font-size: 12px;
+  margin-bottom: 8px;
+  letter-spacing: 0;
+}
+.appointment-series-note {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .appointment-series-filter,
+  .appointment-series-field-row,
+  .appointment-series-visit-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .appointment-series-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .appointment-series-actions > .button {
+    flex: 1 1 100%;
+  }
+}

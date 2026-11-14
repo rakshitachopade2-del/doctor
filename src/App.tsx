@@ -97,6 +97,11 @@ const MessagesPage = lazy(() =>
 const AppointmentsPage = lazy(() =>
   import('./pages/ClinicPages').then((module) => ({ default: module.AppointmentsPage })),
 );
+const AppointmentSeriesPage = lazy(() =>
+  import('./pages/AppointmentSeriesPage').then((module) => ({
+    default: module.AppointmentSeriesPage,
+  })),
+);
 const ProcedureSchedulingPage = lazy(() =>
   import('./pages/ProcedureSchedulingPage').then((module) => ({
     default: module.ProcedureSchedulingPage,
@@ -243,7 +248,8 @@ const staffNav = [
     clinical: true,
   },
 ];
-const adminPageLabels: Record<string, string> = {
+const workspacePageLabels: Record<string, string> = {
+  '/clinic/appointment-series': 'Appointment series',
   '/clinic/insights': 'Clinic reports',
   '/clinic/expenses': 'Expenses',
   '/clinic/accounts': 'Accounts & access',
@@ -439,7 +445,7 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
                 {nav.find((n) =>
                   n.end ? location.pathname === n.to : location.pathname.startsWith(n.to),
                 )?.label ||
-                  adminPageLabels[location.pathname] ||
+                  workspacePageLabels[location.pathname] ||
                   'Account'}
               </strong>
             </span>
@@ -595,6 +601,7 @@ export function App() {
             }
           />
           <Route path="clinic/appointments" element={<AppointmentsPage />} />
+          <Route path="clinic/appointment-series" element={<AppointmentSeriesPage />} />
           <Route path="clinic/procedures" element={<ProcedureSchedulingPage />} />
           <Route
             path="clinic/procedure-catalogue"

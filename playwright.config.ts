@@ -97,6 +97,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)knowledge-authoring\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5198' },
     },
+    {
+      name: 'appointment-series',
+      testMatch: /(?:^|\/)appointment-series\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5199' },
+    },
   ],
   webServer: [
     {
@@ -193,6 +198,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3026 E2E_VITE_PORT=5198 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5198',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3027 E2E_VITE_PORT=5199 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5199',
       reuseExistingServer: false,
       timeout: 60000,
     },

@@ -30,6 +30,7 @@ These are intentionally public **development-only credentials**. Production star
 
 - **Discovery:** doctor profiles, focus areas, qualifications, languages, consultation fees, and clinic contact information.
 - **Booking:** in-person or online appointments, live availability, protection against overlapping doctor and patient bookings, rescheduling, cancellation, check-in, consultation progression, no-shows, and `.ics` calendar export with the recorded visit duration.
+- **Recurring visits:** staff preview and confirm 2–12 weekly, fortnightly or four-weekly appointments together. Every visit must fit availability and the booking horizon; conflicts prevent the whole booking. Original series snapshots remain available after individual visits change, and uncertain requests can be retried safely.
 - **Custom visit lengths:** staff can reserve 15–240 minutes for an extended visit, change its length with retained history, or restore the doctor's default. Custom lengths stay intact when patients or staff reschedule.
 - **Procedure appointments:** staff can link an existing procedure plan to a booked visit, replace or remove an eligible link, and inspect attributed history. Patients see the current visit; original clinical plans, decisions and invoices stay intact.
 - **Rooms and equipment:** optional staff reservations for existing visits, maintenance windows, an operational diary, conflict-safe rescheduling and retained allocation history. Each resource represents one physical room or unit.
@@ -133,6 +134,12 @@ For an existing future scheduled visit, open **Change visit length**. Choose a c
 Patients see the saved duration when viewing or rescheduling their visits and in calendar exports. They cannot set the length themselves. A custom visit keeps its length even if the doctor's default later changes; staff must explicitly restore the default policy. Ordinary consultation rescheduling still adopts the selected doctor's current default.
 
 Changing only the length preserves the booked fee and clinician name. Moving the date or time adopts the current clinician fee/name under the existing rescheduling rule. Minutes never automatically multiply a fee or change an invoice. Custom length does not record clinical consent, choose suitable equipment or create a procedure plan. Use **Procedure appointments** to connect an existing plan to a booked visit.
+
+## Book recurring visits
+
+From **Appointments**, choose **Book recurring visits**, select a patient and clinician, and set the first date, time, consultation mode, visit length, interval and count. Preview every generated visit before confirming the patient agrees to the complete set. The preview reserves nothing. If any visit conflicts with a booking, closure, available hours or the 180-day horizon, the entire booking is blocked; change the pattern and preview again.
+
+All visits save together. A lost or unconfirmed response retains the exact request for a safe retry. **Appointment series** shows the original booked snapshots beside each current appointment, including later individual reschedules or cancellations. Use the normal appointment actions to manage each visit. Rooms, equipment, procedures, waitlists and invoices are not assigned automatically. The private series note remains available only to staff.
 
 ## Schedule an existing procedure plan
 
@@ -248,7 +255,7 @@ npm run test:e2e
 npm run test:production
 ```
 
-API tests use isolated databases. Browser workflow projects use frontend ports **5183–5194** and API ports **3011–3022**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+API tests use isolated databases. Browser workflow projects use frontend ports **5183–5199** and API ports **3011–3027**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
 
 The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards. Follow-up and activity tests cover stale-review rejection, preserved check-in versions, same-day corrections, private assessment redaction, module pauses, recipient isolation, stable pagination, and read-state changes that leave clinical review work unchanged.
 

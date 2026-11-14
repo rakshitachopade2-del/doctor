@@ -539,6 +539,93 @@ try {
   assert.equal(restoredDuration.appointment.durationMinutes, 20);
   assert.equal(restoredDuration.appointment.durationPolicy, 'schedule');
   assert.equal((await fetch(durationUrl)).status, 401);
+  const privateSeriesNote = 'Synthetic private recurring booking note';
+  const seriesInput = {
+    patientId: patient.id,
+    doctorId: visitDoctor.id,
+    firstDate: visitDay,
+    time: '14:05',
+    mode: 'in-person',
+    reason: 'Synthetic recurring clinic visits',
+    count: 3,
+    intervalWeeks: 1,
+    durationPolicy: 'custom',
+    durationMinutes: 45,
+  };
+  const seriesPreview = await visitWrite('/appointment-series/preview', seriesInput);
+  assert.equal(seriesPreview.canBook, true);
+  assert.equal(seriesPreview.visits.length, 3);
+  assert.equal(seriesPreview.durationMinutes, 45);
+  assert.ok(seriesPreview.visits.every((visit) => visit.available && visit.endTime === '14:50'));
+  const seriesCommand = {
+    input: seriesInput,
+    expectedRevision: seriesPreview.revision,
+    patientConfirmed: true,
+    privateNote: privateSeriesNote,
+    requestId: randomUUID(),
+  };
+  const seriesCreated = await visitWrite('/appointment-series', seriesCommand, 201);
+  assert.equal(seriesCreated.appointments.length, 3);
+  assert.equal(seriesCreated.series.bookedAppointments.length, 3);
+  assert.equal(new Set(seriesCreated.appointments.map((visit) => visit.id)).size, 3);
+  assert.ok(seriesCreated.appointments.every((visit) => visit.durationPolicy === 'custom'));
+  const seriesUrl = `${base}/api/appointment-series/${seriesCreated.series.id}`;
+  assert.equal((await fetch(seriesUrl)).status, 401);
+  await visitWrite(
+    `/appointments/${seriesCreated.appointments[0].id}`,
+    {
+      date: visitDay,
+      time: '15:05',
+    },
+    200,
+    'PATCH',
+  );
+  await visitWrite(
+    `/appointments/${seriesCreated.appointments[1].id}`,
+    {
+      status: 'cancelled',
+    },
+    200,
+    'PATCH',
+  );
+  const seriesReplay = await visitWrite('/appointment-series', seriesCommand);
+  assert.deepEqual(seriesReplay.series, seriesCreated.series);
+  assert.equal(seriesReplay.appointments[0].time, '15:05');
+  assert.equal(seriesReplay.appointments[0].durationMinutes, 45);
+  assert.equal(seriesReplay.appointments[1].status, 'cancelled');
+  assert.equal(seriesReplay.series.bookedAppointments[0].time, '14:05');
+  assert.equal(seriesReplay.series.bookedAppointments[1].status, 'scheduled');
+  await visitWrite('/appointment-series', { ...seriesCommand, requestId: randomUUID() }, 409);
+  const seriesBlocked = await visitWrite('/appointment-series/preview', seriesInput);
+  assert.equal(seriesBlocked.canBook, false);
+  assert.equal(seriesBlocked.visits[2].available, false);
+  await visitWrite(
+    '/appointment-series',
+    {
+      ...seriesCommand,
+      expectedRevision: seriesBlocked.revision,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  const seriesListResponse = await fetch(`${base}/api/appointment-series?patientId=${patient.id}`, {
+    headers: apiHeaders,
+  });
+  assert.equal(seriesListResponse.status, 200);
+  assert.match(seriesListResponse.headers.get('cache-control'), /no-store/);
+  assert.equal((await seriesListResponse.json()).total, 1);
+  const seriesDetailsResponse = await fetch(seriesUrl, { headers: apiHeaders });
+  assert.equal(seriesDetailsResponse.status, 200);
+  assert.deepEqual((await seriesDetailsResponse.json()).series, seriesCreated.series);
+  const ordinaryAppointments = await (
+    await fetch(`${base}/api/appointments`, { headers: apiHeaders })
+  ).json();
+  assert.equal(ordinaryAppointments.length, 4);
+  assert.equal(JSON.stringify(ordinaryAppointments).includes(privateSeriesNote), false);
+  assert.equal(JSON.stringify(ordinaryAppointments).includes(seriesCommand.requestId), false);
+  const seriesShell = await fetch(`${base}/clinic/appointment-series`);
+  assert.equal(seriesShell.status, 200);
+  assert.match(seriesShell.headers.get('x-robots-tag'), /noindex/);
   // Give the synthetic administrator a clinician profile in this disposable
   // database, then refresh the session invalidated by that access change.
   await visitWrite(`/accounts/${account.user.id}`, { doctorId: visitDoctor.id }, 200, 'PATCH');
@@ -831,6 +918,8 @@ try {
   assert.equal(JSON.stringify(summary).includes(noticeRun.events[0].id), false);
   assert.equal(JSON.stringify(summary).includes(privateDurationReason), false);
   assert.equal(JSON.stringify(summary).includes(privateSchedulingReason), false);
+  assert.equal(JSON.stringify(summary).includes(privateSeriesNote), false);
+  assert.equal(JSON.stringify(summary).includes(seriesCommand.requestId), false);
   assert.equal(JSON.stringify(summary).includes('Synthetic private removal reason'), false);
   const sharedProcedure = summary.procedures.find((item) => item.id === procedurePlan.id);
   assert.equal(sharedProcedure.appointmentId, null);
@@ -1068,6 +1157,7 @@ try {
   assert.equal((await fetch(`${base}/api/search/patients`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(attendanceUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(durationUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(seriesUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureScheduleUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureSchedulingUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(catalogueUrl, { headers: apiHeaders })).status, 401);
@@ -1247,7 +1337,7 @@ try {
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {
