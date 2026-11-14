@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { crc32 } from 'node:zlib';
 
 const imageIndex = process.argv.indexOf('--image');
 const image = imageIndex >= 0 ? process.argv[imageIndex + 1] : undefined;
@@ -31,6 +32,50 @@ function authenticatorCode(secret) {
   counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
   const mac = createHmac('sha1', bytes).update(counter).digest();
   return String((mac.readUInt32BE(mac[19] & 15) & 0x7fffffff) % 1000000).padStart(6, '0');
+}
+
+// Read the ZIP central directory independently of the application's archive writer.
+function storedZipEntries(bytes) {
+  const end = bytes.length - 22;
+  assert.ok(end >= 0);
+  assert.equal(bytes.readUInt32LE(end), 0x06054b50);
+  assert.equal(bytes.readUInt32LE(end + 4), 0);
+  assert.equal(bytes.readUInt16LE(end + 20), 0);
+  const count = bytes.readUInt16LE(end + 10);
+  assert.equal(bytes.readUInt16LE(end + 8), count);
+  assert.ok(count >= 3 && count <= 22);
+  const start = bytes.readUInt32LE(end + 16);
+  assert.equal(start + bytes.readUInt32LE(end + 12), end);
+  let cursor = start;
+  const entries = new Map();
+  for (let index = 0; index < count; index++) {
+    assert.equal(bytes.readUInt32LE(cursor), 0x02014b50);
+    assert.equal(bytes.readUInt16LE(cursor + 10), 0);
+    assert.equal(bytes.readUInt16LE(cursor + 8) & 1, 0);
+    const length = bytes.readUInt32LE(cursor + 24);
+    assert.equal(bytes.readUInt32LE(cursor + 20), length);
+    const nameLength = bytes.readUInt16LE(cursor + 28);
+    const name = bytes.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8');
+    assert.match(
+      name,
+      /^(?:care-summary\.json|manifest\.json|attachments\/(?:image|document)-[a-f0-9]{64}\.(?:png|jpg|webp|pdf))$/,
+    );
+    assert.equal(entries.has(name), false);
+    const local = bytes.readUInt32LE(cursor + 42);
+    assert.equal(bytes.readUInt32LE(local), 0x04034b50);
+    assert.equal(bytes.readUInt16LE(local + 8), 0);
+    const localNameLength = bytes.readUInt16LE(local + 26);
+    assert.equal(bytes.subarray(local + 30, local + 30 + localNameLength).toString('utf8'), name);
+    const dataStart = local + 30 + localNameLength + bytes.readUInt16LE(local + 28);
+    assert.ok(dataStart + length <= start);
+    const data = bytes.subarray(dataStart, dataStart + length);
+    assert.equal(crc32(data), bytes.readUInt32LE(cursor + 16));
+    assert.equal(crc32(data), bytes.readUInt32LE(local + 14));
+    entries.set(name, data);
+    cursor += 46 + nameLength + bytes.readUInt16LE(cursor + 30) + bytes.readUInt16LE(cursor + 32);
+  }
+  assert.equal(cursor, end);
+  return entries;
 }
 
 function command(binary, args, env = process.env, input = '') {
@@ -1311,6 +1356,33 @@ try {
   assert.equal(noCharges.issuedCharges.totalPaise, 1000);
   assert.equal(noCharges.corrections.length, 2);
   assert.equal(noCharges.reversals.length, 1);
+  const bundleImageBytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cWb0AAAAASUVORK5CYII=',
+    'base64',
+  );
+  const bundlePdfBytes = Buffer.from('%PDF-1.7\nSynthetic portable report only.\n%%EOF\n');
+  const bundleImage = await visitWrite(
+    '/images',
+    {
+      patientId: patient.id,
+      caption: 'Synthetic portable photograph',
+      category: 'clinical',
+      consent: true,
+      dataUrl: `data:image/png;base64,${bundleImageBytes.toString('base64')}`,
+    },
+    201,
+  );
+  const bundleDocument = await visitWrite(
+    '/documents',
+    {
+      patientId: patient.id,
+      title: 'Synthetic portable report',
+      originalName: 'synthetic-report.pdf',
+      consent: true,
+      dataUrl: `data:application/pdf;base64,${bundlePdfBytes.toString('base64')}`,
+    },
+    201,
+  );
   const summaryUrl = `${base}/api/patients/${patient.id}/care-summary`;
   const summaryResponse = await fetch(summaryUrl, { headers: apiHeaders });
   assert.equal(summaryResponse.status, 200);
@@ -1390,6 +1462,53 @@ try {
   assert.equal(copyBytes.length, savedCopy.copy.byteLength);
   assert.equal(createHash('sha256').update(copyBytes).digest('hex'), savedCopy.copy.contentSha256);
   assert.deepEqual(JSON.parse(copyBytes.toString('utf8')), originalCopy.summary);
+  const bundlePath = `${copiesPath}/${savedCopy.copy.id}/bundle`;
+  const bundleUrl = `${base}/api${bundlePath}`;
+  assert.equal((await fetch(`${bundleUrl}/attachments`)).status, 401);
+  const bundleCatalogueResponse = await fetch(`${bundleUrl}/attachments?pageSize=10`, {
+    headers: apiHeaders,
+  });
+  assert.equal(bundleCatalogueResponse.status, 200);
+  const bundleCatalogue = await bundleCatalogueResponse.json();
+  assert.equal(bundleCatalogue.total, 2);
+  assert.ok(bundleCatalogue.items.every((item) => item.availability === 'present'));
+  assert.deepEqual(bundleCatalogue.copy, savedCopy.copy);
+  assert.deepEqual(bundleCatalogue.limits, {
+    maxAttachments: 20,
+    maxFileBytes: 5242880,
+    maxBundleBytes: 26214400,
+  });
+  const bundleSelection = [
+    { type: 'image', id: bundleImage.id },
+    { type: 'document', id: bundleDocument.id },
+  ];
+  const bundlePreview = await visitWrite(`${bundlePath}/preview`, { attachments: bundleSelection });
+  assert.deepEqual(bundlePreview.copy, savedCopy.copy);
+  assert.equal(bundlePreview.manifest.summary.sha256, savedCopy.copy.contentSha256);
+  assert.equal(bundlePreview.manifest.files.length, 2);
+  assert.ok(bundlePreview.manifest.files.every((file) => file.verification === 'saved-sha256'));
+  assert.equal(JSON.stringify(bundlePreview).includes(privateConfigurationReason), false);
+  assert.deepEqual(
+    await visitWrite(`${bundlePath}/preview`, { attachments: [...bundleSelection].reverse() }),
+    bundlePreview,
+  );
+  await visitWrite(
+    `${bundlePath}/preview`,
+    { attachments: [bundleSelection[0], bundleSelection[0]] },
+    400,
+  );
+  await visitWrite(`${bundlePath}/preview`, { attachments: [] }, 400);
+  await visitWrite(
+    `${bundlePath}/preview`,
+    { attachments: [{ type: 'image', id: randomUUID() }] },
+    400,
+  );
+  await visitWrite(
+    `${bundlePath}/download`,
+    { attachments: bundleSelection, expectedRevision: '0'.repeat(64) },
+    409,
+  );
+
   await billingWrite(`/invoices/${invoice.id}/corrections`, {
     items: [{ description: 'Later synthetic charge', quantity: 1, unitAmountPaise: 900 }],
     reason: 'Synthetic change after saving the care-summary copy',
@@ -1405,9 +1524,75 @@ try {
   const laterDownload = await fetch(`${copyUrl}/download`, { headers: apiHeaders });
   assert.equal(laterDownload.status, 200);
   assert.deepEqual(Buffer.from(await laterDownload.arrayBuffer()), copyBytes);
+  const bundleDownloadBody = {
+    attachments: bundleSelection,
+    expectedRevision: bundlePreview.revision,
+  };
+  async function fetchBundle(headers = apiHeaders) {
+    return fetch(`${bundleUrl}/download`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(bundleDownloadBody),
+    });
+  }
+  const bundleDownload = await fetchBundle();
+  assert.equal(bundleDownload.status, 200);
+  assert.equal(bundleDownload.headers.get('content-type'), 'application/zip');
+  assert.equal(
+    bundleDownload.headers.get('content-disposition'),
+    `attachment; filename="${bundlePreview.filename}"`,
+  );
+  assert.match(bundleDownload.headers.get('cache-control'), /no-store/);
+  assert.equal(bundleDownload.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(bundleDownload.headers.get('x-bundle-revision'), bundlePreview.revision);
+  assert.equal(bundleDownload.headers.get('x-content-sha256'), bundlePreview.contentSha256);
+  assert.equal(Number(bundleDownload.headers.get('content-length')), bundlePreview.byteLength);
+  const bundleBytes = Buffer.from(await bundleDownload.arrayBuffer());
+  assert.equal(bundleBytes.length, bundlePreview.byteLength);
+  assert.equal(createHash('sha256').update(bundleBytes).digest('hex'), bundlePreview.contentSha256);
+  const bundleEntries = storedZipEntries(bundleBytes);
+  assert.equal(bundleEntries.size, 4);
+  assert.deepEqual(bundleEntries.get('care-summary.json'), copyBytes);
+  assert.deepEqual(
+    JSON.parse(bundleEntries.get('manifest.json').toString('utf8')),
+    bundlePreview.manifest,
+  );
+  for (const file of bundlePreview.manifest.files) {
+    const fileBytes = bundleEntries.get(file.path);
+    assert.deepEqual(fileBytes, file.type === 'image' ? bundleImageBytes : bundlePdfBytes);
+    assert.equal(fileBytes.length, file.byteLength);
+    assert.equal(createHash('sha256').update(fileBytes).digest('hex'), file.sha256);
+  }
+  const repeatBundle = await fetchBundle();
+  assert.equal(repeatBundle.status, 200);
+  assert.deepEqual(Buffer.from(await repeatBundle.arrayBuffer()), bundleBytes);
+  const laterBundleImage = await visitWrite(
+    '/images',
+    {
+      patientId: patient.id,
+      caption: 'Later image excluded from the earlier saved copy',
+      category: 'clinical',
+      consent: true,
+      dataUrl: `data:image/png;base64,${bundleImageBytes.toString('base64')}`,
+    },
+    201,
+  );
+  await visitWrite(
+    `${bundlePath}/preview`,
+    { attachments: [{ type: 'image', id: laterBundleImage.id }] },
+    400,
+  );
+  const unchangedCatalogue = await (
+    await fetch(`${bundleUrl}/attachments`, { headers: apiHeaders })
+  ).json();
+  assert.equal(unchangedCatalogue.total, 2);
+
   const newestCopy = await visitWrite(
     copiesPath,
-    { expectedRevision: laterSummary.revision, requestId: randomUUID() },
+    {
+      expectedRevision: (await (await fetch(summaryUrl, { headers: apiHeaders })).json()).revision,
+      requestId: randomUUID(),
+    },
     201,
   );
   const copiesPage = await (
@@ -1638,6 +1823,8 @@ try {
   for (const path of [configurationPath, `${configurationPath}/history`])
     assert.equal((await fetch(`${base}${path}`, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(summaryUrl, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetch(`${bundleUrl}/attachments`, { headers: apiHeaders })).status, 401);
+  assert.equal((await fetchBundle()).status, 401);
   for (const privateCopyUrl of [copiesUrl, copyUrl, `${copyUrl}/download`])
     assert.equal((await fetch(privateCopyUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(`${base}/api/inventory/items`, { headers: apiHeaders })).status, 401);
@@ -1744,6 +1931,8 @@ try {
   };
   for (const path of [configurationPath, `${configurationPath}/history`])
     assert.equal((await fetch(`${base}${path}`, { headers: patientHeaders })).status, 403);
+  assert.equal((await fetch(`${bundleUrl}/attachments`, { headers: patientHeaders })).status, 403);
+  assert.equal((await fetchBundle(patientHeaders)).status, 403);
   const patientConfigurationWrite = await fetch(`${base}${configurationPath}/profile`, {
     method: 'POST',
     headers: patientHeaders,
@@ -2335,7 +2524,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

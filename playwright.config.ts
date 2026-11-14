@@ -137,6 +137,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)clinic-configuration\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5206' },
     },
+    {
+      name: 'care-summary-bundles',
+      testMatch: /(?:^|\/)care-summary-bundles\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5207' },
+    },
   ],
   webServer: [
     {
@@ -281,6 +286,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3034 E2E_VITE_PORT=5206 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5206',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3035 E2E_VITE_PORT=5207 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5207',
       reuseExistingServer: false,
       timeout: 60000,
     },

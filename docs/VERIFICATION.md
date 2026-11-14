@@ -1,18 +1,24 @@
 # Release verification
 
-Release **1.29.0**, verified locally on **14 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.30.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 527 passed                                              |
-| Browser and accessibility tests | 98 passed                                               |
+| API and online-backup tests     | 541 passed                                              |
+| Browser and accessibility tests | 102 passed                                              |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
 | Prettier and whitespace checks  | Passed                                                  |
 | Docker Compose configuration    | Valid                                                   |
 | Docker image build/runtime      | Passed: image build and disposable production container |
+
+Saved-summary bundle API checks verify unchanged frozen JSON and exact selected original image/PDF bytes, deterministic ZIP output, manifest and archive hashes, safe generated paths, historical fingerprint handling and Python standard-library ZIP interoperability. Authorization includes patient ownership, clinical access, reception denial and fresh session/role/MFA checks under the transaction lock. Selection and source checks reject foreign/current-only/duplicate references, missing or mismatched originals, invalid signatures, stale revisions and size-limit violations without partial archives. Attachment pagination reads only the selected page's source metadata/lengths; original file bytes are retrieved only for explicit preview/download selection. Audit failures prevent file response headers.
+
+Four bundle browser journeys verify downloaded archive contents through an independent central-directory reader, frozen JSON after later record edits, explicit selection across 26 references, the 20-file selection bound, role isolation, unavailable/oversize errors, renewed review after a stale response, rejection of wrong MIME or corrupt binary data, recoverable catalogue failures and obsolete read/preview/download suppression. Patient download screens and clinician API access are exercised. Patient selection and preview dialogs include 320-pixel accessibility/overflow checks.
+
+Local and disposable Docker production checks upload a synthetic image and PDF, save a summary, preview selected files and independently inspect the downloaded ZIP directory, CRCs, original bytes and SHA-256 hashes. A later invoice change preserves the earlier export, repeat requests yield identical bytes, later-added images remain excluded, and anonymous, logged-out and unrelated patient access is rejected. All fixtures and archives are temporary; no deployment or external file delivery is involved.
 
 Clinic configuration verification adds 14 API tests for independent profile/module revisions, changes away and back, exact actor-bound retries after later edits, current authorization under the transaction lock, strict inputs and unchanged-value rejection. Compatibility PATCH checks preserve partial-field behavior, unknown-field stripping, legacy provenance, unchanged module pauses, no-op revisions and atomic two-group updates. Injected failures cover settings/event/receipt/audit rollback, including a second legacy event and the final compatibility audit. History checks cover deterministic filtering/pagination, SQL-bounded decoding and index plans, a coherent count/page snapshot, immutable records, public projection privacy and persistence after database restart.
 

@@ -7,6 +7,7 @@ import { api, ApiError, useSession } from '../lib';
 import { EmptyState, ErrorState, Loading, Modal, PageHeader } from './ui';
 import { Pagination } from './Pagination';
 import { SummaryDocument } from './CareSummaryDocument';
+import { CareSummaryBundleModal } from './CareSummaryBundleModal';
 import {
   checkedCareSummary,
   checkedSummaryCopyDetail,
@@ -311,10 +312,12 @@ function SavedSummaryDetail({
     location = useLocation();
   const request = useRef<AbortController | null>(null);
   const [downloading, setDownloading] = useState(false),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [bundleOrigin, setBundleOrigin] = useState<string | null>(null);
   useEffect(() => {
     setDownloading(false);
     setError('');
+    setBundleOrigin(null);
     return () => {
       request.current?.abort();
       request.current = null;
@@ -415,6 +418,14 @@ function SavedSummaryDetail({
               <ArrowDownToLine size={16} />
               {downloading ? 'Preparing saved copy…' : 'Download saved JSON'}
             </button>
+            <button
+              className="button button-secondary"
+              disabled={!ready || downloading}
+              onClick={() => setBundleOrigin(location.key)}
+            >
+              <ArrowDownToLine size={16} />
+              Download with attachments
+            </button>
           </>
         }
       />
@@ -434,6 +445,14 @@ function SavedSummaryDetail({
           recordPath={recordPath}
         />
       ) : null}
+      {bundleOrigin === location.key && detail.data && ready && (
+        <CareSummaryBundleModal
+          key={`${copyId}:${bundleOrigin}`}
+          copy={detail.data.copy}
+          summary={detail.data.summary}
+          onClose={() => setBundleOrigin(null)}
+        />
+      )}
     </>
   );
 }

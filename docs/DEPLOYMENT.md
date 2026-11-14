@@ -75,6 +75,8 @@ The procedure catalogue also starts empty on upgrade. Its current projection, im
 
 After restart, confirm account access and review each doctor’s actual hours and planned closures. An upgrade does not automatically reschedule, cancel, or notify patients. Keep the pre-upgrade backup so application code and database state can be restored together if rollback is required.
 
+Saved-summary attachment bundles need no provider, environment setting or migration. They are generated in memory from existing immutable copies and original image/report BLOBs, with at most 20 attachments, 5 MiB per original and 25 MiB for the complete ZIP. No archive is saved on the server. Existing database backups already contain the required copies and originals. The ordinary JSON export remains available for a copy whose selected originals cannot be bundled. Downloaded archives are unencrypted and outside application access control after download.
+
 ## Follow-up escalation operation
 
 Escalation policy, command, run and notice tables are additive and begin empty on upgrade. The policy starts disabled with thresholds of 3/7 overdue calendar days. An administrator can enable it in **Follow-up care → Escalation policy** after reviewing a preview. Existing active overdue plans then become eligible for new notices; no past notice is invented. Policy changes and notice history are included in the SQLite backup.

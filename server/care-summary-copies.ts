@@ -13,6 +13,7 @@ import type {
 } from '../shared/care-summary-copies.ts';
 import { get, id, nowISO, type DB } from './db.ts';
 import { mfaSessionAllowed } from './mfa.ts';
+import { registerCareSummaryBundles } from './care-summary-bundles.ts';
 
 interface Context {
   db: DB;
@@ -267,4 +268,5 @@ export function registerCareSummaryCopies(app: Express, context: Context) {
     };
     res.json(value);
   });
+  registerCareSummaryBundles(app, { db, authorize, patientAccess, transaction, audit, fail });
 }
