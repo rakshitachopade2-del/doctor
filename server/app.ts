@@ -43,6 +43,7 @@ import { mfaEncryptionKey } from './mfa-crypto.ts';
 import { AuthenticationThrottle, createAuthSecurity } from './auth-security.ts';
 import { registerVisitDuration } from './visit-duration.ts';
 import { registerAppointmentSeries } from './appointment-series.ts';
+import { registerAppointmentSeriesCancellations } from './appointment-series-cancellations.ts';
 import {
   publicSiteConfiguration,
   registerPublicLibrary,
@@ -1304,7 +1305,23 @@ export function createApp(options: AppOptions = {}) {
     scheduling,
     clinicResources,
   });
-  registerAppointmentSeries(app, { db, actor, audit, fail, patientAccess, scheduling });
+  const appointmentSeries = registerAppointmentSeries(app, {
+    db,
+    actor,
+    audit,
+    fail,
+    patientAccess,
+    scheduling,
+  });
+  registerAppointmentSeriesCancellations(app, {
+    db,
+    patientAccess,
+    audit,
+    fail,
+    scheduling,
+    clinicResources,
+    series: appointmentSeries,
+  });
   registerRecordSearch(app, { db, actor, fail });
   registerAttendance(app, { db, actor, audit, fail });
   waitlist.register(app);

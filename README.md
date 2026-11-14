@@ -141,6 +141,10 @@ From **Appointments**, choose **Book recurring visits**, select a patient and cl
 
 All visits save together. A lost or unconfirmed response retains the exact request for a safe retry. **Appointment series** shows the original booked snapshots beside each current appointment, including later individual reschedules or cancellations. Use the normal appointment actions to manage each visit. Rooms, equipment, procedures, waitlists and invoices are not assigned automatically. The private series note remains available only to staff.
 
+From an individual series, choose **Cancel remaining visits** to cancel several future visits together. Select the current appointments explicitly, enter an internal reason, preview the exact dates and confirm the cancellations with the patient. Already-started, checked-in, in-progress or closed visits stay visible but cannot be selected. If a selected visit or its reservations change, review a fresh preview; no part of the selection is cancelled on failure.
+
+Successful cancellation releases those visits’ room/equipment reservations and records a dated staff-only history alongside the unchanged original series. The original visit reasons, fees and durations stay intact. Patients receive ordinary cancellation activity without the internal reason. Linked procedure plans remain linked for separate review, and invoices, payments and waitlists are unchanged. An uncertain save can be retried with the same request without duplicating cancellations or notices.
+
 ## Schedule an existing procedure plan
 
 Open **Procedure appointments** from the clinic workspace or **Manage appointment** on a clinical procedure card. Search patient names or procedure titles and filter by procedure status and appointment link. The operational list is available to reception without exposing clinical discussion, decisions or outcomes.

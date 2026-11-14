@@ -1,0 +1,172 @@
+.series-cancel-form,
+.series-cancel-selection,
+.series-cancel-preview,
+.series-cancellation-history {
+  min-width: 0;
+}
+.series-cancel-form {
+  display: grid;
+  gap: 18px;
+}
+.series-cancel-form .notice {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.series-cancel-form p {
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.series-cancel-patient {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  background: #f0f5ef;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.series-cancel-patient span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.series-cancel-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.series-cancel-selection-actions span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.series-cancel-selection {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.series-cancel-visit,
+.series-cancel-preview-visit,
+.series-cancellation-event {
+  padding: 17px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: white;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.series-cancel-checkbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  line-height: 1.8;
+  font-size: 13px;
+}
+.series-cancel-checkbox input {
+  flex: 0 0 auto;
+}
+.series-cancel-facts p,
+.series-cancel-visit > p,
+.series-cancel-preview-visit > p {
+  margin: 7px 0 0;
+  font-size: 12px;
+}
+.series-cancel-facts p {
+  color: #425e50;
+}
+.series-cancel-blocked {
+  color: #8b3928;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.series-cancel-preview {
+  display: grid;
+  gap: 12px;
+}
+.series-cancel-preview > h3,
+.series-cancel-preview-visit > h4 {
+  margin: 0;
+}
+.series-cancel-preview > p {
+  margin: 0;
+}
+.series-cancel-confirm {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f6f4ee;
+}
+.series-cancel-confirm input {
+  margin-top: 5px;
+}
+.series-cancel-actions {
+  flex-wrap: wrap;
+}
+.series-cancel-actions .button,
+.series-cancel-selection-actions .button {
+  max-width: 100%;
+  white-space: normal;
+}
+.series-cancellation-history {
+  margin-top: 24px;
+}
+.series-cancellation-history > h2 {
+  font-size: 21px;
+  margin: 0 0 10px;
+}
+.series-cancellation-event {
+  margin: 17px 0;
+}
+.series-cancellation-event h3 {
+  margin: 0 0 9px;
+  font-size: 17px;
+}
+.series-cancellation-event h4 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+.series-cancellation-event p {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.series-cancel-internal {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.series-cancellation-event summary {
+  cursor: pointer;
+  padding: 12px 0;
+  color: #286455;
+  font-size: 13px;
+  font-weight: 600;
+}
+.series-cancel-history-visit {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  margin-top: 12px;
+}
+.series-cancel-history-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.series-cancel-history-columns h5 {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .series-cancel-history-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .series-cancel-actions > .button {
+    flex: 1 1 100%;
+  }
+  .series-cancel-visit,
+  .series-cancel-preview-visit,
+  .series-cancellation-event {
+    padding: 14px;
+  }
+}

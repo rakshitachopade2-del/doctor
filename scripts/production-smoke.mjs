@@ -626,6 +626,132 @@ try {
   const seriesShell = await fetch(`${base}/clinic/appointment-series`);
   assert.equal(seriesShell.status, 200);
   assert.match(seriesShell.headers.get('x-robots-tag'), /noindex/);
+  const cancellationPath = `/appointment-series/${seriesCreated.series.id}/cancellations`;
+  const cancellationUrl = `${base}/api${cancellationPath}`;
+  const cancellationContextResponse = await fetch(`${cancellationUrl}/context`, {
+    headers: apiHeaders,
+  });
+  assert.equal(cancellationContextResponse.status, 200);
+  assert.match(cancellationContextResponse.headers.get('cache-control'), /no-store/);
+  const cancellationContext = await cancellationContextResponse.json();
+  assert.deepEqual(
+    cancellationContext.visits.map((visit) => visit.eligible),
+    [true, false, true],
+  );
+  assert.equal(cancellationContext.visits[0].appointment.time, '15:05');
+  const blockedCancellation = await visitWrite(`${cancellationPath}/preview`, {
+    appointmentIds: seriesCreated.appointments.slice(0, 2).map((visit) => visit.id),
+  });
+  assert.equal(blockedCancellation.canCancel, false);
+  assert.equal(blockedCancellation.visits.length, 2);
+  assert.equal(blockedCancellation.visits[1].eligible, false);
+  const privateCancellationReason = 'Synthetic private recurring cancellation reason';
+  await visitWrite(
+    cancellationPath,
+    {
+      appointmentIds: blockedCancellation.appointmentIds,
+      expectedRevision: blockedCancellation.revision,
+      reason: privateCancellationReason,
+      patientConfirmed: true,
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  const selectedVisitIds = [seriesCreated.appointments[2].id, seriesCreated.appointments[0].id];
+  const cancellationPreview = await visitWrite(`${cancellationPath}/preview`, {
+    appointmentIds: selectedVisitIds,
+  });
+  assert.equal(cancellationPreview.canCancel, true);
+  const cancellationRoom = await visitWrite(
+    '/clinic-resources',
+    {
+      name: 'Synthetic series cancellation room',
+      kind: 'room',
+      location: 'Disposable local verification',
+      notes: '',
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const reservationPath = `/appointments/${seriesCreated.appointments[0].id}/resources`;
+  const reservationContext = await (
+    await fetch(`${base}/api${reservationPath}`, {
+      headers: apiHeaders,
+    })
+  ).json();
+  await visitWrite(
+    reservationPath,
+    {
+      resourceIds: [cancellationRoom.resource.id],
+      reason: 'Synthetic reservation before cancelling',
+      expectedRevision: reservationContext.revision,
+      requestId: randomUUID(),
+    },
+    200,
+    'PUT',
+  );
+  const cancellationCommand = {
+    appointmentIds: selectedVisitIds,
+    reason: privateCancellationReason,
+    expectedRevision: cancellationPreview.revision,
+    patientConfirmed: true,
+    requestId: randomUUID(),
+  };
+  await visitWrite(cancellationPath, cancellationCommand, 409);
+  const beforeCancellation = await (await fetch(seriesUrl, { headers: apiHeaders })).json();
+  assert.equal(beforeCancellation.appointments[0].status, 'scheduled');
+  assert.equal(beforeCancellation.appointments[2].status, 'scheduled');
+  const refreshedCancellation = await visitWrite(`${cancellationPath}/preview`, {
+    appointmentIds: selectedVisitIds,
+  });
+  assert.deepEqual(
+    refreshedCancellation.visits.map((visit) => visit.reservationCount),
+    [1, 0],
+  );
+  cancellationCommand.expectedRevision = refreshedCancellation.revision;
+  const cancellation = await visitWrite(cancellationPath, cancellationCommand, 201);
+  assert.deepEqual(cancellation.event.appointmentIds, [...selectedVisitIds].reverse());
+  assert.deepEqual(
+    cancellation.event.visits.map((visit) => visit.releasedReservationCount),
+    [1, 0],
+  );
+  assert.ok(
+    cancellation.event.visits.every(
+      (visit) => visit.before.status === 'scheduled' && visit.after.status === 'cancelled',
+    ),
+  );
+  assert.ok(cancellation.detail.appointments.every((visit) => visit.status === 'cancelled'));
+  assert.deepEqual(cancellation.detail.series, seriesCreated.series);
+  const releasedReservations = await (
+    await fetch(`${base}/api${reservationPath}`, {
+      headers: apiHeaders,
+    })
+  ).json();
+  assert.deepEqual(releasedReservations.resourceIds, []);
+  assert.equal(releasedReservations.history[0].source, 'appointment-status');
+  const cancellationReplay = await visitWrite(cancellationPath, {
+    ...cancellationCommand,
+    appointmentIds: [...selectedVisitIds].reverse(),
+  });
+  assert.deepEqual(cancellationReplay.event, cancellation.event);
+  const cancellationHistory = await (await fetch(cancellationUrl, { headers: apiHeaders })).json();
+  assert.equal(cancellationHistory.total, 1);
+  assert.deepEqual(cancellationHistory.items[0], cancellation.event);
+  const bookingAfterCancellation = await visitWrite('/appointment-series', seriesCommand);
+  assert.deepEqual(bookingAfterCancellation.series, seriesCreated.series);
+  assert.ok(bookingAfterCancellation.appointments.every((visit) => visit.status === 'cancelled'));
+  const cancellationAppointments = await (
+    await fetch(`${base}/api/appointments`, {
+      headers: apiHeaders,
+    })
+  ).json();
+  assert.equal(JSON.stringify(cancellationAppointments).includes(privateCancellationReason), false);
+  assert.equal(
+    JSON.stringify(cancellationAppointments).includes(cancellationCommand.requestId),
+    false,
+  );
+  for (const privateCancellationUrl of [cancellationUrl, `${cancellationUrl}/context`])
+    assert.equal((await fetch(privateCancellationUrl)).status, 401);
   // Give the synthetic administrator a clinician profile in this disposable
   // database, then refresh the session invalidated by that access change.
   await visitWrite(`/accounts/${account.user.id}`, { doctorId: visitDoctor.id }, 200, 'PATCH');
@@ -919,6 +1045,8 @@ try {
   assert.equal(JSON.stringify(summary).includes(privateDurationReason), false);
   assert.equal(JSON.stringify(summary).includes(privateSchedulingReason), false);
   assert.equal(JSON.stringify(summary).includes(privateSeriesNote), false);
+  assert.equal(JSON.stringify(summary).includes(privateCancellationReason), false);
+  assert.equal(JSON.stringify(summary).includes(cancellationCommand.requestId), false);
   assert.equal(JSON.stringify(summary).includes(seriesCommand.requestId), false);
   assert.equal(JSON.stringify(summary).includes('Synthetic private removal reason'), false);
   const sharedProcedure = summary.procedures.find((item) => item.id === procedurePlan.id);
@@ -1224,6 +1352,8 @@ try {
   assert.equal((await fetch(attendanceUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(durationUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(seriesUrl, { headers: apiHeaders })).status, 401);
+  for (const privateCancellationUrl of [cancellationUrl, `${cancellationUrl}/context`])
+    assert.equal((await fetch(privateCancellationUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureScheduleUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(procedureSchedulingUrl, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(catalogueUrl, { headers: apiHeaders })).status, 401);
@@ -1403,7 +1533,7 @@ try {
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/retries, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, recurring appointment series/cancellations/retries, immutable care-summary copies/downloads/retries, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

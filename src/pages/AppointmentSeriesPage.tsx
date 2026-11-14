@@ -11,18 +11,18 @@ import { Badge, Card, EmptyState, ErrorState, Field, Loading, PageHeader } from 
 import { Pagination } from '../components/Pagination';
 import { AppointmentSeriesModal } from '../components/AppointmentSeriesModal';
 import {
+  SeriesCancellationModal,
+  SeriesCancellationHistory,
+} from '../components/SeriesCancellationModal';
+import { useCancellationData } from '../components/series-cancellation-helpers';
+import {
   checkedSeriesDetail,
   checkedSeriesPage,
   seriesCadence,
   seriesDate,
   seriesStamp,
 } from '../components/appointment-series-helpers';
-import {
-  useVisitData,
-  visitInterval,
-  visitMinutes,
-  visitPolicy,
-} from '../components/visit-duration-helpers';
+import { visitInterval, visitMinutes, visitPolicy } from '../components/visit-duration-helpers';
 import '../components/appointment-series.css';
 
 function positive(value: string | null) {
@@ -48,10 +48,10 @@ export function AppointmentSeriesPage() {
     ...(filters.patientId ? { patientId: filters.patientId } : {}),
     ...(filters.doctorId ? { doctorId: filters.doctorId } : {}),
   });
-  const list = useVisitData(!seriesId ? `/api/appointment-series?${query}` : null, (value) =>
+  const list = useCancellationData(!seriesId ? `/api/appointment-series?${query}` : null, (value) =>
       checkedSeriesPage(value, filters, page, 25),
     ),
-    detail = useVisitData(
+    detail = useCancellationData(
       seriesId ? `/api/appointment-series/${encodeURIComponent(seriesId)}` : null,
       (value) => checkedSeriesDetail(value, seriesId ?? undefined),
     );
@@ -59,9 +59,11 @@ export function AppointmentSeriesPage() {
     patients = useResource<Patient[]>(!seriesId ? '/api/patients' : null);
   const [draft, setDraft] = useState(filters),
     [booking, setBooking] = useState<string | null>(null),
+    [cancelling, setCancelling] = useState<string | null>(null),
     ownNavigation = useRef<string | null>(null);
   useLayoutEffect(() => {
     setBooking((origin) => (origin === location.key ? origin : null));
+    setCancelling((origin) => (origin === location.key ? origin : null));
     if (ownNavigation.current === location.search) {
       ownNavigation.current = null;
       return;
@@ -104,10 +106,20 @@ export function AppointmentSeriesPage() {
         title="Appointment series"
         description="Original recurring bookings and the current state of each individual visit."
         actions={
-          <button className="button button-primary" onClick={() => setBooking(location.key)}>
-            <Plus size={16} />
-            Book recurring visits
-          </button>
+          <>
+            {seriesId && detail.data && !detail.loading && !detail.error && (
+              <button
+                className="button button-secondary"
+                onClick={() => setCancelling(location.key)}
+              >
+                Cancel remaining visits
+              </button>
+            )}
+            <button className="button button-primary" onClick={() => setBooking(location.key)}>
+              <Plus size={16} />
+              Book recurring visits
+            </button>
+          </>
         }
       />
       {seriesId ? (
@@ -249,6 +261,19 @@ export function AppointmentSeriesPage() {
           }}
         />
       )}
+      {cancelling === location.key && detail.data && (
+        <SeriesCancellationModal
+          series={detail.data.series}
+          onClose={() => setCancelling(null)}
+          onSaved={async (result) => {
+            setCancelling(null);
+            toast(
+              `${result.event.visits.length} ${result.event.visits.length === 1 ? 'visit cancelled' : 'visits cancelled'}.`,
+            );
+            await detail.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -290,9 +315,10 @@ function SeriesDetail({ detail }: { detail: AppointmentSeriesDetail }) {
           </p>
         )}
         <p className="notice">
-          Every listed date and time was confirmed with the patient when booked. Changes below
-          affect individual visits. The original booking and internal note remain unchanged; no
-          future visits are generated automatically.
+          Every listed date and time was confirmed with the patient when booked. Changes below show
+          individual visits. Future scheduled visits may also be selected and reviewed for
+          cancellation together. The original booking and internal note remain unchanged; no future
+          visits are generated automatically.
         </p>
       </Card>
       {series.bookedAppointments.map((original, index) => {
@@ -351,6 +377,7 @@ function SeriesDetail({ detail }: { detail: AppointmentSeriesDetail }) {
           </article>
         );
       })}
+      <SeriesCancellationHistory series={series} />
     </div>
   );
 }

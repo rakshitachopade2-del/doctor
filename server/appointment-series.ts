@@ -450,4 +450,6 @@ export function registerAppointmentSeries(app: Express, context: Context) {
       }),
     );
   });
+  // Related series operations must call these inside their own scheduling transaction.
+  return { authorize, detail };
 }
