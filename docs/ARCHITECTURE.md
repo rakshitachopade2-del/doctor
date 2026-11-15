@@ -48,6 +48,7 @@ flowchart LR
 | `server/db.ts`                                 | Schema, database utilities, synthetic demo seed                                            |
 | `server/appointment-booking.ts`                | Ordinary booking creation, immutable confirmations and terminal command outcomes           |
 | `server/appointment-rescheduling.ts`           | Reviewed individual moves, source counters, immutable events and terminal retry outcomes   |
+| `server/appointment-cancellation.ts`           | Reviewed individual cancellations, atomic resource release and immutable command outcomes  |
 | `server/database-recovery.ts`                  | Backup verification, isolated recovery, access retirement and preservation checks          |
 | `server/restore.ts`                            | Local operator JSON recovery CLI, with no HTTP mutation surface                            |
 | `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                         |
@@ -196,6 +197,14 @@ The preview binds the source revision, explicit target, current target doctor me
 Append-only `appointmentRescheduleEvents` retains before/after snapshots; `appointmentRescheduleCommands` binds the actor, appointment and full normalized input to one successful event or terminal rejection. A savepoint rolls back failed booking/resource/evidence effects before saving a known rejection under the outer writer lock. Exact retries return original evidence with current appointment state, or the stored rejection, after fresh authorization. Unknown failures roll back entirely. Compatibility PATCH remains available with its existing shape and does not create reviewed events.
 
 Patient and clinic pages share the rescheduling form and response validators. Context refresh preserves selected targets, while a changed source requires a new preview. Only a matching definitive rejection unlocks an uncertain command. Original event validation and later-current display remain separate, and account/navigation guards run before local updates or global session-expiry effects. Staff close/resume uses page memory; no medical draft is stored in browser persistence.
+
+## Reviewed individual cancellation
+
+`server/appointment-cancellation.ts` reuses the rescheduling module's fresh transaction authorization and monotonic appointment source revision. Its context adds recorded resource claims and the latest allocation event to the revision, so appointment and allocation changes away and back require renewed review. Current catalogue availability is intentionally excluded: cancellation releases existing claims without validating a new target interval. Patient/staff eligibility follows the existing cancellation transition rules, including past scheduled visits.
+
+Append-only `appointmentCancellationEvents` retains the original before/after record and actor acknowledgment; `appointmentCancellationCommands` binds actor, appointment and normalized command to one successful event or stored terminal rejection. Status and source counter, retained-resource release/history, event, command, audit and patient activity share one transaction. Known business failures roll back a savepoint before persisting rejection under the outer lock. Exact retries reauthorize before returning original evidence/current state or the same rejection; other failures emit no definitive marker.
+
+`src/components/AppointmentCancellationForm.tsx` validates actor/request/source/event identities and requires explicit acknowledgment of the authoritative visit. Only a matching terminal rejection unlocks an uncertain command; refreshing a stale source clears acknowledgment. Staff and patient parents retain pending attempts only for their current account/navigation entry and defer list refresh until the confirmed result closes. Supporting reads and mutations use the established guards before session-expiry side effects. No clinical draft or command is persisted in browser storage.
 
 ## Finite recurring appointment series
 

@@ -53,6 +53,8 @@ import type { WaitlistEntry } from '../../shared/waitlist';
 import { PatientWaitlistPanel, WaitlistJoinModal } from '../components/PatientWaitlist';
 import { PatientAppointments } from '../components/PatientAppointments';
 import { AppointmentRescheduleForm } from '../components/AppointmentRescheduleForm';
+import { AppointmentCancellationForm } from '../components/AppointmentCancellationForm';
+import type { CancellationAttempt } from '../components/appointment-cancellation-helpers';
 import type { AppointmentBookingInput } from '../../shared/appointment-booking';
 import {
   appointmentBookingHasChanged,
@@ -1299,19 +1301,48 @@ function IntakeForm() {
 
 export function MyCarePage() {
   const { session } = useSession();
+  const location = useLocation();
   if (!session?.user) return <Navigate to="/login?next=%2Fmy-care" replace />;
   if (session.user.role !== 'patient' || !session.user.patientId)
     return <Navigate to="/clinic" replace />;
-  return <PatientCare patientId={session.user.patientId} name={session.user.name} />;
+  return (
+    <PatientCare
+      key={`${session.user.id}:${location.key}`}
+      patientId={session.user.patientId}
+      name={session.user.name}
+    />
+  );
 }
 
 function PatientCare({ patientId, name }: { patientId: string; name: string }) {
-  const record = useResource<PatientRecord>(`/api/patients/${patientId}`);
+  const record = useAppointmentBookingData<PatientRecord>(`/api/patients/${patientId}`, (value) => {
+    const data = value as PatientRecord | null;
+    if (
+      !data ||
+      data.patient?.id !== patientId ||
+      ![
+        'appointments',
+        'carePlans',
+        'checkIns',
+        'intakes',
+        'encounters',
+        'images',
+        'messages',
+      ].every((field) => Array.isArray(data[field as keyof PatientRecord]))
+    )
+      throw new Error('Your care record could not be confirmed. Please try again.');
+    return data;
+  });
   const settings = useResource<ClinicSettings>('/api/settings');
-  const toast = useToast();
   const [checkIn, setCheckIn] = useState<CarePlan | null>(null);
-  const [cancel, setCancel] = useState<Appointment | null>(null);
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [pendingCancellation, setPendingCancellation] = useState<{
+    appointmentId: string;
+    attempt: CancellationAttempt;
+  } | null>(null);
+  const [cancellationConfirmed, setCancellationConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const cancellationBusy = useRef(false);
   const [params] = useSearchParams();
   const selectedPlanId = params.get('plan');
   const [showCompleted, setShowCompleted] = useState(false);
@@ -1328,21 +1359,12 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
       setShowCompleted(true);
     }
   }, [selectedPlanId, record.data]);
-  async function cancelVisit() {
-    if (!cancel) return;
-    setBusy(true);
-    try {
-      await api(`/api/appointments/${cancel.id}`, {
-        method: 'PATCH',
-        body: { status: 'cancelled' },
-      });
-      setCancel(null);
-      record.reload();
-      toast('Appointment cancelled.');
-    } catch (problem) {
-      toast(errorMessage(problem), 'error');
-    } finally {
-      setBusy(false);
+  function closeCancellation() {
+    if (cancellationBusy.current) return;
+    setCancelId(null);
+    if (cancellationConfirmed) {
+      setCancellationConfirmed(false);
+      void record.reload();
     }
   }
   if (record.loading) return <Loading />;
@@ -1359,6 +1381,19 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           </Link>
         }
       />
+      {pendingCancellation && !cancelId && (
+        <div className="notice" role="status">
+          <p>
+            A cancellation is awaiting confirmation. Resume the same request to check its outcome.
+          </p>
+          <button
+            className="button button-secondary"
+            onClick={() => setCancelId(pendingCancellation.appointmentId)}
+          >
+            Resume cancellation
+          </button>
+        </div>
+      )}
       <div className="patient-welcome-banner">
         <div>
           <span className="eyebrow">ONE DAY AT A TIME</span>
@@ -1447,7 +1482,11 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           <PatientAppointments
             appointments={record.data?.appointments ?? []}
             selectedId={params.get('appointment')}
-            onCancel={setCancel}
+            cancellationPending={!!pendingCancellation}
+            onCancel={(appointment) => {
+              setCancellationConfirmed(false);
+              setCancelId(appointment.id);
+            }}
           />
           <PatientWaitlistPanel />
           {settings.data?.modules.intake && (
@@ -1498,21 +1537,30 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           }}
         />
       )}
-      {cancel && (
-        <Modal title="Cancel this appointment?" onClose={() => setCancel(null)}>
-          <p>
-            Your visit with {cancel.doctorName} on {formatDate(cancel.date)} at {cancel.time} will
-            be cancelled.
-          </p>
-          <p className="muted">You can book a new time when you are ready.</p>
-          <div className="row">
-            <button className="button button-secondary" onClick={() => setCancel(null)}>
-              Keep appointment
-            </button>
-            <button className="button button-primary" disabled={busy} onClick={cancelVisit}>
-              {busy ? 'Cancelling…' : 'Confirm cancellation'}
-            </button>
-          </div>
+      {cancelId && (
+        <Modal title="Cancel appointment" onClose={closeCancellation}>
+          <AppointmentCancellationForm
+            key={cancelId}
+            appointmentId={cancelId}
+            pendingAttempt={
+              pendingCancellation?.appointmentId === cancelId ? pendingCancellation.attempt : null
+            }
+            onPendingAttemptChange={(attempt) =>
+              setPendingCancellation(attempt ? { appointmentId: cancelId, attempt } : null)
+            }
+            onBusyChange={(value) => {
+              cancellationBusy.current = value;
+              setBusy(value);
+            }}
+            onConfirmed={() => setCancellationConfirmed(true)}
+          />
+          <button className="button button-secondary" disabled={busy} onClick={closeCancellation}>
+            {cancellationConfirmed
+              ? 'Close cancellation'
+              : pendingCancellation
+                ? 'Close for now'
+                : 'Keep appointment'}
+          </button>
         </Modal>
       )}
     </div>

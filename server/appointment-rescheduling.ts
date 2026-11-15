@@ -436,5 +436,5 @@ export function registerAppointmentRescheduling(app: Express, dependencies: Depe
     });
     res.status(response.status).json(response.body);
   });
-  return { authorize };
+  return { authorize, sourceRevision };
 }

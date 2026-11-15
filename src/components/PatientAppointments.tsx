@@ -15,9 +15,11 @@ function interval(appointment: Appointment) {
 function Visit({
   appointment,
   onCancel,
+  cancellationPending,
 }: {
   appointment: Appointment;
   onCancel: (value: Appointment) => void;
+  cancellationPending: boolean;
 }) {
   const future =
     new Date(`${appointment.date}T${appointment.time}:00+05:30`).getTime() > Date.now();
@@ -49,15 +51,19 @@ function Visit({
           · {appointment.durationMinutes ?? 30} minutes
         </p>
         <Badge>{appointment.status.replaceAll('-', ' ')}</Badge>
-        {future && open && (
+        {((future && open) || appointment.status === 'scheduled') && (
           <div className="appointment-actions">
-            <a href={`/api/appointments/${appointment.id}/calendar`} download>
-              Add to calendar
-            </a>
+            {future && open && (
+              <a href={`/api/appointments/${appointment.id}/calendar`} download>
+                Add to calendar
+              </a>
+            )}
             {appointment.status === 'scheduled' && (
               <>
-                <Link to={`/book?appointmentId=${appointment.id}`}>Reschedule</Link>
-                <button onClick={() => onCancel(appointment)}>Cancel</button>
+                {future && <Link to={`/book?appointmentId=${appointment.id}`}>Reschedule</Link>}
+                <button disabled={cancellationPending} onClick={() => onCancel(appointment)}>
+                  Cancel
+                </button>
               </>
             )}
           </div>
@@ -72,10 +78,12 @@ export function PatientAppointments({
   appointments,
   selectedId,
   onCancel,
+  cancellationPending = false,
 }: {
   appointments: Appointment[];
   selectedId: string | null;
   onCancel: (value: Appointment) => void;
+  cancellationPending?: boolean;
 }) {
   const selected = selectedId
     ? appointments.find((appointment) => appointment.id === selectedId)
@@ -113,7 +121,11 @@ export function PatientAppointments({
                 Earlier activity notices are recorded history. These are the appointment’s current
                 details.
               </p>
-              <Visit appointment={selected} onCancel={onCancel} />
+              <Visit
+                appointment={selected}
+                onCancel={onCancel}
+                cancellationPending={cancellationPending}
+              />
               <Link className="text-link" to="/my-care/record?tab=visits">
                 View visit history
               </Link>
@@ -133,7 +145,12 @@ export function PatientAppointments({
       {upcoming.length ? (
         <div className="upcoming-visits">
           {upcoming.map((appointment) => (
-            <Visit key={appointment.id} appointment={appointment} onCancel={onCancel} />
+            <Visit
+              key={appointment.id}
+              appointment={appointment}
+              onCancel={onCancel}
+              cancellationPending={cancellationPending}
+            />
           ))}
         </div>
       ) : selected &&

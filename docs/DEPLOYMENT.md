@@ -49,7 +49,9 @@ Clinic details and care modules use independent forms in Clinic settings. Each r
 
 ## Upgrade an existing installation
 
-Reviewed individual rescheduling adds appointment change counters, immutable before/after events and successful/rejected command receipts automatically. Existing appointment bytes and earlier booking/series origins remain untouched, and earlier moves receive no fabricated events. Counters and receipts are included in the same SQLite backup and recovery checks. Updated reschedule forms require no provider or environment setting. Compatibility appointment updates remain available; cancellation and consultation-state actions keep their existing workflow.
+Reviewed individual cancellation adds empty immutable event and command tables automatically and reuses the existing appointment-change counter. Earlier cancellations are not reconstructed, and existing appointment, booking, series and financial records retain their stored values. SQLite backups retain successful and rejected cancellation commands and resource-release history. Updated patient/staff forms need no provider or environment setup; the legacy status-update API remains compatible.
+
+Reviewed individual rescheduling adds appointment change counters, immutable before/after events and successful/rejected command receipts automatically. Existing appointment bytes and earlier booking/series origins remain untouched, and earlier moves receive no fabricated events. Counters and receipts are included in the same SQLite backup and recovery checks. Updated reschedule forms require no provider or environment setting. Compatibility appointment updates remain available; consultation-state actions keep their existing workflow.
 
 Ordinary booking confirmation and command tables are created additively at startup. Existing appointments retain their stored bytes and do not receive invented confirmations. Updated patient/staff forms use retry-safe booking automatically, with no provider setup. A rejected booking command remains rejected after restart or recovery; a fresh reviewed attempt uses a new request identity.
 

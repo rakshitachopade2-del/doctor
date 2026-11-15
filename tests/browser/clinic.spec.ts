@@ -217,6 +217,15 @@ test('clinic appointment booking, rescheduling, calendar download and cancellati
     .getByRole('dialog')
     .getByRole('button', { name: 'Cancel appointment', exact: true })
     .click();
+  const cancellation = page.getByRole('dialog', { name: 'Cancel appointment', exact: true });
+  await cancellation
+    .getByLabel('I reviewed this appointment and confirm its cancellation.', { exact: true })
+    .check();
+  await cancellation.getByRole('button', { name: 'Confirm cancellation', exact: true }).click();
+  await expect(
+    cancellation.getByRole('heading', { name: 'Cancellation confirmed', exact: true }),
+  ).toBeVisible();
+  await cancellation.getByRole('button', { name: 'Close cancellation', exact: true }).click();
   await expect(row.getByText('Cancelled', { exact: true })).toBeVisible();
   await page.reload();
   await page.getByLabel('Appointment date', { exact: true }).fill(newDate);

@@ -1,0 +1,85 @@
+.appointment-cancellation-form,
+.appointment-cancellation-result {
+  min-width: 0;
+}
+.appointment-cancellation-source,
+.appointment-cancellation-current {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f4f8f5;
+}
+.appointment-cancellation-source h3,
+.appointment-cancellation-current h3 {
+  margin-top: 0;
+}
+.appointment-cancellation-facts {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-cancellation-facts p {
+  margin: 0.4rem 0;
+}
+.appointment-cancellation-form .notice,
+.appointment-cancellation-result .notice {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.appointment-cancellation-form .notice > strong {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.appointment-cancellation-form .notice > .button {
+  margin-top: 0.65rem;
+}
+.appointment-cancellation-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+.appointment-cancellation-confirm input[type='checkbox'] {
+  width: 16px;
+  min-width: 16px;
+  flex: 0 0 16px;
+  margin-top: 0.25rem;
+}
+.appointment-cancellation-confirm span {
+  min-width: 0;
+}
+.appointment-cancellation-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0.8rem 0;
+}
+.appointment-cancellation-columns > section {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.appointment-cancellation-columns h3 {
+  margin-top: 0;
+  font-size: 0.95rem;
+}
+.appointment-cancellation-original {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-cancellation-original summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.6rem 0;
+}
+.appointment-cancellation-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+@media (max-width: 580px) {
+  .appointment-cancellation-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .appointment-cancellation-actions .button {
+    width: 100%;
+  }
+}

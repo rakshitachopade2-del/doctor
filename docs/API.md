@@ -143,6 +143,21 @@ Appointment updates, retained resource moves/history, immutable event/command, a
 
 Preview/result DTOs exclude resource names, reservation details and internal reasons. Event/command IDs are not added to appointment lists, calendars or care summaries. No rescheduling-history endpoint is provided. Original booking/series origins, waitlist fulfillment, procedure associations and invoices remain unchanged. Interactive forms retain pending requests in page memory only; staff close/reopen on the same page can resume them.
 
+## Reviewed individual appointment cancellation
+
+- `GET /appointments/:id/cancellation-context` → `AppointmentCancellationContext {appointment,revision,canCancel,blockedReason}`.
+- `POST /appointments/:id/cancellations {expectedRevision,cancellationConfirmed:true,requestId}` → `AppointmentCancellationResult {appointment,event,receipt}` with `201` new / `200` exact replay.
+
+Staff and the owning patient can read the current context. Patients may cancel scheduled visits; staff may cancel scheduled or checked-in visits. There is no future-start or booking-horizon condition, preserving eligibility for past scheduled visits. In-consultation, completed, cancelled and no-show visits are not eligible for a new cancellation. `cancellationConfirmed` records the actor's acknowledgment of this specific cancellation; it does not claim patient consent or external contact.
+
+Both routes reject unknown query fields and validate the path ID as a trimmed 1–300-character identifier. The command body is strict, its revision is lowercase 64-character hexadecimal, and its UUID is normalized to lowercase. Fresh account/session/password-change/MFA and patient-access checks run inside the writer transaction; writes also revalidate CSRF. The context revision binds the complete appointment, the shared monotonic appointment-change counter, retained reservation rows and latest allocation event. Appointment or allocation changes away and back invalidate an older review. Unrelated doctor fee/profile, pause, schedule or resource-maintenance changes do not block release of the recorded reservations.
+
+The event contains `id,appointmentId,requestId,expectedRevision,before,after,cancellationConfirmed,createdById,createdByName,createdByRole,createdAt`. `after` preserves every original appointment field except `status:'cancelled'`, including absent legacy duration fields. The receipt binds `requestId,actorId,patientId,appointmentId,eventId,expectedRevision`; the separate `appointment` is the current record. Exact authorized retries return the immutable original event and receipt before current eligibility/revision checks. UUID identity is unique within this cancellation endpoint and binds the actor, appointment, operation and normalized input. A collision returns `409` with no outcome marker.
+
+Status/counter changes, resource release and its history, cancellation event/command, audit and patient activity commit together. Known domain `400/404/409` failures after fresh access and command-absence checks roll back attempted effects and persist a terminal rejection under the same writer lock. Its body is `{error,cancellationOutcome:'not-applied',requestId,actorId,patientId,appointmentId}`. Clients must match all identities before unlocking an uncertain request. The rejected UUID can never apply later; a new reviewed attempt needs a new UUID. Schema, authorization, collision and unknown/internal errors have no definitive marker.
+
+The context and receipt contain no resource names, reservation counts or private reasons. Cancellation metadata is not added to appointment lists, calendars or care summaries. There is no cancellation-history HTTP endpoint. Original booking/series records, fulfilled waitlist requests, procedure associations, invoices and payments are untouched, and no refund or external delivery occurs. Compatibility `PATCH /appointments/:id {status:'cancelled'}` remains available with its earlier plain response and transition rules, without these review/retry guarantees. Patient and staff forms use the reviewed route, retain uncertain requests in page memory across close/resume, and refresh the underlying list after closing a confirmed result.
+
 ## Reviewed weekly availability
 
 - `GET /schedules/:doctorId/availability` → `{doctor:{id,name},schedule,source,revision,latestChange}`.

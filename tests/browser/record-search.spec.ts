@@ -596,6 +596,15 @@ test('reception can page and filter complete patient and appointment lists witho
     await expect(actions.getByText(patients[0].name, { exact: true })).toBeVisible();
     await actions.getByRole('button', { name: 'Cancel appointment', exact: true }).click();
     await expect(actions).toHaveCount(0);
+    const cancellation = page.getByRole('dialog', { name: 'Cancel appointment', exact: true });
+    await cancellation
+      .getByLabel('I reviewed this appointment and confirm its cancellation.', { exact: true })
+      .check();
+    await cancellation.getByRole('button', { name: 'Confirm cancellation', exact: true }).click();
+    await expect(
+      cancellation.getByRole('heading', { name: 'Cancellation confirmed', exact: true }),
+    ).toBeVisible();
+    await cancellation.getByRole('button', { name: 'Close cancellation', exact: true }).click();
     await expect(schedule.getByText('Cancelled', { exact: true })).toBeVisible();
     const afterCancellation = (await (
       await page.request.get(

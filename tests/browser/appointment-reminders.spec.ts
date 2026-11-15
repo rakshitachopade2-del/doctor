@@ -407,10 +407,13 @@ test('administrators create only eligible in-app reminders and patient links foc
       fullPage: true,
     });
     await selected.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await patient
-      .getByRole('dialog', { name: 'Cancel this appointment?', exact: true })
-      .getByRole('button', { name: 'Confirm cancellation', exact: true })
-      .click();
+    const cancellation = patient.getByRole('dialog', { name: 'Cancel appointment', exact: true });
+    await cancellation.getByLabel('I agree to cancel this appointment.', { exact: true }).check();
+    await cancellation.getByRole('button', { name: 'Confirm cancellation', exact: true }).click();
+    await expect(
+      cancellation.getByRole('heading', { name: 'Cancellation confirmed', exact: true }),
+    ).toBeVisible();
+    await cancellation.getByRole('button', { name: 'Close cancellation', exact: true }).click();
     await expect(selected).toBeFocused();
     await expect(selected).toContainText('cancelled');
     await expect(selected.getByRole('link', { name: 'Reschedule', exact: true })).toHaveCount(0);

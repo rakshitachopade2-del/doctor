@@ -3326,6 +3326,174 @@ try {
   );
   assert.equal(anonymousMove.rescheduleOutcome, undefined);
 
+  // Individual cancellation reviews the exact visit and retained allocations.
+  await ordinaryAcceptance(true);
+  const individualCancellationBooking = await ordinaryWrite('/visit-duration/bookings', {
+    patientId: ordinaryCommand.patientId,
+    doctorId: ordinaryDoctor.id,
+    date: ordinaryDay,
+    time: '15:00',
+    mode: 'in-person',
+    reason: 'Synthetic reviewed cancellation with a retained custom length',
+    durationMinutes: 90,
+    requestId: randomUUID(),
+  });
+  const individualCancellationBase = `/appointments/${individualCancellationBooking.appointment.id}`;
+  const unallocatedCancellation = await reminderRead(
+    `${individualCancellationBase}/cancellation-context`,
+    patientHeaders,
+  );
+  assert.equal(unallocatedCancellation.canCancel, true);
+  const individualCancellationResources = await reminderRead(
+    `${individualCancellationBase}/resources`,
+  );
+  await ordinaryWrite(
+    `${individualCancellationBase}/resources`,
+    {
+      resourceIds: [moveRoom.resource.id],
+      reason: 'Synthetic cancellation releases the retained room',
+      expectedRevision: individualCancellationResources.revision,
+      requestId: randomUUID(),
+    },
+    verifiedHeaders,
+    200,
+    'PUT',
+  );
+  const staleCancellationCommand = {
+    expectedRevision: unallocatedCancellation.revision,
+    cancellationConfirmed: true,
+    requestId: randomUUID(),
+  };
+  const rejectedCancellation = await ordinaryWrite(
+    `${individualCancellationBase}/cancellations`,
+    staleCancellationCommand,
+    patientHeaders,
+    409,
+  );
+  assert.equal(rejectedCancellation.cancellationOutcome, 'not-applied');
+  assert.equal(rejectedCancellation.requestId, staleCancellationCommand.requestId);
+  assert.equal(rejectedCancellation.actorId, registeredSession.user.id);
+  assert.equal(rejectedCancellation.patientId, ordinaryCommand.patientId);
+  assert.equal(rejectedCancellation.appointmentId, individualCancellationBooking.appointment.id);
+  const allocatedCancellation = await reminderRead(
+    `${individualCancellationBase}/cancellation-context`,
+    patientHeaders,
+  );
+  assert.notEqual(allocatedCancellation.revision, unallocatedCancellation.revision);
+  await ordinaryWrite(individualCancellationBase, { time: '15:30' }, patientHeaders, 200, 'PATCH');
+  await ordinaryWrite(individualCancellationBase, { time: '15:00' }, patientHeaders, 200, 'PATCH');
+  const returnedCancellation = await reminderRead(
+    `${individualCancellationBase}/cancellation-context`,
+    patientHeaders,
+  );
+  assert.deepEqual(returnedCancellation.appointment, allocatedCancellation.appointment);
+  assert.notEqual(returnedCancellation.revision, allocatedCancellation.revision);
+  const staleMovedCancellation = await ordinaryWrite(
+    `${individualCancellationBase}/cancellations`,
+    {
+      expectedRevision: allocatedCancellation.revision,
+      cancellationConfirmed: true,
+      requestId: randomUUID(),
+    },
+    patientHeaders,
+    409,
+  );
+  assert.equal(staleMovedCancellation.cancellationOutcome, 'not-applied');
+  await ordinaryAcceptance(false);
+  await ordinaryWrite(
+    `/doctors/${ordinaryDoctor.id}`,
+    { ...ordinaryDoctor, name: 'Later cancellation profile', fee: 1250 },
+    verifiedHeaders,
+    200,
+    'PATCH',
+  );
+  const individualCancellationContext = await reminderRead(
+    `${individualCancellationBase}/cancellation-context`,
+    patientHeaders,
+  );
+  assert.equal(individualCancellationContext.revision, returnedCancellation.revision);
+  assert.equal(JSON.stringify(individualCancellationContext).includes(moveRoom.resource.id), false);
+  const individualCancellationCommand = {
+    expectedRevision: individualCancellationContext.revision,
+    cancellationConfirmed: true,
+    requestId: randomUUID(),
+  };
+  const waitingBeforeCancellation = await reminderRead('/waitlist', patientHeaders);
+  const individualCancellation = await ordinaryWrite(
+    `${individualCancellationBase}/cancellations`,
+    individualCancellationCommand,
+    patientHeaders,
+  );
+  assert.deepEqual(individualCancellation.event.before, individualCancellationContext.appointment);
+  assert.deepEqual(individualCancellation.event.after, {
+    ...individualCancellationContext.appointment,
+    status: 'cancelled',
+  });
+  assert.deepEqual(individualCancellation.appointment, individualCancellation.event.after);
+  assert.equal(individualCancellation.appointment.durationMinutes, 90);
+  assert.equal(individualCancellation.appointment.fee, 950);
+  assert.equal(individualCancellation.receipt.actorId, registeredSession.user.id);
+  assert.equal(individualCancellation.receipt.requestId, individualCancellationCommand.requestId);
+  assert.equal(individualCancellation.receipt.eventId, individualCancellation.event.id);
+  assert.deepEqual((await reminderRead(`${individualCancellationBase}/resources`)).resourceIds, []);
+  assert.deepEqual(
+    await ordinaryWrite(
+      `${individualCancellationBase}/cancellations`,
+      individualCancellationCommand,
+      patientHeaders,
+      200,
+    ),
+    individualCancellation,
+  );
+  assert.deepEqual(
+    await ordinaryWrite(
+      `${individualCancellationBase}/cancellations`,
+      staleCancellationCommand,
+      patientHeaders,
+      409,
+    ),
+    rejectedCancellation,
+  );
+  assert.deepEqual(await reminderRead('/waitlist', patientHeaders), waitingBeforeCancellation);
+  const cancelledCalendar = await fetch(`${base}/api${individualCancellationBase}/calendar`, {
+    headers: patientHeaders,
+  });
+  assert.equal(cancelledCalendar.status, 200);
+  assert.match(await cancelledCalendar.text(), /STATUS:CANCELLED/);
+  const individualCancellationAudit = await reminderRead(
+    `/search/audit?entityType=appointment&entityId=${individualCancellation.appointment.id}`,
+  );
+  assert.equal(
+    individualCancellationAudit.items.filter((entry) => entry.action === 'appointment cancelled')
+      .length,
+    1,
+  );
+  const individualCancellationCollision = await ordinaryWrite(
+    `${individualCancellationBase}/cancellations`,
+    individualCancellationCommand,
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(individualCancellationCollision.cancellationOutcome, undefined);
+  for (const projection of [
+    await reminderRead('/appointments', patientHeaders),
+    await reminderRead(reminderSummaryPath, patientHeaders),
+  ]) {
+    for (const value of [
+      individualCancellationCommand.requestId,
+      individualCancellation.event.id,
+      staleCancellationCommand.requestId,
+    ])
+      assert.equal(JSON.stringify(projection).includes(value), false);
+  }
+  const anonymousCancellation = await ordinaryWrite(
+    `${individualCancellationBase}/cancellations`,
+    individualCancellationCommand,
+    publicHeaders,
+    401,
+  );
+  assert.equal(anonymousCancellation.cancellationOutcome, undefined);
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -3341,6 +3509,13 @@ try {
     401,
   );
   assert.equal(loggedOutMove.rescheduleOutcome, undefined);
+  const loggedOutCancellation = await ordinaryWrite(
+    `${individualCancellationBase}/cancellations`,
+    individualCancellationCommand,
+    patientHeaders,
+    401,
+  );
+  assert.equal(loggedOutCancellation.cancellationOutcome, undefined);
   assert.equal(
     (await (await fetch(`${base}/api/session`, { headers: patientHeaders })).json()).user,
     null,
@@ -3423,7 +3598,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling with retained resources and safe outcome retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

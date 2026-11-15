@@ -80,10 +80,13 @@ test('a new patient registers, books a slot, reschedules, downloads a calendar e
   await expect(page.getByRole('heading', { name: 'Reschedule confirmed' })).toBeVisible();
   await page.getByRole('link', { name: 'Back to my care', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await page
-    .getByRole('dialog')
-    .getByRole('button', { name: 'Confirm cancellation', exact: true })
-    .click();
+  const cancellation = page.getByRole('dialog', { name: 'Cancel appointment', exact: true });
+  await cancellation.getByLabel('I agree to cancel this appointment.', { exact: true }).check();
+  await cancellation.getByRole('button', { name: 'Confirm cancellation', exact: true }).click();
+  await expect(
+    cancellation.getByRole('heading', { name: 'Cancellation confirmed', exact: true }),
+  ).toBeVisible();
+  await cancellation.getByRole('button', { name: 'Close cancellation', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'No upcoming visits' })).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'No upcoming visits' })).toBeVisible();

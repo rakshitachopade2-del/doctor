@@ -42,6 +42,8 @@ import { VisitDurationModal } from '../components/VisitDurationModal';
 import { AppointmentSeriesModal } from '../components/AppointmentSeriesModal';
 import { AppointmentRescheduleForm } from '../components/AppointmentRescheduleForm';
 import type { RescheduleAttempt } from '../components/appointment-rescheduling-helpers';
+import { AppointmentCancellationForm } from '../components/AppointmentCancellationForm';
+import type { CancellationAttempt } from '../components/appointment-cancellation-helpers';
 import {
   appointmentBookingHasChanged,
   isAppointmentBookingNotCreated,
@@ -225,6 +227,11 @@ export function AppointmentsPage() {
   const [rescheduleBusy, setRescheduleBusy] = useState(false);
   const rescheduleBusyNow = useRef(false),
     rescheduleSavedDate = useRef<string | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [pendingCancellation, setPendingCancellation] = useState<CancellationAttempt | null>(null);
+  const [cancellationBusy, setCancellationBusy] = useState(false);
+  const [cancellationResult, setCancellationResult] = useState<Appointment | null>(null);
+  const cancellationBusyNow = useRef(false);
   const bookingOrigin = useRef({ key: location.key, actorId: session.user?.id });
   const newBookingCleanup = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -243,9 +250,15 @@ export function AppointmentsPage() {
       setRescheduleBusy(false);
       rescheduleBusyNow.current = false;
       rescheduleSavedDate.current = null;
+      setCancelling(null);
+      setPendingCancellation(null);
+      setCancellationBusy(false);
+      setCancellationResult(null);
+      cancellationBusyNow.current = false;
     }
   }, [location.key, location.search, session.user?.id]);
-  const hasPendingBooking = !!pendingCustomBooking || !!pendingBooking || !!pendingReschedule;
+  const hasPendingBooking =
+    !!pendingCustomBooking || !!pendingBooking || !!pendingReschedule || !!pendingCancellation;
   const [moreActions, setMoreActions] = useState<Appointment | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const focusResults = useRef(false);
@@ -369,7 +382,28 @@ export function AppointmentsPage() {
       }
     }
   }, [loading, error, data, page, setParams]);
-  async function update(appointment: Appointment, status: AppointmentStatus) {
+  function closeCancellation() {
+    if (cancellationBusyNow.current) return;
+    setCancelling(null);
+    if (cancellationResult) {
+      setSearch('');
+      changeFilters({
+        date: cancellationResult.date,
+        allDates: null,
+        search: null,
+        doctorId: null,
+        status: null,
+        mode: null,
+        patientId: null,
+      });
+      setCancellationResult(null);
+      void latestReload.current();
+    }
+  }
+  async function update(
+    appointment: Appointment,
+    status: 'checked-in' | 'in-consultation' | 'completed' | 'no-show',
+  ) {
     setBusy(appointment.id);
     try {
       await api(`/api/appointments/${appointment.id}`, { method: 'PATCH', body: { status } });
@@ -458,6 +492,23 @@ export function AppointmentsPage() {
             onClick={() => setRescheduling(pendingReschedule.source.appointment.id)}
           >
             Resume reschedule
+          </button>
+        </div>
+      )}
+      {pendingCancellation && !cancelling && (
+        <div className="notice visit-duration-pending">
+          <div>
+            <strong>A cancellation is awaiting confirmation.</strong>
+            <p>
+              The exact request is retained while this page stays open. Resume it before making
+              another appointment change.
+            </p>
+          </div>
+          <button
+            className="button button-secondary"
+            onClick={() => setCancelling(pendingCancellation.source.appointment.id)}
+          >
+            Resume cancellation
           </button>
         </div>
       )}
@@ -752,7 +803,7 @@ export function AppointmentsPage() {
                             <Check size={14} /> Complete
                           </button>
                         )}
-                        {a.status === 'scheduled' && (
+                        {(a.status === 'scheduled' || a.status === 'checked-in') && (
                           <button
                             className="button button-ghost button-small"
                             aria-label={`More actions for ${a.patientName}`}
@@ -819,17 +870,19 @@ export function AppointmentsPage() {
               </p>
               <p>{moreActions.reason}</p>
             </div>
-            <button
-              className="button button-secondary"
-              disabled={hasPendingBooking}
-              onClick={() => {
-                rescheduleSavedDate.current = null;
-                setRescheduling(moreActions.id);
-                setMoreActions(null);
-              }}
-            >
-              Reschedule appointment
-            </button>
+            {moreActions.status === 'scheduled' && (
+              <button
+                className="button button-secondary"
+                disabled={hasPendingBooking}
+                onClick={() => {
+                  rescheduleSavedDate.current = null;
+                  setRescheduling(moreActions.id);
+                  setMoreActions(null);
+                }}
+              >
+                Reschedule appointment
+              </button>
+            )}
             <a
               className="button button-secondary"
               href={`/api/appointments/${moreActions.id}/calendar`}
@@ -837,7 +890,7 @@ export function AppointmentsPage() {
             >
               Download calendar event
             </a>
-            {moreActions.date <= today() && (
+            {moreActions.status === 'scheduled' && moreActions.date <= today() && (
               <button
                 className="button button-secondary"
                 disabled={busy === moreActions.id}
@@ -848,8 +901,12 @@ export function AppointmentsPage() {
             )}
             <button
               className="button button-danger"
-              disabled={busy === moreActions.id}
-              onClick={() => update(moreActions, 'cancelled')}
+              disabled={hasPendingBooking || busy === moreActions.id}
+              onClick={() => {
+                setCancellationResult(null);
+                setCancelling(moreActions.id);
+                setMoreActions(null);
+              }}
             >
               Cancel appointment
             </button>
@@ -942,6 +999,35 @@ export function AppointmentsPage() {
               }}
             >
               {pendingReschedule ? 'Close for now' : 'Close rescheduling'}
+            </button>
+          </div>
+        </Modal>
+      )}
+      {cancelling && (
+        <Modal title="Cancel appointment" onClose={closeCancellation}>
+          <AppointmentCancellationForm
+            key={`cancellation:${location.key}:${session.user?.id}:${cancelling}`}
+            appointmentId={cancelling}
+            pendingAttempt={pendingCancellation}
+            onPendingAttemptChange={setPendingCancellation}
+            onBusyChange={(value) => {
+              cancellationBusyNow.current = value;
+              setCancellationBusy(value);
+            }}
+            onConfirmed={(result) => setCancellationResult(result.appointment)}
+          />
+          <div className="modal-actions">
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={cancellationBusy}
+              onClick={closeCancellation}
+            >
+              {pendingCancellation
+                ? 'Close for now'
+                : cancellationResult
+                  ? 'Close cancellation'
+                  : 'Keep appointment'}
             </button>
           </div>
         </Modal>
