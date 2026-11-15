@@ -1,0 +1,104 @@
+.appointment-reschedule-form,
+.appointment-reschedule-result {
+  min-width: 0;
+}
+.appointment-reschedule-source,
+.appointment-reschedule-current {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f4f8f5;
+}
+.appointment-reschedule-source h3,
+.appointment-reschedule-current h3 {
+  margin-top: 0;
+}
+.appointment-reschedule-facts {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-reschedule-facts p {
+  margin: 0.4rem 0;
+}
+.appointment-reschedule-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0.8rem 0;
+}
+.appointment-reschedule-columns > section {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.appointment-reschedule-columns h3 {
+  margin-top: 0;
+  font-size: 0.95rem;
+}
+.appointment-reschedule-after {
+  background: #f4f8f5;
+}
+.appointment-reschedule-preview,
+.appointment-reschedule-result details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-reschedule-result summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.6rem 0;
+}
+.appointment-reschedule-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.appointment-reschedule-slots .button {
+  transition: none;
+}
+.appointment-reschedule-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.appointment-reschedule-form .notice {
+  display: block;
+}
+.appointment-reschedule-form .notice > strong {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.appointment-reschedule-form .notice > .button {
+  margin-top: 0.65rem;
+}
+.appointment-reschedule-form .checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+.appointment-reschedule-form .checkbox-field input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: auto;
+  margin-top: 0.25rem;
+}
+.appointment-reschedule-form .checkbox-field span {
+  min-width: 0;
+}
+@media (max-width: 580px) {
+  .appointment-reschedule-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .appointment-reschedule-form .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .appointment-reschedule-form input:not([type='checkbox']),
+  .appointment-reschedule-form select {
+    min-width: 0;
+    width: 100%;
+  }
+  .appointment-reschedule-actions .button {
+    flex: 1 1 100%;
+  }
+}

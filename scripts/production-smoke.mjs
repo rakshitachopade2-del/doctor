@@ -3182,6 +3182,150 @@ try {
   );
   assert.equal(unauthenticatedBooking.bookingOutcome, undefined);
 
+  // Reviewed single-visit moves retain resources and cannot overwrite a changed preview.
+  const moveId = freshOrdinary.appointment.id;
+  const moveBase = `/appointments/${moveId}`;
+  const moveRoom = await ordinaryWrite('/clinic-resources', {
+    name: 'Synthetic individual rescheduling room',
+    kind: 'room',
+    location: 'Disposable local verification',
+    notes: '',
+    requestId: randomUUID(),
+  });
+  const moveResources = await reminderRead(`${moveBase}/resources`);
+  await ordinaryWrite(
+    `${moveBase}/resources`,
+    {
+      resourceIds: [moveRoom.resource.id],
+      reason: 'Synthetic room retained through a reviewed move',
+      expectedRevision: moveResources.revision,
+      requestId: randomUUID(),
+    },
+    verifiedHeaders,
+    200,
+    'PUT',
+  );
+  const moveContext = await reminderRead(`${moveBase}/reschedule-context`, patientHeaders);
+  assert.equal(moveContext.canReschedule, true);
+  const moveTarget = {
+    doctorId: ordinaryDoctor.id,
+    date: ordinaryDay,
+    time: '12:00',
+    mode: 'online',
+  };
+  const movePreview = await ordinaryWrite(
+    `${moveBase}/reschedule-preview`,
+    { ...moveTarget, expectedSourceRevision: moveContext.sourceRevision },
+    patientHeaders,
+    200,
+  );
+  assert.equal(movePreview.canReschedule, true);
+  assert.equal(movePreview.before.time, '11:00');
+  assert.equal(movePreview.after.fee, 850);
+  assert.equal(JSON.stringify(movePreview).includes(moveRoom.resource.id), false);
+  const staleMoveCommand = {
+    ...moveTarget,
+    expectedRevision: movePreview.revision,
+    patientConfirmed: true,
+    requestId: randomUUID(),
+  };
+  await ordinaryWrite(
+    `/doctors/${ordinaryDoctor.id}`,
+    { ...ordinaryDoctor, name: 'Reviewed individual move doctor', fee: 950 },
+    verifiedHeaders,
+    200,
+    'PATCH',
+  );
+  const staleMove = await ordinaryWrite(
+    `${moveBase}/reschedules`,
+    staleMoveCommand,
+    patientHeaders,
+    409,
+  );
+  assert.equal(staleMove.rescheduleOutcome, 'not-applied');
+  assert.equal(staleMove.requestId, staleMoveCommand.requestId);
+  assert.equal(staleMove.actorId, registeredSession.user.id);
+  assert.equal(staleMove.patientId, ordinaryCommand.patientId);
+  assert.equal(staleMove.appointmentId, moveId);
+  const freshMovePreview = await ordinaryWrite(
+    `${moveBase}/reschedule-preview`,
+    { ...moveTarget, expectedSourceRevision: moveContext.sourceRevision },
+    patientHeaders,
+    200,
+  );
+  assert.equal(freshMovePreview.before.time, '11:00');
+  assert.equal(freshMovePreview.after.fee, 950);
+  assert.notEqual(freshMovePreview.revision, movePreview.revision);
+  assert.deepEqual(
+    await ordinaryWrite(`${moveBase}/reschedules`, staleMoveCommand, patientHeaders, 409),
+    staleMove,
+  );
+  const moveCommand = {
+    ...staleMoveCommand,
+    expectedRevision: freshMovePreview.revision,
+    requestId: randomUUID(),
+  };
+  const moved = await ordinaryWrite(`${moveBase}/reschedules`, moveCommand, patientHeaders);
+  assert.equal(moved.receipt.requestId, moveCommand.requestId);
+  assert.equal(moved.receipt.actorId, registeredSession.user.id);
+  assert.equal(moved.receipt.appointmentId, moveId);
+  assert.equal(moved.event.before.time, '11:00');
+  assert.equal(moved.event.before.fee, 850);
+  assert.equal(moved.event.after.time, '12:00');
+  assert.equal(moved.event.after.mode, 'online');
+  assert.equal(moved.event.after.fee, 950);
+  assert.deepEqual(moved.event.after, moved.appointment);
+  assert.deepEqual(
+    await ordinaryWrite(`${moveBase}/reschedules`, moveCommand, patientHeaders, 200),
+    moved,
+  );
+  const retainedRoom = await reminderRead(`${moveBase}/resources`);
+  assert.deepEqual(retainedRoom.resourceIds, [moveRoom.resource.id]);
+  assert.equal(retainedRoom.appointment.time, '12:00');
+  const moveCollision = await ordinaryWrite(
+    `${moveBase}/reschedules`,
+    moveCommand,
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(moveCollision.rescheduleOutcome, undefined);
+  await ordinaryWrite(moveBase, { time: '12:30' }, patientHeaders, 200, 'PATCH');
+  await ordinaryWrite(moveBase, { status: 'cancelled' }, patientHeaders, 200, 'PATCH');
+  const closedMoveReplay = await ordinaryWrite(
+    `${moveBase}/reschedules`,
+    moveCommand,
+    patientHeaders,
+    200,
+  );
+  assert.deepEqual(closedMoveReplay.event, moved.event);
+  assert.deepEqual(closedMoveReplay.receipt, moved.receipt);
+  assert.equal(closedMoveReplay.appointment.time, '12:30');
+  assert.equal(closedMoveReplay.appointment.status, 'cancelled');
+  assert.equal(
+    (await reminderRead(`${moveBase}/reschedule-context`, patientHeaders)).canReschedule,
+    false,
+  );
+  assert.deepEqual((await reminderRead(`${moveBase}/resources`)).resourceIds, []);
+  const moveAudit = await reminderRead(`/search/audit?entityType=appointment&entityId=${moveId}`);
+  assert.equal(
+    moveAudit.items.filter((value) => value.action === 'rescheduled appointment').length,
+    2,
+  );
+  for (const projection of [
+    await reminderRead('/appointments', patientHeaders),
+    await reminderRead(reminderSummaryPath, patientHeaders),
+  ]) {
+    for (const privateValue of [moveCommand.requestId, moved.event.id, staleMoveCommand.requestId])
+      assert.equal(JSON.stringify(projection).includes(privateValue), false);
+  }
+  const anonymousMove = await ordinaryWrite(
+    `${moveBase}/reschedules`,
+    moveCommand,
+    publicHeaders,
+    401,
+  );
+  assert.equal(anonymousMove.rescheduleOutcome, undefined);
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -3190,6 +3334,13 @@ try {
   assert.equal(patientLogout.status, 200);
   const loggedOutBooking = await ordinaryWrite(ordinaryPath, ordinaryCommand, patientHeaders, 401);
   assert.equal(loggedOutBooking.bookingOutcome, undefined);
+  const loggedOutMove = await ordinaryWrite(
+    `${moveBase}/reschedules`,
+    moveCommand,
+    patientHeaders,
+    401,
+  );
+  assert.equal(loggedOutMove.rescheduleOutcome, undefined);
   assert.equal(
     (await (await fetch(`${base}/api/session`, { headers: patientHeaders })).json()).user,
     null,
@@ -3272,7 +3423,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling with retained resources and safe outcome retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

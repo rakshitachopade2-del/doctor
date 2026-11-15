@@ -72,11 +72,13 @@ test('a new patient registers, books a slot, reschedules, downloads a calendar e
   await page.getByRole('link', { name: 'View my care', exact: true }).click();
   await page.getByRole('link', { name: 'Reschedule', exact: true }).click();
   const second = await availableVisit(page, doctors[0].id, 32);
-  await page.getByLabel('Appointment date', { exact: true }).fill(second.date);
+  await page.getByLabel('New date', { exact: true }).fill(second.date);
   await page.getByRole('button', { name: second.time, exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm new time', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Appointment rescheduled.' })).toBeVisible();
-  await page.getByRole('link', { name: 'View my care', exact: true }).click();
+  await page.getByRole('button', { name: 'Review change', exact: true }).click();
+  await page.getByLabel('I agree to this exact appointment change.', { exact: true }).check();
+  await page.getByRole('button', { name: 'Confirm reschedule', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Reschedule confirmed' })).toBeVisible();
+  await page.getByRole('link', { name: 'Back to my care', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page
     .getByRole('dialog')

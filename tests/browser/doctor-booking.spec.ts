@@ -252,14 +252,16 @@ test('paused public profiles block new patient bookings and requests while exist
     await portal.goto(`/book?appointmentId=${original.appointment.id}`);
     await expect(
       portal.getByRole('region', { name: 'Doctor booking status', exact: true }),
-    ).toContainText('You can still change the time of your existing visit');
+    ).toContainText('Your existing visit can still be rescheduled with the same doctor');
     await portal
       .getByRole('group', { name: 'Available appointment times', exact: true })
       .getByRole('button', { name: '10:00', exact: true })
       .click();
-    await portal.getByRole('button', { name: 'Confirm new time', exact: true }).click();
+    await portal.getByRole('button', { name: 'Review change', exact: true }).click();
+    await portal.getByLabel('I agree to this exact appointment change.', { exact: true }).check();
+    await portal.getByRole('button', { name: 'Confirm reschedule', exact: true }).click();
     await expect(
-      portal.getByRole('heading', { name: 'Appointment rescheduled.', exact: true }),
+      portal.getByRole('heading', { name: 'Reschedule confirmed', exact: true }),
     ).toBeVisible();
     const moved = (await get<Appointment[]>(patient.request, '/api/appointments')).find(
       (item) => item.id === original.appointment.id,

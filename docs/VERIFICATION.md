@@ -1,12 +1,12 @@
 # Release verification
 
-Release **1.35.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.36.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API, backup and recovery tests  | 620 passed                                              |
-| Browser and accessibility tests | 118 passed                                              |
+| API, backup and recovery tests  | 638 passed                                              |
+| Browser and accessibility tests | 123 passed                                              |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Isolated recovery rehearsal     | Passed locally and in a disposable Docker container     |
@@ -14,6 +14,12 @@ Release **1.35.0**, verified locally on **15 November 2026** using Node.js **24.
 | Prettier and whitespace checks  | Passed                                                  |
 | Docker Compose configuration    | Valid                                                   |
 | Docker image build/runtime      | Passed: image build and disposable production container |
+
+The 18 individual-rescheduling API groups cover all four roles, strict normalized commands, source/target review, default versus custom length, target fee/name, mode/doctor transfers, no-op and source-time boundaries, full-interval conflicts and retained resource moves. Source revisions detect legacy changes away and back, duration changes and real atomic series moves without altering original booking evidence. Same-doctor pause preserves eligible moves; incoming pause/resume invalidates a transfer preview. Forty-two current-account/session/MFA/role race combinations cover reads, previews, new commands, success/rejection replay and compatibility PATCH. Independent connections verify one exact outcome, competing previews and counters. Nine injected write-failure stages, read-audit and rejection-evidence failures, and source expiry during commit prove atomic rollback. Successful and terminally rejected receipts, source revisions and legacy bytes survive restart; original events stay unchanged after later moves/cancellation, and private command data stays outside ordinary patient projections.
+
+Five browser journeys cover patient source-conflict recovery with retained targets, current fee/default length and resources, custom full-interval conflicts with generic patient-safe messages, and staff uncertain close/resume through malformed or wrong-actor confirmations to a later cancelled current appointment. A never-committed patient request stays locked through an unmarked error or mismatched rejection, then recovers through a matching terminal rejection and fresh preview/UUID. Read recovery and real navigation isolate late previews, committed responses and authorization errors. Existing patient, staff, scheduling, resource, custom-duration and doctor-pause journeys use the new review/confirmation steps while retaining their original operational assertions. Mobile review and recovered confirmation receive 320-pixel accessibility checks and visual review.
+
+Local and disposable-container production checks verify a paused same-doctor move, target fee changes requiring fresh review, durable stale rejection, retained room allocation and consultation-mode changes, exact success replay after a later move/cancellation, audit deduplication, private projection exclusions and logged-out denial. Recovery rehearsals populate successful and rejected rescheduling commands before backup; the restored patient replays their original evidence and retains the exact source revision. The original booking confirmation remains unchanged while its returned current appointment reflects the move.
 
 The 16 ordinary-booking API groups cover all four roles, strict normalized commands, legacy response compatibility, immutable original confirmations alongside moved/cancelled current appointments, and actor/payload-bound UUID collisions. Successful retries survive doctor pause, changed names/fees/hours, terminal waiting requests and actual calendar expiry. Durable rejected commands cannot create on later retries after availability changes; fresh UUIDs remain subject to normal conflicts. Twenty-one new/legacy/replay authentication races and patient-linkage races recheck access under the write lock. Independent connections verify competing slots, exact duplicates and delayed rejected commands. Seven new-command and five compatibility write-failure stages, plus rejection-receipt failure, prove atomic appointment/waitlist/activity/audit rollback without false outcome markers. Immutable evidence and legacy appointment bytes survive restart; private IDs stay outside ordinary patient projections.
 

@@ -52,6 +52,7 @@ import { PatientWorkflowPanel } from './PatientWorkflowPanel';
 import type { WaitlistEntry } from '../../shared/waitlist';
 import { PatientWaitlistPanel, WaitlistJoinModal } from '../components/PatientWaitlist';
 import { PatientAppointments } from '../components/PatientAppointments';
+import { AppointmentRescheduleForm } from '../components/AppointmentRescheduleForm';
 import type { AppointmentBookingInput } from '../../shared/appointment-booking';
 import {
   appointmentBookingHasChanged,
@@ -369,6 +370,21 @@ export function BookingPage() {
         }
       />
     );
+  const appointmentId = params.get('appointmentId');
+  if (appointmentId)
+    return (
+      <div className="booking-page" key={`${session.user.id}:${location.key}:${appointmentId}`}>
+        <PageHeader
+          eyebrow="REVIEW YOUR NEXT VISIT"
+          title="Reschedule your visit"
+          description="Choose a new time, then review the current appointment and proposed change before confirming. All times are in Asia/Kolkata."
+        />
+        <AppointmentRescheduleForm appointmentId={appointmentId} />
+        <Link to="/my-care" className="button button-ghost">
+          Back to my care
+        </Link>
+      </div>
+    );
   return <BookingForm key={`${session.user.id}:${location.key}`} />;
 }
 
@@ -376,25 +392,16 @@ function BookingForm() {
   const { session } = useSession();
   const guard = useAppointmentBookingGuard();
   const [params] = useSearchParams();
-  const appointmentId = params.get('appointmentId');
   const waitlistId = params.get('waitlist');
   const doctors = useAppointmentBookingData('/api/doctors', (value) => {
     if (!Array.isArray(value)) throw new Error('The doctor list could not be loaded.');
     return value as Doctor[];
   });
-  const appointments = useAppointmentBookingData(
-    appointmentId ? '/api/appointments' : null,
-    (value) => {
-      if (!Array.isArray(value)) throw new Error('Your appointments could not be loaded.');
-      return value as Appointment[];
-    },
-  );
   const waitlist = useAppointmentBookingData(waitlistId ? '/api/waitlist' : null, (value) => {
     if (!Array.isArray(value)) throw new Error('Your waiting request could not be loaded.');
     return value as WaitlistEntry[];
   });
   const waitlistEntry = waitlist.data?.find((entry) => entry.id === waitlistId);
-  const existing = appointments.data?.find((appointment) => appointment.id === appointmentId);
   const [doctorId, setDoctorId] = useState(params.get('doctor') ?? '');
   const [date, setDate] = useState(today());
   const [time, setTime] = useState('');
@@ -412,16 +419,7 @@ function BookingForm() {
   const [waitlistCreated, setWaitlistCreated] = useState<WaitlistEntry | null>(null);
   const initializedWaitlist = useRef<string | null>(null);
   useEffect(() => {
-    if (existing) {
-      setDoctorId(existing.doctorId);
-      setDate(existing.date);
-      setMode(existing.mode);
-      setReason(existing.reason);
-      setTime(existing.time);
-    }
-  }, [existing?.id]);
-  useEffect(() => {
-    if (waitlistEntry && !appointmentId && initializedWaitlist.current !== waitlistEntry.id) {
+    if (waitlistEntry && initializedWaitlist.current !== waitlistEntry.id) {
       initializedWaitlist.current = waitlistEntry.id;
       setDoctorId(waitlistEntry.doctorId);
       setMode(waitlistEntry.mode);
@@ -429,21 +427,17 @@ function BookingForm() {
       setReason(waitlistEntry.reason);
       setTime('');
     }
-  }, [waitlistEntry?.id, appointmentId]);
+  }, [waitlistEntry?.id]);
   useEffect(() => {
-    if (!appointmentId && !waitlistId && !doctorId && doctors.data?.length)
+    if (!waitlistId && !doctorId && doctors.data?.length)
       setDoctorId(doctors.data.find((value) => value.acceptingNewBookings !== false)?.id ?? '');
-  }, [doctors.data, doctorId, appointmentId, waitlistId]);
+  }, [doctors.data, doctorId, waitlistId]);
   const doctor = doctors.data?.find((value) => value.id === doctorId);
-  const sameDoctorVisit = existing?.status === 'scheduled' && existing.doctorId === doctorId;
-  const bookingPaused = doctor?.acceptingNewBookings === false && !sameDoctorVisit;
-  const customLength = existing?.durationPolicy === 'custom';
-  const durationMinutes = customLength
-    ? (existing.durationMinutes ?? 30)
-    : (doctor?.appointmentDurationMinutes ?? 30);
+  const bookingPaused = doctor?.acceptingNewBookings === false;
+  const durationMinutes = doctor?.appointmentDurationMinutes ?? 30;
   const slots = useAppointmentBookingData(
     doctorId && date && !bookingPaused
-      ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}&mode=${mode}${appointmentId ? `&excludeAppointmentId=${encodeURIComponent(appointmentId)}` : ''}`
+      ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}&mode=${mode}`
       : null,
     (value) => {
       if (
@@ -487,51 +481,24 @@ function BookingForm() {
       setError('Choose a date within this waiting request. Refresh if the request has changed.');
       return;
     }
-    if (!appointmentId) {
-      if (!session.user?.patientId) return;
-      if (!reason.trim() || reason.trim().length > 300) {
-        setError('Enter a reason for your visit using 1 to 300 characters.');
-        return;
-      }
-      const body: AppointmentBookingInput = {
-        requestId: crypto.randomUUID(),
-        patientId: session.user.patientId,
-        doctorId,
-        date,
-        time,
-        mode,
-        reason: reason.trim(),
-        ...(waitlistId ? { waitlistId, patientConfirmed: true } : {}),
-      };
-      await saveBooking({ actorId: session.user.id, body });
+    if (!session.user?.patientId) return;
+    if (!reason.trim() || reason.trim().length > 300) {
+      setError('Enter a reason for your visit using 1 to 300 characters.');
       return;
     }
-    const current = guard();
-    submitting.current = true;
-    setBusy(true);
-    setError('');
-    try {
-      const result = await api<Appointment>(`/api/appointments/${appointmentId}`, {
-        method: 'PATCH',
-        body: { doctorId, date, time },
-        isCurrent: current,
-      });
-      if (!current()) return;
-      setBooked(result);
-    } catch (problem) {
-      if (!current()) return;
-      setError(errorMessage(problem));
-      setTime('');
-      slots.reload();
-      doctors.reload();
-      if (waitlistId) waitlist.reload();
-    } finally {
-      if (current()) {
-        submitting.current = false;
-        setBusy(false);
-      }
-    }
+    const body: AppointmentBookingInput = {
+      requestId: crypto.randomUUID(),
+      patientId: session.user.patientId,
+      doctorId,
+      date,
+      time,
+      mode,
+      reason: reason.trim(),
+      ...(waitlistId ? { waitlistId, patientConfirmed: true } : {}),
+    };
+    await saveBooking({ actorId: session.user.id, body });
   }
+
   async function saveBooking(sent: AppointmentBookingAttempt) {
     const currentRoute = guard();
     const current = () => currentRoute() && session.user?.id === sent.actorId;
@@ -566,24 +533,14 @@ function BookingForm() {
       }
     }
   }
-  if (
-    (!attempt && doctors.loading) ||
-    (appointmentId && appointments.loading) ||
-    (waitlistId && !attempt && waitlist.loading)
-  )
+  if ((!attempt && doctors.loading) || (waitlistId && !attempt && waitlist.loading))
     return <Loading />;
-  if (
-    !attempt &&
-    (doctors.error || (appointmentId && appointments.error) || (waitlistId && waitlist.error))
-  )
+  if (!attempt && (doctors.error || (waitlistId && waitlist.error)))
     return (
       <ErrorState
-        message={
-          doctors.error || appointments.error || waitlist.error || 'Unable to load appointment.'
-        }
+        message={doctors.error || waitlist.error || 'Unable to load appointment.'}
         retry={() => {
           doctors.reload();
-          appointments.reload();
           waitlist.reload();
         }}
       />
@@ -592,10 +549,7 @@ function BookingForm() {
     waitlistId &&
     !attempt &&
     !booked &&
-    (appointmentId ||
-      !waitlistEntry ||
-      waitlistEntry.status !== 'waiting' ||
-      waitlistEntry.endDate < today())
+    (!waitlistEntry || waitlistEntry.status !== 'waiting' || waitlistEntry.endDate < today())
   )
     return (
       <EmptyState
@@ -611,30 +565,6 @@ function BookingForm() {
         }
       />
     );
-  if (appointmentId && !existing)
-    return (
-      <EmptyState
-        title="Appointment not found"
-        description="This appointment may no longer be available."
-        action={
-          <Link className="button button-primary" to="/my-care">
-            Back to my care
-          </Link>
-        }
-      />
-    );
-  if (existing && existing.status !== 'scheduled' && !booked)
-    return (
-      <EmptyState
-        title="This visit cannot be rescheduled here"
-        description="Contact your clinic to change a visit already in progress or book a new appointment."
-        action={
-          <Link className="button button-primary" to="/my-care">
-            Back to my care
-          </Link>
-        }
-      />
-    );
   if (booked)
     return (
       <div className="booking-success">
@@ -642,13 +572,7 @@ function BookingForm() {
           <CheckCircle2 size={35} />
         </div>
         <span className="eyebrow">BOOKING CONFIRMED</span>
-        <h1>
-          {appointmentId
-            ? 'Appointment rescheduled.'
-            : bookingChanged
-              ? 'Your booking is recorded.'
-              : 'You’re booked in.'}
-        </h1>
+        <h1>{bookingChanged ? 'Your booking is recorded.' : 'You’re booked in.'}</h1>
         <p className="muted">
           {bookingChanged
             ? 'The original booking was saved. The details below show the appointment’s current state after later changes.'
@@ -729,7 +653,7 @@ function BookingForm() {
     <div className="booking-page">
       <PageHeader
         eyebrow="MAKE TIME FOR YOURSELF"
-        title={appointmentId ? 'Reschedule your visit' : 'Let’s plan your visit'}
+        title="Let’s plan your visit"
         description="Choose your dermatologist and a time that works for you. All times are in Asia/Kolkata."
       />
       {waitlistEntry && (
@@ -763,11 +687,9 @@ function BookingForm() {
           <p>
             {attempt
               ? `${doctor.name} is not accepting new bookings. Your submitted request may already be saved. Retry the same request to confirm its outcome before starting another booking.`
-              : sameDoctorVisit
-                ? `${doctor.name} is not accepting new bookings. You can still change the time of your existing visit, subject to availability. Your appointment stays booked until a change is confirmed.`
-                : waitlistEntry
-                  ? `${doctor.name} is not accepting new bookings. Your waiting request is retained and can still be withdrawn. Contact the clinic for help; no appointment has been reserved.`
-                  : `${doctor.name} is not accepting new bookings or new waitlist requests. Choose another dermatologist below or contact the clinic. Existing appointments remain booked.`}
+              : waitlistEntry
+                ? `${doctor.name} is not accepting new bookings. Your waiting request is retained and can still be withdrawn. Contact the clinic for help; no appointment has been reserved.`
+                : `${doctor.name} is not accepting new bookings or new waitlist requests. Choose another dermatologist below or contact the clinic. Existing appointments remain booked.`}
           </p>
           {waitlistEntry && (
             <Link
@@ -803,11 +725,7 @@ function BookingForm() {
                       name="doctor"
                       value={item.id}
                       checked={doctorId === item.id}
-                      disabled={
-                        locked ||
-                        !!waitlistEntry ||
-                        (item.acceptingNewBookings === false && existing?.doctorId !== item.id)
-                      }
+                      disabled={locked || !!waitlistEntry || item.acceptingNewBookings === false}
                       onChange={() => {
                         setDoctorId(item.id);
                         setTime('');
@@ -891,11 +809,9 @@ function BookingForm() {
               <EmptyState
                 title="No slots on this date"
                 description={
-                  appointmentId
-                    ? 'Try another day or contact the clinic for help moving this visit. Your existing appointment stays booked until a change is confirmed.'
-                    : waitlistEntry
-                      ? 'Try another date within your requested range. Your request remains waiting until an appointment is confirmed.'
-                      : 'Try another day or dermatologist, or join the waitlist below with a preferred date range.'
+                  waitlistEntry
+                    ? 'Try another date within your requested range. Your request remains waiting until an appointment is confirmed.'
+                    : 'Try another day or dermatologist, or join the waitlist below with a preferred date range.'
                 }
               />
             )}
@@ -907,7 +823,7 @@ function BookingForm() {
                 <select
                   className="select"
                   value={mode}
-                  disabled={locked || !!appointmentId || !!waitlistEntry}
+                  disabled={locked || !!waitlistEntry}
                   onChange={(event) => {
                     setMode(event.target.value as typeof mode);
                     setTime('');
@@ -927,7 +843,7 @@ function BookingForm() {
                   required
                   minLength={1}
                   maxLength={300}
-                  disabled={locked || !!appointmentId}
+                  disabled={locked}
                   value={reason}
                   placeholder="For example, a follow-up for an ongoing skin concern"
                   onChange={(event) => setReason(event.target.value)}
@@ -965,17 +881,10 @@ function BookingForm() {
                 <strong>{durationMinutes} minutes</strong>
               </div>
               <div className="summary-total">
-                <span>{customLength ? 'Visit fee' : 'Consultation fee'}</span>
+                <span>Consultation fee</span>
                 <strong>{doctor ? money(doctor.fee) : '—'}</strong>
               </div>
             </div>
-            {customLength && (
-              <p className="small muted">
-                This visit keeps its booked length when you choose another time or clinician.
-                Contact the clinic to change its length. Rescheduling uses the selected clinician’s
-                current visit fee.
-              </p>
-            )}
             <p className="small muted">
               {attempt
                 ? 'Your submitted details are locked while the booking is checked. Retry the same request to confirm its outcome without making another booking.'
@@ -1010,19 +919,13 @@ function BookingForm() {
                     !availableSlots.includes(time)))
               }
             >
-              {busy
-                ? 'Saving your visit…'
-                : attempt
-                  ? 'Retry same request'
-                  : appointmentId
-                    ? 'Confirm new time'
-                    : 'Confirm appointment'}
+              {busy ? 'Saving your visit…' : attempt ? 'Retry same request' : 'Confirm appointment'}
               <ArrowRight size={17} />
             </button>
             <Link to="/my-care" className="button button-ghost full-width">
               Back to my care
             </Link>
-            {!appointmentId && !waitlistEntry && (
+            {!waitlistEntry && (
               <div className="booking-waitlist-alternative">
                 <h3>Need a different time?</h3>
                 <p>

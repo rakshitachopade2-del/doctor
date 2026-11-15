@@ -484,10 +484,10 @@ test('patient rescheduling retains custom length after defaults change and check
     expect(unchanged.history).toEqual(before.history);
     const ownPage = await owner.newPage();
     await ownPage.goto(`/book?appointmentId=${original.id}`);
-    await expect(
-      ownPage.locator('.booking-summary').getByText('90 minutes', { exact: true }),
-    ).toBeVisible();
-    await expect(ownPage.locator('.booking-summary')).toContainText('keeps its booked length');
+    await expect(ownPage.locator('.appointment-reschedule-source')).toContainText('90 minutes');
+    await expect(ownPage.locator('.appointment-reschedule-source')).toContainText(
+      'keeps its booked length',
+    );
     await expect(ownPage.getByLabel('Custom duration (minutes)', { exact: true })).toHaveCount(0);
     const times = ownPage.getByRole('group', { name: 'Available appointment times', exact: true });
     await expect(times.getByRole('button', { name: '09:10', exact: true })).toBeVisible();
@@ -499,12 +499,15 @@ test('patient rescheduling retains custom length after defaults change and check
     await expect(ownPage.getByText(assigned.resource.name, { exact: true })).toHaveCount(0);
     await expect(ownPage.getByText(otherPatient.name, { exact: true })).toHaveCount(0);
     await times.getByRole('button', { name: '11:00', exact: true }).click();
-    await ownPage.getByRole('button', { name: 'Confirm new time', exact: true }).click();
+    await ownPage.getByRole('button', { name: 'Review change', exact: true }).click();
+    await ownPage.getByLabel('I agree to this exact appointment change.', { exact: true }).check();
+    await ownPage.getByRole('button', { name: 'Confirm reschedule', exact: true }).click();
     await expect(
-      ownPage.getByRole('heading', { name: 'Appointment rescheduled.', exact: true }),
+      ownPage.getByRole('heading', { name: 'Reschedule confirmed', exact: true }),
     ).toBeVisible();
-    await expect(ownPage.locator('.booking-confirmation-details')).toContainText('11:00–12:30');
-    await expect(ownPage.locator('.booking-confirmation-details')).toContainText('90 minutes');
+    await expect(ownPage.locator('.appointment-reschedule-current')).toContainText('11:00 IST');
+    await expect(ownPage.locator('.appointment-reschedule-current')).toContainText('12:30 IST');
+    await expect(ownPage.locator('.appointment-reschedule-current')).toContainText('90 minutes');
     const moved = await resources(page.request, original.id);
     expect(moved.appointment).toMatchObject({ time: '11:00', durationMinutes: 90 });
     expect(moved.resourceIds).toEqual(originalResources.resourceIds);

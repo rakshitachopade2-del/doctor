@@ -258,6 +258,55 @@ async function rehearseRecovery() {
       409,
     );
     assert.equal(rejected.bookingOutcome, 'not-created');
+    const rescheduleBase = `/appointments/${ordinary.appointment.id}`;
+    const rescheduleSource = await call(source, `${rescheduleBase}/reschedule-context`, patient);
+    const rescheduleTarget = {
+      doctorId: doctor.id,
+      date: visitDate,
+      time: '09:30',
+      mode: 'online',
+    };
+    const reschedulePreview = await call(
+      source,
+      `${rescheduleBase}/reschedule-preview`,
+      patient,
+      'POST',
+      { ...rescheduleTarget, expectedSourceRevision: rescheduleSource.sourceRevision },
+    );
+    assert.equal(reschedulePreview.canReschedule, true);
+    const rescheduleCommand = {
+      ...rescheduleTarget,
+      expectedRevision: reschedulePreview.revision,
+      patientConfirmed: true,
+      requestId: randomUUID(),
+    };
+    const rescheduled = await call(
+      source,
+      `${rescheduleBase}/reschedules`,
+      patient,
+      'POST',
+      rescheduleCommand,
+      201,
+    );
+    const rescheduleRejectedCommand = {
+      ...rescheduleCommand,
+      time: '10:30',
+      requestId: randomUUID(),
+    };
+    const rescheduleRejected = await call(
+      source,
+      `${rescheduleBase}/reschedules`,
+      patient,
+      'POST',
+      rescheduleRejectedCommand,
+      409,
+    );
+    assert.equal(rescheduleRejected.rescheduleOutcome, 'not-applied');
+    const retainedRescheduleSource = await call(
+      source,
+      `${rescheduleBase}/reschedule-context`,
+      patient,
+    );
     const imageBytes = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cWb0AAAAASUVORK5CYII=',
       'base64',
@@ -436,7 +485,15 @@ async function rehearseRecovery() {
     assert.equal((await call(target, '/doctors'))[0].acceptingNewBookings, false);
     assert.deepEqual(
       await call(target, '/appointment-bookings', newPatient, 'POST', ordinaryCommand),
-      ordinary,
+      { ...ordinary, appointment: rescheduled.appointment },
+    );
+    assert.deepEqual(
+      await call(target, `${rescheduleBase}/reschedules`, newPatient, 'POST', rescheduleCommand),
+      rescheduled,
+    );
+    assert.equal(
+      (await call(target, `${rescheduleBase}/reschedule-context`, newPatient)).sourceRevision,
+      retainedRescheduleSource.sourceRevision,
     );
     await call(
       target,
@@ -454,6 +511,17 @@ async function rehearseRecovery() {
     assert.deepEqual(
       await call(target, '/appointment-bookings', newPatient, 'POST', rejectedCommand, 409),
       rejected,
+    );
+    assert.deepEqual(
+      await call(
+        target,
+        `${rescheduleBase}/reschedules`,
+        newPatient,
+        'POST',
+        rescheduleRejectedCommand,
+        409,
+      ),
+      rescheduleRejected,
     );
     assert.equal((await call(target, '/appointments', newPatient)).length, 1);
     const audit = await call(target, '/search/audit?entityType=database-recovery', newAdmin);
@@ -492,7 +560,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking receipts, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking and rescheduling receipts, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

@@ -40,6 +40,8 @@ import { DocumentsPanel } from '../components/DocumentsPanel';
 import { AppointmentResourcesModal } from '../components/AppointmentResourcesModal';
 import { VisitDurationModal } from '../components/VisitDurationModal';
 import { AppointmentSeriesModal } from '../components/AppointmentSeriesModal';
+import { AppointmentRescheduleForm } from '../components/AppointmentRescheduleForm';
+import type { RescheduleAttempt } from '../components/appointment-rescheduling-helpers';
 import {
   appointmentBookingHasChanged,
   isAppointmentBookingNotCreated,
@@ -214,12 +216,15 @@ export function AppointmentsPage() {
   const page = queryPage(params.get('page'));
   const query = params.get('search') || '';
   const [search, setSearch] = useState(query);
-  const [booking, setBooking] = useState<Appointment | 'new' | null>(
-    params.get('new') === '1' ? 'new' : null,
-  );
+  const [booking, setBooking] = useState<'new' | null>(params.get('new') === '1' ? 'new' : null);
   const [busy, setBusy] = useState('');
   const [pendingCustomBooking, setPendingCustomBooking] = useState<CustomVisitAttempt | null>(null);
   const [pendingBooking, setPendingBooking] = useState<AppointmentBookingAttempt | null>(null);
+  const [rescheduling, setRescheduling] = useState<string | null>(null);
+  const [pendingReschedule, setPendingReschedule] = useState<RescheduleAttempt | null>(null);
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const rescheduleBusyNow = useRef(false),
+    rescheduleSavedDate = useRef<string | null>(null);
   const bookingOrigin = useRef({ key: location.key, actorId: session.user?.id });
   const newBookingCleanup = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -233,9 +238,14 @@ export function AppointmentsPage() {
       setBooking(openingFromLink ? 'new' : null);
       setPendingBooking(null);
       setPendingCustomBooking(null);
+      setRescheduling(null);
+      setPendingReschedule(null);
+      setRescheduleBusy(false);
+      rescheduleBusyNow.current = false;
+      rescheduleSavedDate.current = null;
     }
   }, [location.key, location.search, session.user?.id]);
-  const hasPendingBooking = !!pendingCustomBooking || !!pendingBooking;
+  const hasPendingBooking = !!pendingCustomBooking || !!pendingBooking || !!pendingReschedule;
   const [moreActions, setMoreActions] = useState<Appointment | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const focusResults = useRef(false);
@@ -431,6 +441,23 @@ export function AppointmentsPage() {
           </div>
           <button className="button button-secondary" onClick={() => setBooking('new')}>
             Resume booking
+          </button>
+        </div>
+      )}
+      {pendingReschedule && !rescheduling && (
+        <div className="notice visit-duration-pending">
+          <div>
+            <strong>An appointment change is awaiting confirmation.</strong>
+            <p>
+              The exact request is retained while this page stays open. Resume it before making
+              another appointment change.
+            </p>
+          </div>
+          <button
+            className="button button-secondary"
+            onClick={() => setRescheduling(pendingReschedule.source.appointment.id)}
+          >
+            Resume reschedule
           </button>
         </div>
       )}
@@ -796,7 +823,8 @@ export function AppointmentsPage() {
               className="button button-secondary"
               disabled={hasPendingBooking}
               onClick={() => {
-                setBooking(moreActions);
+                rescheduleSavedDate.current = null;
+                setRescheduling(moreActions.id);
                 setMoreActions(null);
               }}
             >
@@ -832,7 +860,6 @@ export function AppointmentsPage() {
         <ClinicBookingModal
           key={`clinic-booking:${location.key}:${session.user?.id}`}
           initialDate={date}
-          appointment={booking === 'new' ? undefined : booking}
           doctors={doctors.data || []}
           pendingCustomBooking={pendingCustomBooking}
           onPendingCustomBookingChange={setPendingCustomBooking}
@@ -855,6 +882,70 @@ export function AppointmentsPage() {
           }}
         />
       )}
+      {rescheduling && (
+        <Modal
+          title="Reschedule appointment"
+          onClose={() => {
+            if (rescheduleBusyNow.current) return;
+            setRescheduling(null);
+            if (rescheduleSavedDate.current) {
+              setSearch('');
+              changeFilters({
+                date: rescheduleSavedDate.current,
+                allDates: null,
+                search: null,
+                doctorId: null,
+                status: null,
+                mode: null,
+                patientId: null,
+              });
+              rescheduleSavedDate.current = null;
+              void latestReload.current();
+            }
+          }}
+        >
+          <AppointmentRescheduleForm
+            key={`reschedule:${location.key}:${session.user?.id}:${rescheduling}`}
+            appointmentId={rescheduling}
+            pendingAttempt={pendingReschedule}
+            onPendingAttemptChange={setPendingReschedule}
+            onBusyChange={(value) => {
+              rescheduleBusyNow.current = value;
+              setRescheduleBusy(value);
+            }}
+            onConfirmed={(result) => {
+              rescheduleSavedDate.current = result.appointment.date;
+            }}
+          />
+          <div className="modal-actions">
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={rescheduleBusy}
+              onClick={() => {
+                if (rescheduleBusyNow.current) return;
+                setRescheduling(null);
+                if (rescheduleSavedDate.current) {
+                  setSearch('');
+                  changeFilters({
+                    date: rescheduleSavedDate.current,
+                    allDates: null,
+                    search: null,
+                    doctorId: null,
+                    status: null,
+                    mode: null,
+                    patientId: null,
+                  });
+                  rescheduleSavedDate.current = null;
+                  void latestReload.current();
+                }
+              }}
+            >
+              {pendingReschedule ? 'Close for now' : 'Close rescheduling'}
+            </button>
+          </div>
+        </Modal>
+      )}
       {seriesBooking === location.key && (
         <AppointmentSeriesModal
           initialDate={date}
@@ -872,7 +963,6 @@ export function AppointmentsPage() {
 
 export function ClinicBookingModal({
   initialDate,
-  appointment,
   waitlist,
   doctors,
   onClose,
@@ -883,7 +973,6 @@ export function ClinicBookingModal({
   onPendingBookingChange,
 }: {
   initialDate: string;
-  appointment?: Appointment;
   waitlist?: WaitlistEntry;
   doctors: Doctor[];
   onClose: () => void;
@@ -907,19 +996,17 @@ export function ClinicBookingModal({
   const [customMinutes, setCustomMinutes] = useState(
     String(pendingCustomBooking?.body.durationMinutes ?? 60),
   );
-  const customBooking = !appointment && !waitlist && lengthPolicy === 'custom';
+  const customBooking = !waitlist && lengthPolicy === 'custom';
   const [patientId, setPatientId] = useState(
     pendingBooking?.body.patientId ||
       pendingCustomBooking?.body.patientId ||
       waitlist?.patientId ||
-      appointment?.patientId ||
       '',
   );
   const [doctorId, setDoctorId] = useState(
     pendingBooking?.body.doctorId ||
       pendingCustomBooking?.body.doctorId ||
       waitlist?.doctorId ||
-      appointment?.doctorId ||
       doctors.find((doctor) => doctor.acceptingNewBookings !== false)?.id ||
       '',
   );
@@ -933,18 +1020,10 @@ export function ClinicBookingModal({
     pendingBooking?.body.time ?? pendingCustomBooking?.body.time ?? '',
   );
   const [mode, setMode] = useState<'in-person' | 'online'>(
-    pendingBooking?.body.mode ||
-      pendingCustomBooking?.body.mode ||
-      waitlist?.mode ||
-      appointment?.mode ||
-      'in-person',
+    pendingBooking?.body.mode || pendingCustomBooking?.body.mode || waitlist?.mode || 'in-person',
   );
   const [reason, setReason] = useState(
-    pendingBooking?.body.reason ||
-      pendingCustomBooking?.body.reason ||
-      waitlist?.reason ||
-      appointment?.reason ||
-      '',
+    pendingBooking?.body.reason || pendingCustomBooking?.body.reason || waitlist?.reason || '',
   );
   const [patientConfirmed, setPatientConfirmed] = useState(
     pendingBooking?.body.patientConfirmed === true,
@@ -954,8 +1033,7 @@ export function ClinicBookingModal({
   const [error, setError] = useState('');
   const locked = saving || uncertain;
   const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
-  const sameDoctorVisit = !!appointment && appointment.doctorId === doctorId;
-  const newBookingPaused = selectedDoctor?.acceptingNewBookings === false && !sameDoctorVisit;
+  const newBookingPaused = selectedDoctor?.acceptingNewBookings === false;
   const patients = useAppointmentBookingData<Patient[]>('/api/patients', (value) => {
     if (
       !Array.isArray(value) ||
@@ -989,16 +1067,13 @@ export function ClinicBookingModal({
         ? patientId && validCustomMinutes(Number(customMinutes))
           ? `/api/visit-duration/slots?${customQuery}`
           : null
-        : `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${date}&mode=${mode}${appointment ? `&excludeAppointmentId=${encodeURIComponent(appointment.id)}` : ''}`
+        : `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${date}&mode=${mode}`
       : null,
     checkedVisitSlots,
   );
-  const duration =
-    appointment?.durationPolicy === 'custom'
-      ? visitMinutes(appointment)
-      : customBooking
-        ? Number(customMinutes)
-        : (doctors.find((d) => d.id === doctorId)?.appointmentDurationMinutes ?? 30);
+  const duration = customBooking
+    ? Number(customMinutes)
+    : (doctors.find((d) => d.id === doctorId)?.appointmentDurationMinutes ?? 30);
   const toast = useToast();
   useEffect(() => {
     if (!attempt && !ordinaryAttempt) setTime('');
@@ -1009,12 +1084,7 @@ export function ClinicBookingModal({
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (savingNow.current) return;
-    if (
-      !appointment &&
-      !attempt &&
-      !ordinaryAttempt &&
-      (!reason.trim() || reason.trim().length > 300)
-    )
+    if (!attempt && !ordinaryAttempt && (!reason.trim() || reason.trim().length > 300))
       return setError('Enter a reason for this visit, up to 300 characters.');
     if (newBookingPaused && !attempt && !ordinaryAttempt)
       return setError(
@@ -1070,17 +1140,6 @@ export function ClinicBookingModal({
         onSaved(result.appointment.date);
         return;
       }
-      if (appointment) {
-        await api(`/api/appointments/${appointment.id}`, {
-          method: 'PATCH',
-          body: { doctorId, date, time },
-          isCurrent: current,
-        });
-        if (!current()) return;
-        toast('Appointment rescheduled.');
-        onSaved(date);
-        return;
-      }
       if (!session.user) return;
       sentOrdinary = sentOrdinary ?? {
         actorId: session.user.id,
@@ -1114,7 +1173,7 @@ export function ClinicBookingModal({
     } catch (e) {
       if (!current()) return;
       setError(errorText(e));
-      if (!appointment && !customBooking && sentOrdinary) {
+      if (!customBooking && sentOrdinary) {
         if (!isAppointmentBookingNotCreated(e, sentOrdinary.body, sentOrdinary.actorId)) {
           setOrdinaryAttempt(sentOrdinary);
           setUncertain(true);
@@ -1192,13 +1251,7 @@ export function ClinicBookingModal({
   }
   return (
     <Modal
-      title={
-        waitlist
-          ? 'Book a confirmed waitlist visit'
-          : appointment
-            ? 'Reschedule appointment'
-            : 'New appointment'
-      }
+      title={waitlist ? 'Book a confirmed waitlist visit' : 'New appointment'}
       onClose={() => {
         if (!savingNow.current) onClose();
       }}
@@ -1224,10 +1277,7 @@ export function ClinicBookingModal({
           {doctors.find((doctor) => doctor.id === doctorId)
             ? money(doctors.find((doctor) => doctor.id === doctorId)!.fee)
             : 'Not available'}
-          .
-          {appointment
-            ? ' Rescheduling uses the selected clinician’s current fee.'
-            : ' Payment is recorded separately.'}
+          .{' Payment is recorded separately.'}
         </p>
         {waitlist && (
           <div className="notice">
@@ -1248,7 +1298,7 @@ export function ClinicBookingModal({
         <Field label="Patient">
           <select
             required
-            disabled={!!appointment || !!waitlist || locked}
+            disabled={!!waitlist || locked}
             value={patientId}
             onChange={(e) => setPatientId(e.target.value)}
           >
@@ -1270,11 +1320,7 @@ export function ClinicBookingModal({
             >
               <option value="">Select a doctor</option>
               {doctors.map((d) => (
-                <option
-                  key={d.id}
-                  value={d.id}
-                  disabled={d.acceptingNewBookings === false && appointment?.doctorId !== d.id}
-                >
+                <option key={d.id} value={d.id} disabled={d.acceptingNewBookings === false}>
                   {d.name}
                   {d.acceptingNewBookings === false ? ' · New bookings paused' : ''}
                 </option>
@@ -1295,26 +1341,22 @@ export function ClinicBookingModal({
         </div>
         {selectedDoctor?.acceptingNewBookings === false && (
           <p className="notice" role="status">
-            {sameDoctorVisit
-              ? 'New bookings are paused for this doctor. This existing visit can still be rescheduled with the same doctor, subject to available hours and time off.'
-              : waitlist
-                ? 'New bookings are paused for this doctor. This waitlist request remains saved and can be withdrawn; it cannot be booked while the pause is in effect.'
-                : 'New bookings are paused for this doctor. Choose another doctor. Your selected doctor has not been changed.'}
+            {waitlist
+              ? 'New bookings are paused for this doctor. This waitlist request remains saved and can be withdrawn; it cannot be booked while the pause is in effect.'
+              : 'New bookings are paused for this doctor. Choose another doctor. Your selected doctor has not been changed.'}
           </p>
         )}
-        {!appointment && (
-          <Field label="Consultation mode">
-            <select
-              disabled={!!waitlist || locked}
-              value={mode}
-              onChange={(e) => setMode(e.target.value as typeof mode)}
-            >
-              <option value="in-person">In clinic</option>
-              <option value="online">Online consultation</option>
-            </select>
-          </Field>
-        )}
-        {!appointment && !waitlist && (
+        <Field label="Consultation mode">
+          <select
+            disabled={!!waitlist || locked}
+            value={mode}
+            onChange={(e) => setMode(e.target.value as typeof mode)}
+          >
+            <option value="in-person">In clinic</option>
+            <option value="online">Online consultation</option>
+          </select>
+        </Field>
+        {!waitlist && (
           <div className="form-grid">
             <Field label="Visit length">
               <select
@@ -1344,11 +1386,6 @@ export function ClinicBookingModal({
         )}
         <p className="muted small">
           {duration}-minute {mode === 'online' ? 'online' : 'in-clinic'} appointment
-          {appointment
-            ? appointment.durationPolicy === 'custom'
-              ? ' · This custom visit keeps its saved length when rescheduled. Use Change visit length for a separate length change.'
-              : ' · Rescheduling uses the doctor’s current appointment length.'
-            : ''}
         </p>
         {time && validCustomMinutes(duration) && (
           <div className="notice visit-duration-preview">
@@ -1365,9 +1402,7 @@ export function ClinicBookingModal({
           </div>
         )}
         <p className="muted small">
-          {appointment
-            ? 'Assigned rooms and equipment move with this visit. Available times include those reservations.'
-            : 'Book the visit first, then use Resources to reserve any room or equipment it needs.'}
+          Book the visit first, then use Resources to reserve any room or equipment it needs.
         </p>
         <Field label="Available times · IST">
           {ordinaryAttempt ? (
@@ -1405,21 +1440,17 @@ export function ClinicBookingModal({
             </div>
           )}
         </Field>
-        {!appointment && (
-          <>
-            <Field label="Reason for visit">
-              <textarea
-                required
-                maxLength={300}
-                rows={3}
-                value={reason}
-                disabled={locked}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Briefly describe the reason for the appointment"
-              />
-            </Field>
-          </>
-        )}
+        <Field label="Reason for visit">
+          <textarea
+            required
+            maxLength={300}
+            rows={3}
+            value={reason}
+            disabled={locked}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Briefly describe the reason for the appointment"
+          />
+        </Field>
         {waitlist && (
           <label className="checkbox-field">
             <input
@@ -1459,11 +1490,9 @@ export function ClinicBookingModal({
               ? 'Saving…'
               : uncertain
                 ? 'Retry same request'
-                : appointment
-                  ? 'Save new time'
-                  : waitlist
-                    ? 'Book confirmed visit'
-                    : 'Book appointment'}
+                : waitlist
+                  ? 'Book confirmed visit'
+                  : 'Book appointment'}
           </button>
         </div>
       </form>

@@ -131,15 +131,15 @@ test('weekly sessions, consultation modes and duration drive bookings; time off 
   const row = page.getByRole('row').filter({ hasText: patient.name });
   await expect(row.getByText('20 min', { exact: true })).toBeVisible();
 
-  // Rescheduling can retain the current slot using the selected doctor’s current appointment length.
+  // The current slot remains visible; closing the review leaves the original visit untouched.
   await row.getByRole('button', { name: `More actions for ${patient.name}`, exact: true }).click();
   await page
     .getByRole('dialog')
     .getByRole('button', { name: 'Reschedule appointment', exact: true })
     .click();
   dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('button', { name: '1:00 PM', exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: '13:00', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close rescheduling', exact: true }).click();
 
   await page.goto('/clinic/scheduling');
   await page

@@ -194,9 +194,21 @@ test('clinic appointment booking, rescheduling, calendar download and cancellati
   expect(download.suggestedFilename()).toBe('appointment.ics');
   await dialog.getByRole('button', { name: 'Reschedule appointment', exact: true }).click();
   dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Date', { exact: true }).fill(newDate);
-  await dialog.locator('.clinic-time-slot').first().click();
-  await dialog.getByRole('button', { name: 'Save new time', exact: true }).click();
+  await dialog.getByLabel('New date', { exact: true }).fill(newDate);
+  await dialog
+    .getByRole('group', { name: 'Available appointment times', exact: true })
+    .getByRole('button')
+    .first()
+    .click();
+  await dialog.getByRole('button', { name: 'Review change', exact: true }).click();
+  await dialog
+    .getByLabel('I confirmed this exact appointment change with the patient.', { exact: true })
+    .check();
+  await dialog.getByRole('button', { name: 'Confirm reschedule', exact: true }).click();
+  await expect(
+    dialog.getByRole('heading', { name: 'Reschedule confirmed', exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close rescheduling', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByLabel('Appointment date', { exact: true })).toHaveValue(newDate);
   await expect(row).toBeVisible();

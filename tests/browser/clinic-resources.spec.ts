@@ -260,9 +260,11 @@ test('resource intervals follow patient rescheduling, preserve cancellation hist
     await expect(ownPage.getByText(roomName, { exact: true })).toHaveCount(0);
     await expect(ownPage.getByText(otherPatient.name, { exact: true })).toHaveCount(0);
     await times.getByRole('button', { name: '11:00', exact: true }).click();
-    await ownPage.getByRole('button', { name: 'Confirm new time', exact: true }).click();
+    await ownPage.getByRole('button', { name: 'Review change', exact: true }).click();
+    await ownPage.getByLabel('I agree to this exact appointment change.', { exact: true }).check();
+    await ownPage.getByRole('button', { name: 'Confirm reschedule', exact: true }).click();
     await expect(
-      ownPage.getByRole('heading', { name: 'Appointment rescheduled.', exact: true }),
+      ownPage.getByRole('heading', { name: 'Reschedule confirmed', exact: true }),
     ).toBeVisible();
     const moved = await context(page.request, ownAppointment.id);
     expect(moved.appointment.time).toBe('11:00');

@@ -24,6 +24,7 @@ flowchart LR
 | `src/App.tsx`                                  | Routing, role guards, public/clinic/patient layouts                                        |
 | `src/lib.tsx`                                  | API client, session context, load/error states, notifications, date/currency helpers       |
 | `src/components/ui.tsx`                        | Shared accessible UI, fields, modal focus handling                                         |
+| `src/components/AppointmentRescheduleForm.tsx` | Shared patient/staff visit review, target preview, confirmation and uncertain retry        |
 | `src/components/DocumentsPanel.tsx`            | Private PDF-report list, upload agreement and authenticated downloads                      |
 | `src/components/ImageAnnotations.tsx`          | Versioned clinical overlays, explicit sharing, original images and patient viewer          |
 | `src/pages/CareSummaryPage.tsx`                | Patient-facing print view and revision-checked JSON download                               |
@@ -46,6 +47,7 @@ flowchart LR
 | `server/app.ts`                                | Core API, authorization, security headers, request validation                              |
 | `server/db.ts`                                 | Schema, database utilities, synthetic demo seed                                            |
 | `server/appointment-booking.ts`                | Ordinary booking creation, immutable confirmations and terminal command outcomes           |
+| `server/appointment-rescheduling.ts`           | Reviewed individual moves, source counters, immutable events and terminal retry outcomes   |
 | `server/database-recovery.ts`                  | Backup verification, isolated recovery, access retirement and preservation checks          |
 | `server/restore.ts`                            | Local operator JSON recovery CLI, with no HTTP mutation surface                            |
 | `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                         |
@@ -184,6 +186,16 @@ Append-only `appointmentBookings` retains the original scheduled appointment and
 A savepoint encloses appointment creation, waitlist transition, audit, activity and successful command evidence. A normal domain rejection rolls that savepoint back, then saves a terminal rejection while retaining the outer writer lock. Only after commit does the response identify the request as `not-created`. Concurrent or delayed copies cannot later create that rejected command. Unknown failures roll back the entire transaction and emit no definitive outcome. Both successful and rejected command rows are immutable.
 
 The shared client helper validates the immutable original against the submitted fields, actor and receipt, then accepts the separately validated current appointment for display. `ApiError.responseData` retains JSON error metadata so the booking form can distinguish a matching definitive rejection from an unknown outcome. Pending forms lock their submitted intent; retries bypass current slot/pause/waitlist display restrictions. Guarded reads and writes check actor, router entry and native navigation generation before applying responses or session-expiry effects. Staff dialog close/reopen retains an attempt in the current page's memory; navigation/reload does not persist medical form content.
+
+## Reviewed individual rescheduling
+
+`server/appointment-rescheduling.ts` owns current-source reads, target previews and reviewed single-visit commands. `appointmentMutationVersions` tracks actual appointment changes with a SQL trigger, so every writer invalidates an older source even after changes away and back. This counter is concurrency metadata; migration leaves original appointment bytes intact and does not invent historical events.
+
+The preview binds the source revision, explicit target, current target doctor metadata, scheduling inputs and private resource-move source. Current authorization, source eligibility and scheduling/resource checks run under `BEGIN IMMEDIATE`. The selected visit must remain future and scheduled. Resources move in the same transaction; retained custom lengths, same-doctor pause exceptions and patient/doctor overlap protection use existing scheduling rules.
+
+Append-only `appointmentRescheduleEvents` retains before/after snapshots; `appointmentRescheduleCommands` binds the actor, appointment and full normalized input to one successful event or terminal rejection. A savepoint rolls back failed booking/resource/evidence effects before saving a known rejection under the outer writer lock. Exact retries return original evidence with current appointment state, or the stored rejection, after fresh authorization. Unknown failures roll back entirely. Compatibility PATCH remains available with its existing shape and does not create reviewed events.
+
+Patient and clinic pages share the rescheduling form and response validators. Context refresh preserves selected targets, while a changed source requires a new preview. Only a matching definitive rejection unlocks an uncertain command. Original event validation and later-current display remain separate, and account/navigation guards run before local updates or global session-expiry effects. Staff close/resume uses page memory; no medical draft is stored in browser persistence.
 
 ## Finite recurring appointment series
 

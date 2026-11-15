@@ -46,6 +46,7 @@ import { AuthenticationThrottle, createAuthSecurity } from './auth-security.ts';
 import { registerVisitDuration } from './visit-duration.ts';
 import { registerAppointmentSeries } from './appointment-series.ts';
 import { registerAppointmentBookings } from './appointment-booking.ts';
+import { registerAppointmentRescheduling } from './appointment-rescheduling.ts';
 import { registerAppointmentSeriesCancellations } from './appointment-series-cancellations.ts';
 import { registerAppointmentSeriesRescheduling } from './appointment-series-rescheduling.ts';
 import {
@@ -753,6 +754,17 @@ export function createApp(options: AppOptions = {}) {
     businessFailure: (error) =>
       error instanceof HttpError ? { status: error.status, message: error.message } : null,
   });
+  const appointmentRescheduling = registerAppointmentRescheduling(app, {
+    db,
+    actor,
+    appointmentGet,
+    audit,
+    fail,
+    scheduling,
+    clinicResources,
+    businessFailure: (error) =>
+      error instanceof HttpError ? { status: error.status, message: error.message } : null,
+  });
   app.patch('/api/appointments/:id', (req: AuthRequest, res) => {
     const input = z
       .object({
@@ -769,8 +781,8 @@ export function createApp(options: AppOptions = {}) {
       .refine((value) => Object.keys(value).length > 0, 'No changes supplied')
       .parse(req.body);
     const updated = scheduling.transaction(() => {
-      const a = appointmentGet(req, String(req.params.id)),
-        user = actor(req);
+      const user = appointmentRescheduling.authorize(req);
+      const a = appointmentGet(req, String(req.params.id));
       if (CLOSED.includes(a.status)) fail(409, 'This appointment is closed and cannot be changed.');
       if (
         user.role === 'receptionist' &&
