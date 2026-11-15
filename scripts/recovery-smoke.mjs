@@ -70,7 +70,9 @@ if (imageIndex >= 0) {
 
 async function rehearseRecovery() {
   const { createApp } = await import(pathToFileURL(resolve('server/app.ts')).href);
-  const { createUser } = await import(pathToFileURL(resolve('server/db.ts')).href);
+  const { createUser, clinicToday, addDays } = await import(
+    pathToFileURL(resolve('server/db.ts')).href
+  );
   const { fromBase32, totpAt } = await import(pathToFileURL(resolve('server/mfa-crypto.ts')).href);
   const directory = await mkdtemp(join(tmpdir(), 'derma-recovery-rehearsal-'));
   const original = join(directory, 'original.sqlite');
@@ -218,6 +220,25 @@ async function rehearseRecovery() {
       },
       201,
     );
+    let visitDate = addDays(clinicToday(), 20);
+    if (new Date(`${visitDate}T12:00:00Z`).getUTCDay() === 0) visitDate = addDays(visitDate, 1);
+    const ordinaryCommand = {
+      patientId,
+      doctorId: doctor.id,
+      date: visitDate,
+      time: '09:00',
+      mode: 'in-person',
+      reason: 'Synthetic retained ordinary booking',
+      requestId: randomUUID(),
+    };
+    const ordinary = await call(
+      source,
+      '/appointment-bookings',
+      patient,
+      'POST',
+      ordinaryCommand,
+      201,
+    );
     const bookingPath = `/doctors/${doctor.id}/booking-status`;
     const bookingContext = await call(source, bookingPath, admin);
     const pauseInput = {
@@ -227,6 +248,16 @@ async function rehearseRecovery() {
       requestId: randomUUID(),
     };
     const pause = await call(source, bookingPath, admin, 'POST', pauseInput, 201);
+    const rejectedCommand = { ...ordinaryCommand, time: '10:00', requestId: randomUUID() };
+    const rejected = await call(
+      source,
+      '/appointment-bookings',
+      patient,
+      'POST',
+      rejectedCommand,
+      409,
+    );
+    assert.equal(rejected.bookingOutcome, 'not-created');
     const imageBytes = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cWb0AAAAASUVORK5CYII=',
       'base64',
@@ -403,6 +434,28 @@ async function rehearseRecovery() {
       pause.change,
     );
     assert.equal((await call(target, '/doctors'))[0].acceptingNewBookings, false);
+    assert.deepEqual(
+      await call(target, '/appointment-bookings', newPatient, 'POST', ordinaryCommand),
+      ordinary,
+    );
+    await call(
+      target,
+      bookingPath,
+      newAdmin,
+      'POST',
+      {
+        acceptingNewBookings: true,
+        reason: 'Synthetic restored clinic resumes booking',
+        expectedRevision: (await call(target, bookingPath, newAdmin)).revision,
+        requestId: randomUUID(),
+      },
+      201,
+    );
+    assert.deepEqual(
+      await call(target, '/appointment-bookings', newPatient, 'POST', rejectedCommand, 409),
+      rejected,
+    );
+    assert.equal((await call(target, '/appointments', newPatient)).length, 1);
     const audit = await call(target, '/search/audit?entityType=database-recovery', newAdmin);
     assert.equal(audit.total, 1);
     assert.equal(audit.items[0].id, recovered.auditId);

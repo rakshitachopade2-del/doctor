@@ -483,6 +483,29 @@
   justify-content: center;
   margin: 20px 0;
 }
+.patient-booking-original {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.patient-booking-original summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.patient-booking-original p,
+.patient-booking-pending p {
+  line-height: 1.6;
+  margin: 10px 0 0;
+}
+.patient-booking-pending {
+  display: block;
+  margin-bottom: 12px;
+}
+.patient-booking-current h2 {
+  margin-bottom: 12px;
+}
 .success-mark {
   background: #e5f0e1;
   color: #387557;

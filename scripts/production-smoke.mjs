@@ -2945,12 +2945,251 @@ try {
     });
     assert.equal(denied.status, status);
   }
+  // Ordinary booking receipts remain definitive through later clinical operations.
+  const ordinaryPath = '/appointment-bookings';
+  async function ordinaryWrite(
+    path,
+    body,
+    headers = verifiedHeaders,
+    status = 201,
+    method = 'POST',
+  ) {
+    const response = await fetch(`${base}/api${path}`, {
+      method,
+      headers,
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, status, `Unexpected ordinary-booking response: ${path}`);
+    return response.json();
+  }
+  const ordinaryDoctor = await ordinaryWrite('/doctors', {
+    name: 'Synthetic ordinary booking doctor',
+    title: 'Dermatologist',
+    qualifications: 'Synthetic only',
+    specialties: ['General dermatology'],
+    experience: 1,
+    fee: 350,
+    bio: 'Disposable booking recovery verification.',
+    languages: ['English'],
+  });
+  await ordinaryWrite(
+    `/schedules/${ordinaryDoctor.id}`,
+    {
+      durationMinutes: 30,
+      windows: Array.from({ length: 7 }, (_, day) => ({
+        day,
+        start: '09:00',
+        end: '18:00',
+        mode: 'both',
+      })),
+    },
+    verifiedHeaders,
+    200,
+    'PUT',
+  );
+  const ordinaryDay = new Date(Date.parse(`${attendanceDay}T12:00:00Z`) + 130 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const ordinaryCommand = {
+    patientId: registeredSession.user.patientId,
+    doctorId: ordinaryDoctor.id,
+    date: ordinaryDay,
+    time: '09:30',
+    mode: 'in-person',
+    reason: 'Synthetic ordinary booking',
+    requestId: randomUUID(),
+  };
+  const ordinaryBooked = await ordinaryWrite(ordinaryPath, ordinaryCommand, patientHeaders);
+  assert.equal(ordinaryBooked.receipt.actorId, registeredSession.user.id);
+  assert.equal(ordinaryBooked.receipt.patientId, ordinaryCommand.patientId);
+  assert.equal(ordinaryBooked.receipt.requestId, ordinaryCommand.requestId);
+  assert.equal(ordinaryBooked.booking.appointment.id, ordinaryBooked.appointment.id);
+  assert.equal(ordinaryBooked.booking.appointment.fee, 350);
+  assert.equal(ordinaryBooked.booking.waitlistId, null);
+  assert.equal(ordinaryBooked.booking.patientConfirmed, false);
+  assert.deepEqual(
+    await ordinaryWrite(ordinaryPath, ordinaryCommand, patientHeaders, 200),
+    ordinaryBooked,
+  );
+  const collision = await ordinaryWrite(
+    ordinaryPath,
+    { ...ordinaryCommand, time: '10:30' },
+    patientHeaders,
+    409,
+  );
+  assert.equal(collision.bookingOutcome, undefined);
+  const otherActor = await ordinaryWrite(ordinaryPath, ordinaryCommand, verifiedHeaders, 409);
+  assert.equal(otherActor.bookingOutcome, undefined);
+  await ordinaryWrite(
+    `/doctors/${ordinaryDoctor.id}`,
+    {
+      ...ordinaryDoctor,
+      name: 'Renamed synthetic booking doctor',
+      fee: 850,
+    },
+    verifiedHeaders,
+    200,
+    'PATCH',
+  );
+  const movedOrdinary = await ordinaryWrite(
+    `/appointments/${ordinaryBooked.appointment.id}`,
+    {
+      date: ordinaryDay,
+      time: '10:00',
+      doctorId: ordinaryDoctor.id,
+    },
+    patientHeaders,
+    200,
+    'PATCH',
+  );
+  assert.equal(movedOrdinary.fee, 850);
+  const ordinaryStatusPath = `/doctors/${ordinaryDoctor.id}/booking-status`;
+  async function ordinaryAcceptance(acceptingNewBookings) {
+    const context = await reminderRead(ordinaryStatusPath);
+    return ordinaryWrite(ordinaryStatusPath, {
+      acceptingNewBookings,
+      reason: 'Synthetic booking-receipt lifecycle check',
+      expectedRevision: context.revision,
+      requestId: randomUUID(),
+    });
+  }
+  await ordinaryAcceptance(false);
+  const movedReplay = await ordinaryWrite(ordinaryPath, ordinaryCommand, patientHeaders, 200);
+  assert.deepEqual(movedReplay.booking, ordinaryBooked.booking);
+  assert.deepEqual(movedReplay.receipt, ordinaryBooked.receipt);
+  assert.equal(movedReplay.appointment.time, '10:00');
+  assert.equal(movedReplay.appointment.fee, 850);
+  const rejectedCommand = { ...ordinaryCommand, time: '11:00', requestId: randomUUID() };
+  const rejectedBooking = await ordinaryWrite(ordinaryPath, rejectedCommand, patientHeaders, 409);
+  assert.deepEqual(rejectedBooking, {
+    error:
+      'This doctor is not accepting new bookings. Choose another doctor or contact the clinic.',
+    bookingOutcome: 'not-created',
+    requestId: rejectedCommand.requestId,
+    actorId: registeredSession.user.id,
+    patientId: ordinaryCommand.patientId,
+  });
+  await ordinaryAcceptance(true);
+  assert.deepEqual(
+    await ordinaryWrite(ordinaryPath, rejectedCommand, patientHeaders, 409),
+    rejectedBooking,
+  );
+  const rejectedCollision = await ordinaryWrite(
+    ordinaryPath,
+    { ...rejectedCommand, time: '12:00' },
+    patientHeaders,
+    409,
+  );
+  assert.equal(rejectedCollision.bookingOutcome, undefined);
+  const freshOrdinary = await ordinaryWrite(
+    ordinaryPath,
+    { ...rejectedCommand, requestId: randomUUID() },
+    patientHeaders,
+  );
+  assert.notEqual(freshOrdinary.appointment.id, ordinaryBooked.appointment.id);
+  const waiting = await ordinaryWrite(
+    '/waitlist',
+    {
+      doctorId: ordinaryDoctor.id,
+      mode: 'online',
+      startDate: ordinaryDay,
+      endDate: ordinaryDay,
+      reason: 'Synthetic retry-safe waitlist fulfillment',
+    },
+    patientHeaders,
+  );
+  const waitlistBookingCommand = {
+    ...ordinaryCommand,
+    mode: 'online',
+    time: '14:00',
+    waitlistId: waiting.id,
+    patientConfirmed: true,
+    requestId: randomUUID(),
+  };
+  const waitlistBooked = await ordinaryWrite(ordinaryPath, waitlistBookingCommand);
+  assert.equal(waitlistBooked.receipt.actorId, account.user.id);
+  assert.equal(waitlistBooked.booking.waitlistId, waiting.id);
+  assert.equal(waitlistBooked.booking.patientConfirmed, true);
+  const closedWaiting = (await reminderRead('/waitlist', patientHeaders)).find(
+    (entry) => entry.id === waiting.id,
+  );
+  assert.equal(closedWaiting.status, 'booked');
+  assert.equal(closedWaiting.appointmentId, waitlistBooked.appointment.id);
+  await ordinaryWrite(
+    `/appointments/${waitlistBooked.appointment.id}`,
+    { status: 'cancelled' },
+    verifiedHeaders,
+    200,
+    'PATCH',
+  );
+  await ordinaryWrite(
+    `/appointments/${ordinaryBooked.appointment.id}`,
+    { status: 'cancelled' },
+    patientHeaders,
+    200,
+    'PATCH',
+  );
+  await ordinaryAcceptance(false);
+  const waitlistReplay = await ordinaryWrite(
+    ordinaryPath,
+    waitlistBookingCommand,
+    verifiedHeaders,
+    200,
+  );
+  assert.deepEqual(waitlistReplay.booking, waitlistBooked.booking);
+  assert.deepEqual(waitlistReplay.receipt, waitlistBooked.receipt);
+  assert.equal(waitlistReplay.appointment.status, 'cancelled');
+  const cancelledReplay = await ordinaryWrite(ordinaryPath, ordinaryCommand, patientHeaders, 200);
+  assert.deepEqual(cancelledReplay.booking, ordinaryBooked.booking);
+  assert.equal(cancelledReplay.appointment.status, 'cancelled');
+  const retryOrdinaryAppointments = await reminderRead('/appointments', patientHeaders);
+  assert.equal(
+    retryOrdinaryAppointments.filter((value) => value.doctorId === ordinaryDoctor.id).length,
+    3,
+  );
+  const ordinaryAudit = await reminderRead(
+    `/search/audit?entityType=appointment&entityId=${ordinaryBooked.appointment.id}`,
+  );
+  assert.equal(
+    ordinaryAudit.items.filter((value) => value.action === 'booked appointment').length,
+    1,
+  );
+  const waitlistAudit = await reminderRead(
+    `/search/audit?entityType=waitlist&entityId=${waiting.id}`,
+  );
+  assert.equal(
+    waitlistAudit.items.filter((value) => value.action === 'booked confirmed waitlist request')
+      .length,
+    1,
+  );
+  for (const projection of [
+    retryOrdinaryAppointments,
+    await reminderRead(reminderSummaryPath, patientHeaders),
+  ]) {
+    for (const privateValue of [
+      ordinaryCommand.requestId,
+      ordinaryBooked.booking.id,
+      rejectedCommand.requestId,
+      waitlistBookingCommand.requestId,
+    ])
+      assert.equal(JSON.stringify(projection).includes(privateValue), false);
+  }
+  const unauthenticatedBooking = await ordinaryWrite(
+    ordinaryPath,
+    ordinaryCommand,
+    publicHeaders,
+    401,
+  );
+  assert.equal(unauthenticatedBooking.bookingOutcome, undefined);
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
     body: '{}',
   });
   assert.equal(patientLogout.status, 200);
+  const loggedOutBooking = await ordinaryWrite(ordinaryPath, ordinaryCommand, patientHeaders, 401);
+  assert.equal(loggedOutBooking.bookingOutcome, undefined);
   assert.equal(
     (await (await fetch(`${base}/api/session`, { headers: patientHeaders })).json()).user,
     null,
@@ -3033,7 +3272,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

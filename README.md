@@ -29,7 +29,7 @@ These are intentionally public **development-only credentials**. Production star
 ## What works
 
 - **Discovery:** doctor profiles, focus areas, qualifications, languages, consultation fees, and clinic contact information.
-- **Booking:** in-person or online appointments, live availability, protection against overlapping doctor and patient bookings, rescheduling, cancellation, check-in, consultation progression, no-shows, and `.ics` calendar export with the recorded visit duration.
+- **Booking:** in-person or online appointments, live availability, protection against overlapping doctor and patient bookings, safe retries after uncertain ordinary or waitlist booking responses, rescheduling, cancellation, check-in, consultation progression, no-shows, and `.ics` calendar export with the recorded visit duration.
 - **Recurring visits:** staff preview and confirm 2–12 weekly, fortnightly or four-weekly appointments together. Every visit must fit availability and the booking horizon; conflicts prevent the whole booking. Original series snapshots remain available after individual visits change, and uncertain requests can be retried safely.
 - **Custom visit lengths:** staff can reserve 15–240 minutes for an extended visit, change its length with retained history, or restore the doctor's default. Custom lengths stay intact when patients or staff reschedule.
 - **Procedure appointments:** staff can link an existing procedure plan to a booked visit, replace or remove an eligible link, and inspect attributed history. Patients see the current visit; original clinical plans, decisions and invoices stay intact.
@@ -143,6 +143,12 @@ When the server has an MFA encryption key configured, open **Account & security*
 Enrolled accounts must complete the authenticator or recovery-code step after entering their password. Starting this step does not grant access to clinic or patient records. Replacing recovery codes is staged: the previous set remains active until you confirm saving the replacement. Enabling, disabling or replacing factors ends other browser sessions. Password recovery changes the password and preserves MFA.
 
 MFA is optional and unavailable for new enrollment until `MFA_ENCRYPTION_KEY` is configured. See [key setup and lost-factor recovery](docs/DEPLOYMENT.md#authenticator-sign-in-and-key-management). There is no email/SMS verification, external delivery or remembered-device bypass. If all factors are lost, an operator must verify identity and use the audited local reset procedure.
+
+## Recover an uncertain booking confirmation
+
+Patient and staff booking forms keep the submitted details when a connection failure or incomplete response leaves the outcome uncertain. Use **Retry same request** to resolve that same request. Its original booking can still be confirmed after the doctor pauses new bookings, the slot becomes occupied, or a waiting request is already marked booked. The confirmation shows the appointment's current details and status if it has since moved or been cancelled.
+
+An uncertain request stays locked until its outcome is established. If the server confirms that it created no appointment, the form preserves your other details and lets you review a new time before submitting a fresh request. Staff can close the dialog and resume the pending confirmation on the same page. Pending form state is kept only in memory; after leaving or reloading the page, check existing appointments or the waiting request before starting another booking. No patient details are placed in browser storage.
 
 ## Coordinate a waiting patient
 
@@ -354,7 +360,7 @@ npm run test:production
 npm run test:recovery
 ```
 
-API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5210** and API ports **3011–3038**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5211** and API ports **3011–3039**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
 
 The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards. Follow-up and activity tests cover stale-review rejection, preserved check-in versions, same-day corrections, private assessment redaction, module pauses, recipient isolation, stable pagination, and read-state changes that leave clinical review work unchanged.
 

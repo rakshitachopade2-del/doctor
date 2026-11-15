@@ -45,6 +45,7 @@ import { mfaEncryptionKey } from './mfa-crypto.ts';
 import { AuthenticationThrottle, createAuthSecurity } from './auth-security.ts';
 import { registerVisitDuration } from './visit-duration.ts';
 import { registerAppointmentSeries } from './appointment-series.ts';
+import { registerAppointmentBookings } from './appointment-booking.ts';
 import { registerAppointmentSeriesCancellations } from './appointment-series-cancellations.ts';
 import { registerAppointmentSeriesRescheduling } from './appointment-series-rescheduling.ts';
 import {
@@ -740,59 +741,17 @@ export function createApp(options: AppOptions = {}) {
     );
     res.json(rows.sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)));
   });
-  app.post('/api/appointments', (req: AuthRequest, res) => {
-    const input = z
-      .object({
-        patientId: required.optional(),
-        doctorId: required,
-        date,
-        time: z.string().regex(/^\d{2}:\d{2}$/),
-        mode: z.enum(['in-person', 'online']),
-        reason: short.min(1),
-        waitlistId: required.optional(),
-        patientConfirmed: z.literal(true).optional(),
-        durationMinutes: z.never().optional(),
-        durationPolicy: z.never().optional(),
-      })
-      .parse(req.body);
-    const { waitlistId, patientConfirmed, ...appointmentInput } = input;
-    const patientId = ownPatient(req, input.patientId);
-    const p = patientAccess(req, patientId, true);
-    const appointment = scheduling.transaction(() => {
-      const durationMinutes = scheduling.validateBooking({
-        doctorId: input.doctorId,
-        date: input.date,
-        time: input.time,
-        mode: input.mode,
-        patientId,
-      });
-      const d = get<Doctor>(db, 'doctors', input.doctorId)!;
-      const value: Appointment = {
-        ...appointmentInput,
-        id: id(),
-        patientId,
-        patientName: p.name,
-        doctorName: d.name,
-        fee: d.fee,
-        durationMinutes,
-        status: 'scheduled',
-        createdAt: nowISO(),
-      };
-      db.prepare(
-        'INSERT INTO appointments(id,patientId,doctorId,date,time,status,data) VALUES (?,?,?,?,?,?,?)',
-      ).run(value.id, patientId, d.id, value.date, value.time, value.status, JSON.stringify(value));
-      if (waitlistId) waitlist.book(req, waitlistId, value, patientConfirmed);
-      audit(req, 'booked appointment', 'appointment', value.id);
-      if (!waitlistId)
-        notifyPatient(db, patientId, `appointment-created:${value.id}`, {
-          kind: 'appointment',
-          title: 'Your appointment is booked',
-          detail: `${value.date} at ${value.time} IST · ${value.doctorName}`,
-          href: '/my-care',
-        });
-      return value;
-    });
-    res.status(201).json(appointment);
+  registerAppointmentBookings(app, {
+    db,
+    actor,
+    ownPatient,
+    patientAccess,
+    audit,
+    fail,
+    scheduling,
+    waitlist,
+    businessFailure: (error) =>
+      error instanceof HttpError ? { status: error.status, message: error.message } : null,
   });
   app.patch('/api/appointments/:id', (req: AuthRequest, res) => {
     const input = z

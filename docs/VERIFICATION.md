@@ -1,19 +1,25 @@
 # Release verification
 
-Release **1.34.0**, verified locally on **15 November 2026** using Node.js **24.13.0**. This release adds operator recovery tooling without changes to browser UI or HTTP application behavior.
+Release **1.35.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
-| Check                           | Result                                                   |
-| ------------------------------- | -------------------------------------------------------- |
-| TypeScript                      | Passed                                                   |
-| API, backup and recovery tests  | 604 passed                                               |
-| Browser and accessibility tests | Prior release: 114 passed; not rerun for this CLI change |
-| Production frontend build       | Passed                                                   |
-| Fresh production startup        | Passed                                                   |
-| Isolated recovery rehearsal     | Passed locally and in a disposable Docker container      |
-| Production dependency audit     | 0 vulnerabilities reported                               |
-| Prettier and whitespace checks  | Passed                                                   |
-| Docker Compose configuration    | Valid                                                    |
-| Docker image build/runtime      | Passed: image build and disposable production container  |
+| Check                           | Result                                                  |
+| ------------------------------- | ------------------------------------------------------- |
+| TypeScript                      | Passed                                                  |
+| API, backup and recovery tests  | 620 passed                                              |
+| Browser and accessibility tests | 118 passed                                              |
+| Production frontend build       | Passed                                                  |
+| Fresh production startup        | Passed                                                  |
+| Isolated recovery rehearsal     | Passed locally and in a disposable Docker container     |
+| Production dependency audit     | 0 vulnerabilities reported                              |
+| Prettier and whitespace checks  | Passed                                                  |
+| Docker Compose configuration    | Valid                                                   |
+| Docker image build/runtime      | Passed: image build and disposable production container |
+
+The 16 ordinary-booking API groups cover all four roles, strict normalized commands, legacy response compatibility, immutable original confirmations alongside moved/cancelled current appointments, and actor/payload-bound UUID collisions. Successful retries survive doctor pause, changed names/fees/hours, terminal waiting requests and actual calendar expiry. Durable rejected commands cannot create on later retries after availability changes; fresh UUIDs remain subject to normal conflicts. Twenty-one new/legacy/replay authentication races and patient-linkage races recheck access under the write lock. Independent connections verify competing slots, exact duplicates and delayed rejected commands. Seven new-command and five compatibility write-failure stages, plus rejection-receipt failure, prove atomic appointment/waitlist/activity/audit rollback without false outcome markers. Immutable evidence and legacy appointment bytes survive restart; private IDs stay outside ordinary patient projections.
+
+Four browser journeys exercise patient ordinary booking and patient/staff waitlist fulfillment through malformed responses, later unmarked errors, wrong-actor confirmations/outcome markers and request collisions. Exact attempts remain locked through later moves, cancellation, doctor pause and terminal waiting requests; staff can close/resume the dialog. A never-committed patient waitlist request unlocks after its matching terminal rejection, retains its edited date/reason across refetch and fulfills once with a fresh command. Whitespace-only reasons are rejected before submission. Consumed late success and authorization responses cannot revive an older form or expire a later route, including navigation away and Back. Pending patient booking, current cancelled confirmation and staff waitlist confirmation receive rendered 320-pixel accessibility checks and visual review.
+
+Local and disposable-container production checks verify ordinary and waitlist original receipts, current records after profile/fee changes and moves/cancellations, rejection persistence through pause/resume, fresh-command recovery, actor/payload collision and no duplicated appointment/audit effects. Private command fields stay out of appointment lists and live care summaries; anonymous and logged-out attempts receive no outcome marker. Recovery rehearsals now populate both successful and rejected booking commands before backup: the restored patient can replay the original success while the doctor is paused, and the rejected command stays rejected after resumption, with one retained appointment.
 
 The 14 recovery API/CLI test groups cover current and baseline-legacy snapshots, exact retained SQL values and file BLOBs, large integers and additive columns/tables, original source bytes, restrictive permissions and one appended operator audit event. Restored sessions, recovery links, MFA challenges/setup and all MFA recovery codes are retired. Credential identity/ciphertext, passwords/account state, durable throttles, MFA epochs, immutable events and command receipts remain unchanged; replay guards advance monotonically. Tests reject corrupt/foreign/incomplete schemas, unsupported version markers/views/virtual tables, foreign-key violations, destructive/ignored triggers and audit failures without publishing partial recovery.
 
@@ -21,7 +27,7 @@ Filesystem tests cover existing files/directories, hardlink aliases, symlinks an
 
 The local and disposable-container recovery rehearsals exercise the actual backup and recovery commands, using a live synthetic production fixture. They verify that the original stays usable, restore into a different file, reject old sessions/grants/challenges/codes, preserve exact private image/PDF and saved-summary download bytes, replay original saved-copy and doctor-booking commands, and expose the added recovery audit through the existing administrator search. A fresh real authenticator sign-in succeeds after the restored replay guard, with zero old recovery codes remaining. Fixtures and servers are removed; the container publishes no ports. CI now runs the local recovery rehearsal after its existing production smoke check.
 
-Browser results and journey descriptions below are retained from version 1.33.0. This release did not rerun those 114 journeys or claim new UI accessibility coverage. Nothing was deployed or published to hosting.
+Nothing was deployed or published to hosting. All fixtures use synthetic records and accounts.
 
 The 16 doctor-booking API checks cover legacy/new accepting defaults, independent status revisions, changes away and back, no-op rejection, strict inputs, exact actor/doctor/payload-bound retries and unchanged profile bytes. Pauses block new ordinary/custom/series appointments, waitlist joins/fulfillment and incoming doctor transfers. Existing same-doctor patient moves, custom length changes and real multi-visit series swaps remain usable, preserving resources and original booking receipts. Client flags, unrelated or terminal appointment IDs and batch exclusion IDs cannot enable the stored-visit exception. New-series previews detect pause/resume changes; existing same-doctor previews remain stable. Twenty-eight private-route account/session/MFA race combinations, external pauses before booking locks, atomic failure rollback, competing connections, immutable evidence, restart and bounded coherent history pages are checked. Public directory fields expose the status boolean without private evidence.
 

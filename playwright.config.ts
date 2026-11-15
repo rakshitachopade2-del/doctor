@@ -157,6 +157,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)doctor-booking\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5210' },
     },
+    {
+      name: 'appointment-booking',
+      testMatch: /(?:^|\/)appointment-booking\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5211' },
+    },
   ],
   webServer: [
     {
@@ -325,6 +330,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3038 E2E_VITE_PORT=5210 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5210',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3039 E2E_VITE_PORT=5211 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5211',
       reuseExistingServer: false,
       timeout: 60000,
     },

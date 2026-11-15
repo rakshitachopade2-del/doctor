@@ -1,5 +1,5 @@
-import { useMemo, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
   ArrowRight,
   CalendarDays,
@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 import type { Appointment, Doctor, Patient } from '../../shared/types';
 import type { WaitlistEntry, WaitlistStatus } from '../../shared/waitlist';
-import { api, formatDate, today, useResource, useToast } from '../lib';
+import { api, formatDate, today, useResource, useSession, useToast } from '../lib';
+import type { AppointmentBookingAttempt } from '../components/appointment-booking-helpers';
 import {
   Avatar,
   Badge,
@@ -58,12 +59,26 @@ type WaitlistAction =
   { kind: 'create' } | { kind: 'book' | 'withdraw' | 'details'; entry: WaitlistEntry };
 
 export function WaitlistPage() {
+  const location = useLocation();
+  const { session } = useSession();
   const entries = useResource<WaitlistEntry[]>('/api/waitlist');
   const doctors = useResource<Doctor[]>('/api/doctors');
   const [status, setStatus] = useState<WaitlistStatus | 'all'>('waiting');
   const [doctorId, setDoctorId] = useState('');
   const [search, setSearch] = useState('');
   const [action, setAction] = useState<WaitlistAction | null>(null);
+  const [pendingBooking, setPendingBooking] = useState<{
+    entry: WaitlistEntry;
+    attempt: AppointmentBookingAttempt;
+  } | null>(null);
+  const origin = useRef({ key: location.key, actorId: session.user?.id });
+  useLayoutEffect(() => {
+    if (origin.current.key !== location.key || origin.current.actorId !== session.user?.id) {
+      origin.current = { key: location.key, actorId: session.user?.id };
+      setPendingBooking(null);
+      setAction(null);
+    }
+  }, [location.key, session.user?.id]);
   const matches = useMemo(
     () =>
       (entries.data ?? [])
@@ -107,6 +122,23 @@ export function WaitlistPage() {
           </>
         }
       />
+      {pendingBooking && action?.kind !== 'book' && (
+        <div className="notice visit-duration-pending">
+          <div>
+            <strong>A booking is awaiting confirmation.</strong>
+            <p>
+              The exact request for {pendingBooking.entry.patientName} is retained while this page
+              stays open. Resume it before booking another visit.
+            </p>
+          </div>
+          <button
+            className="button button-secondary"
+            onClick={() => setAction({ kind: 'book', entry: pendingBooking.entry })}
+          >
+            Resume booking
+          </button>
+        </div>
+      )}
       <div className="wl-intro">
         <span className="wl-intro-icon">
           <ListPlus size={23} />
@@ -254,6 +286,7 @@ export function WaitlistPage() {
                             <button
                               className="button button-primary button-small"
                               disabled={
+                                !!pendingBooking ||
                                 doctors.loading ||
                                 !!doctors.error ||
                                 doctors.data?.find((doctor) => doctor.id === entry.doctorId)
@@ -265,6 +298,7 @@ export function WaitlistPage() {
                             </button>
                             <button
                               className="button button-ghost button-small"
+                              disabled={pendingBooking?.entry.id === entry.id}
                               onClick={() => setAction({ kind: 'withdraw', entry })}
                             >
                               Withdraw request
@@ -310,9 +344,14 @@ export function WaitlistPage() {
       )}
       {action?.kind === 'book' && (
         <ClinicBookingModal
+          key={`waitlist-booking:${location.key}:${session.user?.id}:${action.entry.id}`}
           waitlist={action.entry}
           initialDate={action.entry.startDate > today() ? action.entry.startDate : today()}
           doctors={doctors.data ?? []}
+          pendingBooking={pendingBooking?.attempt}
+          onPendingBookingChange={(attempt) =>
+            setPendingBooking(attempt ? { entry: action.entry, attempt } : null)
+          }
           onClose={() => setAction(null)}
           onSaved={() => {
             setStatus('booked');

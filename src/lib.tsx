@@ -13,6 +13,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public responseData?: unknown,
   ) {
     super(message);
   }
@@ -60,7 +61,11 @@ export async function api<T>(
       csrfToken = '';
       window.dispatchEvent(new Event('derma:session-expired'));
     }
-    throw new ApiError(data.error || 'Something went wrong. Please try again.', response.status);
+    throw new ApiError(
+      data.error || 'Something went wrong. Please try again.',
+      response.status,
+      data,
+    );
   }
   if (
     (path === '/api/auth/login' || path === '/api/auth/mfa/challenge') &&

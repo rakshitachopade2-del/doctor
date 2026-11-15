@@ -225,7 +225,7 @@ test('patient joins and withdraws a waitlist, then confirms a slot from a new re
   const competing = await competingResponse.json();
   const conflict = page.waitForResponse(
     (response) =>
-      new URL(response.url()).pathname === '/api/appointments' &&
+      new URL(response.url()).pathname === '/api/appointment-bookings' &&
       response.request().method() === 'POST',
   );
   await page.getByRole('button', { name: 'Confirm appointment', exact: true }).click();
@@ -248,7 +248,8 @@ test('patient joins and withdraws a waitlist, then confirms a slot from a new re
   await replacementSlot.click();
   const bookingRequest = page.waitForRequest(
     (request) =>
-      request.method() === 'POST' && new URL(request.url()).pathname === '/api/appointments',
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/appointment-bookings',
   );
   await page.getByRole('button', { name: 'Confirm appointment', exact: true }).click();
   expect((await bookingRequest).postDataJSON()).toMatchObject({

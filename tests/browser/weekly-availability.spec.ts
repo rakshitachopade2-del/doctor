@@ -248,11 +248,11 @@ test('the first reviewed default becomes explicit and later weekly changes prese
     await portal
       .getByLabel('Main reason for your visit', { exact: true })
       .fill('Synthetic booking under the reviewed weekly schedule.');
-    const booking = responseFor(portal, '/api/appointments');
+    const booking = responseFor(portal, '/api/appointment-bookings');
     await portal.getByRole('button', { name: 'Confirm appointment', exact: true }).click();
     const response = await booking;
     expect(response.status()).toBe(201);
-    const booked = (await response.json()) as Appointment;
+    const booked = (await response.json()).appointment as Appointment;
     expect(booked).toMatchObject({
       doctorId: doctor.id,
       date: monday,

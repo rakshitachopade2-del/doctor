@@ -45,6 +45,7 @@ flowchart LR
 | `src/pages/IdentityPages.tsx`                  | Account administration, required password rotation, sessions, recovery                     |
 | `server/app.ts`                                | Core API, authorization, security headers, request validation                              |
 | `server/db.ts`                                 | Schema, database utilities, synthetic demo seed                                            |
+| `server/appointment-booking.ts`                | Ordinary booking creation, immutable confirmations and terminal command outcomes           |
 | `server/database-recovery.ts`                  | Backup verification, isolated recovery, access retirement and preservation checks          |
 | `server/restore.ts`                            | Local operator JSON recovery CLI, with no HTTP mutation surface                            |
 | `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                         |
@@ -173,6 +174,16 @@ The paginated staff operational list contains only current closure details/statu
 Duration-only changes preserve the booked fee/name; an actual date/time move follows the normal rescheduling fee rule. Appointment updates, retained resource moves/resizing, private events, audit and patient activity commit in the scheduling transaction. Complete interval validation protects sessions, closures, both patient/doctor occupancy and room/equipment claims. Resource slot filtering uses that same effective duration. Patients receive only the current duration/policy and ordinary appointment updates; staff duration reasons and source revisions never enter patient care summaries.
 
 The clinic booking dialog retains exact custom-booking attempts after uncertain responses. A separate duration editor fixes the patient/doctor/mode, allows date/time to move with the new length, and requires explicit source review after a conflict. Existing procedure records retain their immutable appointment associations; this feature neither schedules an unlinked procedure plan nor updates agreements, clinical completion or invoices.
+
+## Ordinary appointment booking
+
+`server/appointment-booking.ts` owns both strict `POST /appointment-bookings` and compatibility `POST /appointments`. They share one creator and revalidate current account/session/CSRF/MFA and patient access inside `BEGIN IMMEDIATE`. New ordinary bookings derive the doctor’s current fee/name/default length and apply the existing full-interval booking and waitlist rules. Compatibility input stripping and plain `Appointment` responses remain intact.
+
+Append-only `appointmentBookings` retains the original scheduled appointment and optional waitlist confirmation. `appointmentBookingCommands` binds one normalized UUID to actor, operation and canonical payload, with exactly one successful booking link or stored rejection. Exact matching success returns original evidence plus the current appointment before new-booking eligibility checks. Actor/payload collisions fail without disclosing another command's result. Neither table is projected into ordinary patient records or summaries.
+
+A savepoint encloses appointment creation, waitlist transition, audit, activity and successful command evidence. A normal domain rejection rolls that savepoint back, then saves a terminal rejection while retaining the outer writer lock. Only after commit does the response identify the request as `not-created`. Concurrent or delayed copies cannot later create that rejected command. Unknown failures roll back the entire transaction and emit no definitive outcome. Both successful and rejected command rows are immutable.
+
+The shared client helper validates the immutable original against the submitted fields, actor and receipt, then accepts the separately validated current appointment for display. `ApiError.responseData` retains JSON error metadata so the booking form can distinguish a matching definitive rejection from an unknown outcome. Pending forms lock their submitted intent; retries bypass current slot/pause/waitlist display restrictions. Guarded reads and writes check actor, router entry and native navigation generation before applying responses or session-expiry effects. Staff dialog close/reopen retains an attempt in the current page's memory; navigation/reload does not persist medical form content.
 
 ## Finite recurring appointment series
 
