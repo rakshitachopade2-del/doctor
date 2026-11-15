@@ -7,7 +7,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,6 +20,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run test:production
+      - run: npm run test:recovery
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
         env:

@@ -1,18 +1,27 @@
 # Release verification
 
-Release **1.33.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.34.0**, verified locally on **15 November 2026** using Node.js **24.13.0**. This release adds operator recovery tooling without changes to browser UI or HTTP application behavior.
 
-| Check                           | Result                                                  |
-| ------------------------------- | ------------------------------------------------------- |
-| TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 590 passed                                              |
-| Browser and accessibility tests | 114 passed                                              |
-| Production frontend build       | Passed                                                  |
-| Fresh production startup        | Passed                                                  |
-| Production dependency audit     | 0 vulnerabilities reported                              |
-| Prettier and whitespace checks  | Passed                                                  |
-| Docker Compose configuration    | Valid                                                   |
-| Docker image build/runtime      | Passed: image build and disposable production container |
+| Check                           | Result                                                   |
+| ------------------------------- | -------------------------------------------------------- |
+| TypeScript                      | Passed                                                   |
+| API, backup and recovery tests  | 604 passed                                               |
+| Browser and accessibility tests | Prior release: 114 passed; not rerun for this CLI change |
+| Production frontend build       | Passed                                                   |
+| Fresh production startup        | Passed                                                   |
+| Isolated recovery rehearsal     | Passed locally and in a disposable Docker container      |
+| Production dependency audit     | 0 vulnerabilities reported                               |
+| Prettier and whitespace checks  | Passed                                                   |
+| Docker Compose configuration    | Valid                                                    |
+| Docker image build/runtime      | Passed: image build and disposable production container  |
+
+The 14 recovery API/CLI test groups cover current and baseline-legacy snapshots, exact retained SQL values and file BLOBs, large integers and additive columns/tables, original source bytes, restrictive permissions and one appended operator audit event. Restored sessions, recovery links, MFA challenges/setup and all MFA recovery codes are retired. Credential identity/ciphertext, passwords/account state, durable throttles, MFA epochs, immutable events and command receipts remain unchanged; replay guards advance monotonically. Tests reject corrupt/foreign/incomplete schemas, unsupported version markers/views/virtual tables, foreign-key violations, destructive/ignored triggers and audit failures without publishing partial recovery.
+
+Filesystem tests cover existing files/directories, hardlink aliases, symlinks and dangling symlinks, source/destination sidecars, competing publications and source replacement. Destination paths cannot create either a source sidecar file or a descendant directory beneath one, including through ancestor aliases. CLI reports are parseable JSON with safe counts/hashes and generic errors, excluding record contents and operator reasons. A restored protected fixture still requires the matching MFA encryption key and can be opened by the application.
+
+The local and disposable-container recovery rehearsals exercise the actual backup and recovery commands, using a live synthetic production fixture. They verify that the original stays usable, restore into a different file, reject old sessions/grants/challenges/codes, preserve exact private image/PDF and saved-summary download bytes, replay original saved-copy and doctor-booking commands, and expose the added recovery audit through the existing administrator search. A fresh real authenticator sign-in succeeds after the restored replay guard, with zero old recovery codes remaining. Fixtures and servers are removed; the container publishes no ports. CI now runs the local recovery rehearsal after its existing production smoke check.
+
+Browser results and journey descriptions below are retained from version 1.33.0. This release did not rerun those 114 journeys or claim new UI accessibility coverage. Nothing was deployed or published to hosting.
 
 The 16 doctor-booking API checks cover legacy/new accepting defaults, independent status revisions, changes away and back, no-op rejection, strict inputs, exact actor/doctor/payload-bound retries and unchanged profile bytes. Pauses block new ordinary/custom/series appointments, waitlist joins/fulfillment and incoming doctor transfers. Existing same-doctor patient moves, custom length changes and real multi-visit series swaps remain usable, preserving resources and original booking receipts. Client flags, unrelated or terminal appointment IDs and batch exclusion IDs cannot enable the stored-visit exception. New-series previews detect pause/resume changes; existing same-doctor previews remain stable. Twenty-eight private-route account/session/MFA race combinations, external pauses before booking locks, atomic failure rollback, competing connections, immutable evidence, restart and bounded coherent history pages are checked. Public directory fields expose the status boolean without private evidence.
 

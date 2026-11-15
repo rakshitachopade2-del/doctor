@@ -330,6 +330,19 @@ Each review episode can produce one owner notice and one later clinic notice. A 
 
 The **Activity** inbox records new events from this release onward. It does not backfill notifications for older records or for events that occurred before an eligible account was available. Updates become visible when the app is opened or refreshed; there is no external delivery or push subscription. Enabled escalation policies can create new staff notices for currently overdue plans, including older plans. Unread/read is the account holder’s explicit inbox state, not evidence that a clinician assessed a report or that a patient followed instructions. Marking the current activity snapshot read leaves subsequent arrivals unread.
 
+## Verify a backup and prepare a recovery copy
+
+The recovery command checks a completed standalone backup and prepares a **new database file** for an operator to inspect. It never replaces the running database:
+
+```sh
+npm run recovery -- verify /private/clinic-backups/clinic-2026-11-15.sqlite
+npm run recovery -- restore /private/clinic-backups/clinic-2026-11-15.sqlite /private/clinic-recovery/restored.sqlite --reason "Isolated recovery rehearsal"
+```
+
+Verification checks SQLite integrity, foreign keys and the recognized clinic schema. Restoration retires sessions, password-recovery links, MFA challenges, pending factor setup and all old MFA recovery codes. It preserves patient and business records, original file bytes, account passwords/status, authenticator enrollment and immutable history, and adds a private operator recovery audit entry. The command checks preserved data before publishing the new file and refuses existing targets or database sidecars. JSON reports contain counts, checks and file/schema hashes rather than record contents.
+
+Keep the original MFA encryption key separately. After restoration, enrolled accounts use a fresh authenticator code and generate replacement recovery codes; the replay guard may require waiting up to 90 seconds. Records and account access return to the snapshot time, so later changes still need review before reopening a clinic. A successful file check does not prove a backup is recent or complete for your needs. See [backup and recovery](docs/DEPLOYMENT.md#backup-and-recovery) for the final stopped-service switch and rehearsal instructions.
+
 ## Verify
 
 ```sh
@@ -338,6 +351,7 @@ npm test
 npm run build
 npm run test:e2e
 npm run test:production
+npm run test:recovery
 ```
 
 API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5210** and API ports **3011–3038**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
@@ -345,6 +359,8 @@ API tests use isolated databases. The ZIP interoperability check uses Python 3�
 The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards. Follow-up and activity tests cover stale-review rejection, preserved check-in versions, same-day corrections, private assessment redaction, module pauses, recipient isolation, stable pagination, and read-state changes that leave clinical review work unchanged.
 
 After building, `npm run test:production` starts an isolated production service with a fresh temporary database and generated administrator credentials. It verifies bootstrap, absence of demo data, secure cookie attributes, migrations, protected APIs, built frontend serving, and logout. It does not validate a real domain or TLS proxy. A built Docker image can be checked with `npm run test:production -- --image <image-name>`.
+
+`npm run test:recovery` rehearses an online backup and restoration into a separate temporary database, then checks real sign-in, retired access, retained authenticator enrollment, original private files, saved summaries and booking receipts. It uses only generated synthetic accounts and removes its fixtures. The same rehearsal runs inside a disposable image with `npm run test:recovery -- --image <image-name>`; no port is published. It waits for a fresh authenticator code when the restore replay guard requires it.
 
 ```sh
 npm run format        # format source with Prettier

@@ -45,6 +45,8 @@ flowchart LR
 | `src/pages/IdentityPages.tsx`                  | Account administration, required password rotation, sessions, recovery                     |
 | `server/app.ts`                                | Core API, authorization, security headers, request validation                              |
 | `server/db.ts`                                 | Schema, database utilities, synthetic demo seed                                            |
+| `server/database-recovery.ts`                  | Backup verification, isolated recovery, access retirement and preservation checks          |
+| `server/restore.ts`                            | Local operator JSON recovery CLI, with no HTTP mutation surface                            |
 | `server/operations.ts`                         | Invoice/payment, knowledge/revision, portal-provisioning endpoints                         |
 | `server/scheduling.ts`                         | Schedule/closure storage, duration-aware slot generation, booking validation               |
 | `server/visit-duration.ts`                     | Custom booking, explicit length changes, private immutable events and retry receipts       |
@@ -93,6 +95,14 @@ flowchart LR
 - Database and backups contain sensitive plaintext application records. Protect host storage and backups, restrict filesystem access, and configure operational monitoring before real use.
 
 The permission model is clinic-wide for clinicians. A second organization must use a separate deployment/database until true tenancy and clinic-scoped authorization are implemented.
+
+## Database recovery
+
+`npm run recovery -- verify SOURCE` and `restore SOURCE NEWDEST --reason TEXT` operate on completed standalone backups. They copy a regular source file through a read-only descriptor into private staging; SQLite never opens the original. Source identity/size/time and sidecars are rechecked. Restore staging lives beside the destination so a no-overwrite hard link can publish the finished file. Existing destinations, symlinks and stale sidecars are rejected, and staged artifacts are removed on failure.
+
+The module recognizes baseline clinic tables and supported authentication columns without running application startup or additive migrations. It checks integrity, foreign keys and schema metadata, rejecting unknown nonzero version markers and views/virtual tables. Streaming canonical table hashes cover stored scalar/text/BLOB values before and after changes. All original audit rows and schema objects must remain unchanged; the only permitted data differences are transient-auth deletions, monotonic MFA `lastStep` advancement and one explicitly checked operator audit row. Unexpected trigger or foreign-key effects abort restoration.
+
+Restored sessions, recovery grants, MFA challenges, pending MFA setup and all MFA recovery codes are removed transactionally. Credential ciphertext and identity, users/passwords/status, durable throttles, MFA epochs, domain receipts and immutable history remain intact. MFA replay guards advance to `max(savedStep, floor(restoredAt / 30000) + 1)` to prevent recent code reuse. File hashes/counts/checks in the JSON report omit record contents. The restore audit records the source digest and operator reason without inventing an authenticated account. Recovery prepares a new artifact only; the stopped-service switch, matching MFA key, review of post-backup changes and off-site storage remain operator responsibilities.
 
 ## Knowledge authoring and private history
 

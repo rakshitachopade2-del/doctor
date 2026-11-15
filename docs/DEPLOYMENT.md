@@ -208,15 +208,39 @@ docker compose cp app:/app/data/backups/clinic-2026-11-10.sqlite ./backups/
 
 Move a copy to separately protected storage. A backup includes private patient records, image and PDF bytes, messages, immutable clinical workflow events follow-up reviews and assignments, waitlist requests, invoice/procedure links, expense entries and void history, image annotation/publication records, activity contents and read status, password hashes, account access flags, sessions, hashed recovery grants, encrypted MFA credentials, recovery-code state, MFA evidence/attempts, schedules, and closures. The MFA encryption key must be backed up separately. Limit access and encrypt backup storage. A snapshot kept only in the application volume is not protection against losing that volume.
 
-To restore:
+### Verify and prepare a new recovery file
 
-1. Stop the application, including every process using the database (`docker compose stop app` for Docker).
-2. Preserve the existing database **and** any `-wal` / `-shm` sidecars together in a recovery directory.
-3. Copy the selected completed backup to the configured `DATABASE_PATH`. Do not leave old sidecars next to the restored file. In Docker, perform this inside the mounted `clinic-data` volume while the app is stopped.
-4. Before reopening access, remove restored sessions and outstanding recovery grants through trusted database maintenance tooling. For a current-release snapshot, use a transaction containing `DELETE FROM sessions;` and `DELETE FROM recoveryGrants;`. For a snapshot with MFA tables, also delete `mfaChallenges`, `mfaPending` and `mfaRecoveryCodes` in that transaction. This retires restored one-use codes rather than making codes consumed after the backup reusable. Preserve `mfaCredentials` so authenticator verification remains enabled. Omit statements for tables absent from older snapshots.
-5. Ensure the runtime user owns the restored file, restrict its access, then start the application. Check `/api/health`, sign in and verify expected records, administrator access, staff suspensions, enrolled MFA state and doctor availability. Enrolled accounts can authenticate with their authenticator and prepare replacement recovery codes; accounts without that factor need the verified local reset procedure.
+Use the recovery CLI against a completed, standalone backup. It refuses symlink sources and any accompanying `-wal`, `-shm` or `-journal` file, including an empty sidecar. Take a new online backup instead of deleting sidecars from an active database.
 
-Restoring also restores account access, passwords, MFA enrollment, scheduling changes, and recovery state to the snapshot time. Reapply factor enrollments/removals that occurred after the snapshot before reopening access. Removing restored sessions and grants prevents old sign-ins or previously consumed links from becoming usable again. Reapply later staff-access changes and rotate credentials if a snapshot may have been exposed. Regularly rehearse restoration into a separate isolated database.
+```sh
+npm run recovery -- verify /private/clinic-backups/clinic-2026-11-15.sqlite
+npm run recovery -- restore /private/clinic-backups/clinic-2026-11-15.sqlite /private/clinic-recovery/restored.sqlite --reason "Reviewed backup for isolated recovery"
+```
+
+Both commands copy the source into private staging and run checks there. They leave the source unchanged and do not start the application, migrate its schema, create accounts or run notification workers. `verify` removes its temporary copy after checking. `restore` requires a new destination and refuses any existing file, directory, symlink or destination sidecar. It publishes only the completed checked file, with private file permissions. Use a protected destination directory owned by the operator; concurrent unrelated writers to that directory are outside the tool's control.
+
+The command's stdout is a JSON report (use `npm run --silent recovery -- ...` when piping it). It includes the exact source and output file SHA-256 digests, byte sizes, schema fingerprint, table counts and check results. It does not print clinical records, passwords, factor secrets or the operator's reason. SQLite integrity and foreign-key checks run before and after restoration. Recognition checks the application's baseline tables and supported authentication columns; earlier snapshots may omit later optional tables. Unrecognized version markers, views, virtual tables and malformed schemas fail closed. There is no historical release marker in older snapshots, so a passing report is not a guarantee of compatibility with every application version or of clinical completeness.
+
+Restoration retires all stored sessions, password-recovery grants, MFA login challenges, pending MFA enrollment/code-replacement preparations, and **all** MFA recovery-code rows. It retains encrypted MFA credentials and advances their accepted-step guard to at least the next authenticator time step, preventing a recently consumed code from becoming reusable. A fresh current code may require up to 90 seconds; an already higher stored step remains higher. Existing passwords, roles, suspension flags, forced-password-change requirements, durable login/MFA limits, domain retry receipts and immutable history remain as recorded in the backup. The separately held matching `MFA_ENCRYPTION_KEY` is still required; recovery does not disable MFA or validate the key.
+
+A transaction appends one administrator-visible `database-recovery` audit entry attributed to **Local recovery operator**, with the supplied reason, source digest and retirement counts. This is local operator evidence, not an authenticated staff identity. Before publication, the tool compares every preserved table value and original audit row, including BLOB content, and checks the exact allowed authentication changes. Unexpected trigger/cascade effects or write failures reject the copy. The original backup remains usable for another attempt; choose a different destination if a previous copy already exists.
+
+### Switch only while the application is stopped
+
+1. Review the new recovery file and its report. Keep the original backup and its MFA encryption key separately protected.
+2. Stop every application process using the target database (`docker compose stop app` for Docker). Preserve the old database **and** all its sidecars together in a separate recovery directory.
+3. Point `DATABASE_PATH` at the prepared new file, or move it into the configured location only after preserving the prior files and removing their old sidecars from that location. In Docker, keep it inside the mounted `clinic-data` volume. The recovery command itself performs no live switch.
+4. Ensure the runtime user owns the restored file and its protected directory. Start the application with external access still closed and the original MFA key. Check `/api/health`, sign in and inspect expected patient records, administrator access, staff suspensions, doctor availability and enrolled MFA state. Enrolled accounts should prepare replacement recovery codes; accounts without their authenticator need the verified local reset procedure.
+5. Review and reapply account/password/factor and scheduling changes made after the snapshot before reopening clinic access. Restoring returns all of these to the snapshot time; the command cannot reconstruct later events. Rotate credentials if a backup may have been exposed.
+
+For Docker, the same CLI is present in the image. For example, while preparing a separate file in an already running container:
+
+```sh
+docker compose exec -T app npm run recovery -- verify /app/data/backups/clinic-2026-11-15.sqlite
+docker compose exec -T app npm run recovery -- restore /app/data/backups/clinic-2026-11-15.sqlite /app/data/recovery/restored.sqlite --reason "Reviewed recovery copy"
+```
+
+Regularly rehearse restoration separately. `npm run test:recovery` automatically exercises the backup/verify/restore CLIs with synthetic private files and accounts, then opens the restored production application and checks retained data, exact command receipts, retired access and a fresh authenticator login. `npm run test:recovery -- --image <image-name>` runs the same check inside a disposable container without publishing a port. These checks do not touch the configured clinic database and do not establish an off-site backup policy or validate a real clinic's backup.
 
 ## Integration boundaries
 
