@@ -357,6 +357,72 @@ async function rehearseRecovery() {
       `${cancellationBase}/cancellation-context`,
       patient,
     );
+    // Historical synthetic row in this isolated rehearsal database. Public booking
+    // correctly refuses past dates; no application fixture endpoint is introduced.
+    const stateVisit = {
+      ...ordinary.appointment,
+      id: randomUUID(),
+      date: addDays(clinicToday(), -1),
+      time: '09:00',
+      reason: 'Synthetic historical recovery state visit',
+    };
+    db.prepare(
+      'INSERT INTO appointments(id,patientId,doctorId,date,time,status,data) VALUES (?,?,?,?,?,?,?)',
+    ).run(
+      stateVisit.id,
+      stateVisit.patientId,
+      stateVisit.doctorId,
+      stateVisit.date,
+      stateVisit.time,
+      stateVisit.status,
+      JSON.stringify(stateVisit),
+    );
+    const stateBase = `/appointments/${stateVisit.id}`;
+    const stateCommand = {
+      status: 'checked-in',
+      expectedRevision: (await call(source, `${stateBase}/state-context`, admin)).revision,
+      changeConfirmed: true,
+      requestId: randomUUID(),
+    };
+    const stateCheckedIn = await call(
+      source,
+      `${stateBase}/state-changes`,
+      admin,
+      'POST',
+      stateCommand,
+      201,
+    );
+    const stateRejectedCommand = { ...stateCommand, status: 'no-show', requestId: randomUUID() };
+    const stateRejected = await call(
+      source,
+      `${stateBase}/state-changes`,
+      admin,
+      'POST',
+      stateRejectedCommand,
+      409,
+    );
+    assert.equal(stateRejected.stateChangeOutcome, 'not-applied');
+    let stateCurrent = stateCheckedIn.appointment;
+    for (const status of ['in-consultation', 'completed']) {
+      const context = await call(source, `${stateBase}/state-context`, admin);
+      stateCurrent = (
+        await call(
+          source,
+          `${stateBase}/state-changes`,
+          admin,
+          'POST',
+          {
+            status,
+            expectedRevision: context.revision,
+            changeConfirmed: true,
+            requestId: randomUUID(),
+          },
+          201,
+        )
+      ).appointment;
+    }
+    const retainedStateContext = await call(source, `${stateBase}/state-context`, admin);
+
     const imageBytes = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cWb0AAAAASUVORK5CYII=',
       'base64',
@@ -599,8 +665,31 @@ async function rehearseRecovery() {
       retainedCancellationContext,
     );
     const retainedAppointments = await call(target, '/appointments', newPatient);
-    assert.equal(retainedAppointments.length, 2);
+    assert.deepEqual(
+      await call(target, `${stateBase}/state-changes`, newAdmin, 'POST', stateCommand),
+      { ...stateCheckedIn, appointment: stateCurrent },
+    );
+    assert.deepEqual(
+      await call(target, `${stateBase}/state-changes`, newAdmin, 'POST', stateRejectedCommand, 409),
+      stateRejected,
+    );
+    const restoredStateContext = await call(target, `${stateBase}/state-context`, newAdmin);
+    assert.equal(restoredStateContext.revision, retainedStateContext.revision);
+    assert.deepEqual(restoredStateContext.appointment, stateCurrent);
+    assert.ok(restoredStateContext.actions.every((action) => !action.allowed));
+    const stateAudit = await call(
+      target,
+      `/search/audit?entityType=appointment&entityId=${stateVisit.id}`,
+      newAdmin,
+    );
+    for (const status of ['checked-in', 'in-consultation', 'completed'])
+      assert.equal(
+        stateAudit.items.filter((entry) => entry.action === `appointment ${status}`).length,
+        1,
+      );
+    assert.equal(retainedAppointments.length, 3);
     assert.equal(retainedAppointments.filter((value) => value.status === 'cancelled').length, 1);
+    assert.equal(retainedAppointments.filter((value) => value.status === 'completed').length, 1);
     const audit = await call(target, '/search/audit?entityType=database-recovery', newAdmin);
     assert.equal(audit.total, 1);
     assert.equal(audit.items[0].id, recovered.auditId);
@@ -637,7 +726,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling and cancellation receipts, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

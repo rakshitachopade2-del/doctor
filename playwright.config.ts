@@ -172,6 +172,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)appointment-cancellation\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5213' },
     },
+    {
+      name: 'appointment-state-change',
+      testMatch: /(?:^|\/)appointment-state-change\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5214' },
+    },
   ],
   webServer: [
     {
@@ -358,6 +363,13 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3041 E2E_VITE_PORT=5213 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5213',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command:
+        'E2E_API_PORT=3042 E2E_VITE_PORT=5214 E2E_APPOINTMENT_STATE_FIXTURES=1 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5214',
       reuseExistingServer: false,
       timeout: 60000,
     },

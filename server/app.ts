@@ -48,6 +48,7 @@ import { registerAppointmentSeries } from './appointment-series.ts';
 import { registerAppointmentBookings } from './appointment-booking.ts';
 import { registerAppointmentRescheduling } from './appointment-rescheduling.ts';
 import { registerAppointmentCancellation } from './appointment-cancellation.ts';
+import { registerAppointmentStateChange } from './appointment-state-change.ts';
 import { registerAppointmentSeriesCancellations } from './appointment-series-cancellations.ts';
 import { registerAppointmentSeriesRescheduling } from './appointment-series-rescheduling.ts';
 import {
@@ -767,6 +768,18 @@ export function createApp(options: AppOptions = {}) {
       error instanceof HttpError ? { status: error.status, message: error.message } : null,
   });
   registerAppointmentCancellation(app, {
+    db,
+    actor,
+    appointmentGet,
+    audit,
+    fail,
+    scheduling,
+    clinicResources,
+    appointmentRescheduling,
+    businessFailure: (error) =>
+      error instanceof HttpError ? { status: error.status, message: error.message } : null,
+  });
+  registerAppointmentStateChange(app, {
     db,
     actor,
     appointmentGet,

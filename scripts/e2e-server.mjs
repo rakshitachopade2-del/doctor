@@ -18,6 +18,24 @@ const env = {
   API_PORT: apiPort,
   VITE_PORT: vitePort,
 };
+if (env.E2E_APPOINTMENT_STATE_FIXTURES === '1') {
+  try {
+    await new Promise((resolve, reject) => {
+      const fixture = spawn(
+        process.execPath,
+        ['--import', 'tsx', 'tests/fixtures/appointment-state-change.ts'],
+        { env, stdio: 'inherit' },
+      );
+      fixture.once('error', reject);
+      fixture.once('exit', (code) =>
+        code === 0 ? resolve() : reject(new Error('Appointment state browser fixtures failed.')),
+      );
+    });
+  } catch (error) {
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
 const commands = [
   ['--import', 'tsx', 'server/index.ts'],
   ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1'],

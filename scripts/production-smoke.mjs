@@ -108,6 +108,56 @@ async function freePort() {
   return port;
 }
 
+// Seed historical synthetic visits only in this disposable smoke database. The
+// public booking API correctly refuses past visits; production has no fixture route.
+async function historicalStateFixtures(appointments, resource) {
+  const script = `
+    import assert from 'node:assert/strict';
+    import { DatabaseSync } from 'node:sqlite';
+    const db = new DatabaseSync(process.argv[2]);
+    const { appointments, resource } = JSON.parse(Buffer.from(process.argv[3], 'base64url'));
+    db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; BEGIN IMMEDIATE');
+    try {
+      for (const appointment of appointments) {
+        assert.ok(appointment.reason.startsWith('Synthetic historical state smoke'));
+        db.prepare('INSERT INTO appointments(id,patientId,doctorId,date,time,status,data) VALUES (?,?,?,?,?,?,?)')
+          .run(appointment.id, appointment.patientId, appointment.doctorId, appointment.date, appointment.time, appointment.status, JSON.stringify(appointment));
+        const snapshot = Object.fromEntries(['id','patientId','patientName','doctorId','doctorName','date','time','mode','status','durationMinutes'].map(key => [key, appointment[key]]));
+        const room = Object.fromEntries(['id','name','kind','location'].map(key => [key, resource[key]]));
+        const start = Date.parse(appointment.date + 'T' + appointment.time + ':00+05:30');
+        db.prepare('INSERT INTO resourceReservations(appointmentId,resourceId,startAt,endAt,data) VALUES (?,?,?,?,?)')
+          .run(appointment.id, resource.id, start, start + appointment.durationMinutes * 60000, JSON.stringify({ resource: room, appointment: snapshot }));
+      }
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+    finally { db.close(); }
+  `;
+  const payload = Buffer.from(JSON.stringify({ appointments, resource })).toString('base64url');
+  if (image)
+    await command(
+      'docker',
+      [
+        'exec',
+        '-i',
+        container,
+        'node',
+        '--input-type=module',
+        '-',
+        '/app/data/clinic.sqlite',
+        payload,
+      ],
+      process.env,
+      script,
+    );
+  else
+    await command(
+      process.execPath,
+      ['--input-type=module', '-', join(directory, 'clinic.sqlite'), payload],
+      process.env,
+      script,
+    );
+}
+
 try {
   let base;
   if (image) {
@@ -3494,6 +3544,147 @@ try {
   );
   assert.equal(anonymousCancellation.cancellationOutcome, undefined);
 
+  // Staff progression retains the booked interval; no-show releases that interval.
+  // Synthetic historical fixtures make this proof independent of time of day.
+  const stateSmokeDay = new Date(Date.parse(`${refundDate(new Date())}T12:00:00Z`) - 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const stateSmokeVisits = ['09:00', '11:00'].map((time) => ({
+    ...individualCancellationBooking.appointment,
+    id: randomUUID(),
+    date: stateSmokeDay,
+    time,
+    status: 'scheduled',
+    reason: 'Synthetic historical state smoke only',
+  }));
+  await historicalStateFixtures(stateSmokeVisits, moveRoom.resource);
+  const stateSmokeBase = `/appointments/${stateSmokeVisits[0].id}`;
+  const stateSmokeContext = await reminderRead(`${stateSmokeBase}/state-context`);
+  assert.equal(
+    stateSmokeContext.actions.find((action) => action.status === 'checked-in').allowed,
+    true,
+  );
+  const stateSmokeCommand = {
+    status: 'checked-in',
+    expectedRevision: stateSmokeContext.revision,
+    changeConfirmed: true,
+    requestId: randomUUID(),
+  };
+  const stateSmokeCheckedIn = await ordinaryWrite(
+    `${stateSmokeBase}/state-changes`,
+    stateSmokeCommand,
+  );
+  assert.deepEqual(stateSmokeCheckedIn.event.before, stateSmokeVisits[0]);
+  assert.deepEqual(stateSmokeCheckedIn.event.after, {
+    ...stateSmokeVisits[0],
+    status: 'checked-in',
+  });
+  assert.equal(stateSmokeCheckedIn.receipt.status, 'checked-in');
+  assert.equal(stateSmokeCheckedIn.receipt.actorId, account.user.id);
+  const stateSmokeRejectedCommand = {
+    ...stateSmokeCommand,
+    status: 'no-show',
+    requestId: randomUUID(),
+  };
+  const stateSmokeRejected = await ordinaryWrite(
+    `${stateSmokeBase}/state-changes`,
+    stateSmokeRejectedCommand,
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(stateSmokeRejected.stateChangeOutcome, 'not-applied');
+  let stateSmokeLatest = stateSmokeCheckedIn;
+  for (const status of ['in-consultation', 'completed']) {
+    const context = await reminderRead(`${stateSmokeBase}/state-context`);
+    stateSmokeLatest = await ordinaryWrite(`${stateSmokeBase}/state-changes`, {
+      status,
+      expectedRevision: context.revision,
+      changeConfirmed: true,
+      requestId: randomUUID(),
+    });
+    assert.deepEqual(stateSmokeLatest.appointment, { ...stateSmokeVisits[0], status });
+  }
+  const stateSmokeResources = await reminderRead(`${stateSmokeBase}/resources`);
+  assert.deepEqual(stateSmokeResources.resourceIds, [moveRoom.resource.id]);
+  assert.equal(stateSmokeResources.history.length, 3);
+  assert.ok(stateSmokeResources.history.every((entry) => entry.source === 'appointment-status'));
+  assert.deepEqual(
+    await ordinaryWrite(`${stateSmokeBase}/state-changes`, stateSmokeCommand, verifiedHeaders, 200),
+    { ...stateSmokeCheckedIn, appointment: stateSmokeLatest.appointment },
+  );
+  assert.deepEqual(
+    await ordinaryWrite(
+      `${stateSmokeBase}/state-changes`,
+      stateSmokeRejectedCommand,
+      verifiedHeaders,
+      409,
+    ),
+    stateSmokeRejected,
+  );
+  const stateSmokeCollision = await ordinaryWrite(
+    `${stateSmokeBase}/state-changes`,
+    { ...stateSmokeCommand, status: 'completed' },
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(stateSmokeCollision.stateChangeOutcome, undefined);
+  const stateSmokeNoShowBase = `/appointments/${stateSmokeVisits[1].id}`;
+  const stateSmokeNoShowCommand = {
+    status: 'no-show',
+    expectedRevision: (await reminderRead(`${stateSmokeNoShowBase}/state-context`)).revision,
+    changeConfirmed: true,
+    requestId: randomUUID(),
+  };
+  const stateSmokeNoShow = await ordinaryWrite(
+    `${stateSmokeNoShowBase}/state-changes`,
+    stateSmokeNoShowCommand,
+  );
+  assert.deepEqual(stateSmokeNoShow.appointment, { ...stateSmokeVisits[1], status: 'no-show' });
+  assert.deepEqual((await reminderRead(`${stateSmokeNoShowBase}/resources`)).resourceIds, []);
+  assert.deepEqual(
+    await ordinaryWrite(
+      `${stateSmokeNoShowBase}/state-changes`,
+      stateSmokeNoShowCommand,
+      verifiedHeaders,
+      200,
+    ),
+    stateSmokeNoShow,
+  );
+  const stateSmokeAudit = await reminderRead(
+    `/search/audit?entityType=appointment&entityId=${stateSmokeVisits[0].id}`,
+  );
+  for (const status of ['checked-in', 'in-consultation', 'completed'])
+    assert.equal(
+      stateSmokeAudit.items.filter((entry) => entry.action === `appointment ${status}`).length,
+      1,
+    );
+  for (const projection of [
+    await reminderRead('/appointments', patientHeaders),
+    await reminderRead(reminderSummaryPath, patientHeaders),
+  ])
+    for (const value of [
+      stateSmokeCommand.requestId,
+      stateSmokeCheckedIn.event.id,
+      stateSmokeRejectedCommand.requestId,
+    ])
+      assert.equal(JSON.stringify(projection).includes(value), false);
+  for (const [headers, status] of [
+    [publicHeaders, 401],
+    [patientHeaders, 403],
+  ]) {
+    assert.equal(
+      (await fetch(`${base}/api${stateSmokeBase}/state-context`, { headers })).status,
+      status,
+    );
+    const denied = await ordinaryWrite(
+      `${stateSmokeBase}/state-changes`,
+      stateSmokeCommand,
+      headers,
+      status,
+    );
+    assert.equal(denied.stateChangeOutcome, undefined);
+  }
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -3589,6 +3780,13 @@ try {
     200,
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
+  const stateSmokeLoggedOut = await ordinaryWrite(
+    `${stateSmokeBase}/state-changes`,
+    stateSmokeCommand,
+    verifiedHeaders,
+    401,
+  );
+  assert.equal(stateSmokeLoggedOut.stateChangeOutcome, undefined);
   assert.equal(
     (await fetch(`${base}/api${reminderPolicyPath}`, { headers: verifiedHeaders })).status,
     401,
@@ -3598,7 +3796,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

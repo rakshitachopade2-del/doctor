@@ -1,0 +1,97 @@
+.appointment-state-change-form,
+.appointment-state-change-result {
+  min-width: 0;
+}
+.appointment-state-change-source,
+.appointment-state-change-current {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f4f8f5;
+}
+.appointment-state-change-source h3,
+.appointment-state-change-current h3 {
+  margin-top: 0;
+}
+.appointment-state-change-facts {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-state-change-facts p {
+  margin: 0.4rem 0;
+}
+.appointment-state-change-form .notice,
+.appointment-state-change-result .notice {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.appointment-state-change-form .notice > strong {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.appointment-state-change-form .notice > .button {
+  margin-top: 0.65rem;
+}
+.appointment-state-change-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+.appointment-state-change-confirm input[type='checkbox'] {
+  width: 16px;
+  min-width: 16px;
+  flex: 0 0 16px;
+  margin-top: 0.25rem;
+}
+.appointment-state-change-confirm span {
+  min-width: 0;
+}
+.appointment-state-change-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0.8rem 0;
+}
+.appointment-state-change-columns > section {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.appointment-state-change-columns h3 {
+  margin-top: 0;
+  font-size: 0.95rem;
+}
+.appointment-state-change-original {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-state-change-original summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.6rem 0;
+}
+.appointment-state-change-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+@media (max-width: 580px) {
+  .appointment-state-change-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .appointment-state-change-actions .button {
+    width: 100%;
+  }
+}
+
+.appointment-state-change-target {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.appointment-state-change-target h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.appointment-state-change-target p {
+  margin: 0.5rem 0 0;
+}

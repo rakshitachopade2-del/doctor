@@ -206,6 +206,14 @@ Append-only `appointmentCancellationEvents` retains the original before/after re
 
 `src/components/AppointmentCancellationForm.tsx` validates actor/request/source/event identities and requires explicit acknowledgment of the authoritative visit. Only a matching terminal rejection unlocks an uncertain command; refreshing a stale source clears acknowledgment. Staff and patient parents retain pending attempts only for their current account/navigation entry and defer list refresh until the confirmed result closes. Supporting reads and mutations use the established guards before session-expiry side effects. No clinical draft or command is persisted in browser storage.
 
+## Reviewed staff appointment progression
+
+`server/appointment-state-change.ts` adds staff-only context and commands for check-in, consultation start/completion and no-show. It reuses fresh authorization and the shared appointment mutation counter. Source hashes include recorded resource claims and allocation history; eligibility uses a captured context clock and fresh commit-time checks. Target-role authority precedes replay. Status transitions preserve all other appointment fields, including legacy omissions.
+
+Append-only `appointmentStateChangeEvents` and `appointmentStateChangeCommands` retain original evidence and an actor/appointment/target/payload-bound success or terminal rejection. The status/counter, resource hook, event, command, audit and notice share the scheduling transaction. Completion retains the recorded resource interval; no-show releases it. A savepoint rolls back failed effects before persisting a known business rejection. Replay returns immutable evidence with current appointment state, even after later completion.
+
+`AppointmentStateChangeForm` validates the intended target and every receipt identity, requires refreshed acknowledgment after a definitive rejection, and retains uncertain commands in page memory across Close/Resume. Parent list refresh waits until the confirmation closes. Account/navigation guards protect reads, writes and global session effects. Isolated test startup seeds historical synthetic visits because the public booking API correctly rejects past dates; production code has no fixture endpoint or test clock.
+
 ## Finite recurring appointment series
 
 `server/appointment-series.ts` provides staff-only pattern previews and atomic series creation. The server generates 2–12 exact dates at 1-, 2- or 4-week intervals and applies the existing scheduling validator to every requested interval. Blocked dates remain visible; the server never shortens the set or selects alternative times. A preview revision binds normalized input, displayed patient/doctor metadata, fees, effective schedule, relevant closures and booking sources, the clinic date and resulting availability. Preview timestamps do not act as reservations or fixed expiry windows; the current clock and every visit are checked again when committing.

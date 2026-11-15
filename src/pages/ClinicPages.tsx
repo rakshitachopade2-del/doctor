@@ -33,6 +33,7 @@ import type { PatientClinicalWorkflows } from '../../shared/clinical';
 import type { WaitlistEntry } from '../../shared/waitlist';
 import type { PatientDirectoryItem } from '../../shared/record-search';
 import type { AppointmentBookingResult } from '../../shared/appointment-booking';
+import type { AppointmentStateChangeStatus } from '../../shared/appointment-state-change';
 import { useSearchPage } from '../record-search';
 import { Pagination } from '../components/Pagination';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
@@ -44,6 +45,8 @@ import { AppointmentRescheduleForm } from '../components/AppointmentRescheduleFo
 import type { RescheduleAttempt } from '../components/appointment-rescheduling-helpers';
 import { AppointmentCancellationForm } from '../components/AppointmentCancellationForm';
 import type { CancellationAttempt } from '../components/appointment-cancellation-helpers';
+import { AppointmentStateChangeForm } from '../components/AppointmentStateChangeForm';
+import type { StateChangeAttempt } from '../components/appointment-state-change-helpers';
 import {
   appointmentBookingHasChanged,
   isAppointmentBookingNotCreated,
@@ -219,7 +222,6 @@ export function AppointmentsPage() {
   const query = params.get('search') || '';
   const [search, setSearch] = useState(query);
   const [booking, setBooking] = useState<'new' | null>(params.get('new') === '1' ? 'new' : null);
-  const [busy, setBusy] = useState('');
   const [pendingCustomBooking, setPendingCustomBooking] = useState<CustomVisitAttempt | null>(null);
   const [pendingBooking, setPendingBooking] = useState<AppointmentBookingAttempt | null>(null);
   const [rescheduling, setRescheduling] = useState<string | null>(null);
@@ -232,6 +234,14 @@ export function AppointmentsPage() {
   const [cancellationBusy, setCancellationBusy] = useState(false);
   const [cancellationResult, setCancellationResult] = useState<Appointment | null>(null);
   const cancellationBusyNow = useRef(false);
+  const [stateChange, setStateChange] = useState<{
+    appointmentId: string;
+    status: AppointmentStateChangeStatus;
+  } | null>(null);
+  const [pendingStateChange, setPendingStateChange] = useState<StateChangeAttempt | null>(null);
+  const [stateChangeBusy, setStateChangeBusy] = useState(false);
+  const [stateChangeResult, setStateChangeResult] = useState<Appointment | null>(null);
+  const stateChangeBusyNow = useRef(false);
   const bookingOrigin = useRef({ key: location.key, actorId: session.user?.id });
   const newBookingCleanup = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -255,10 +265,19 @@ export function AppointmentsPage() {
       setCancellationBusy(false);
       setCancellationResult(null);
       cancellationBusyNow.current = false;
+      setStateChange(null);
+      setPendingStateChange(null);
+      setStateChangeBusy(false);
+      setStateChangeResult(null);
+      stateChangeBusyNow.current = false;
     }
   }, [location.key, location.search, session.user?.id]);
   const hasPendingBooking =
-    !!pendingCustomBooking || !!pendingBooking || !!pendingReschedule || !!pendingCancellation;
+    !!pendingCustomBooking ||
+    !!pendingBooking ||
+    !!pendingReschedule ||
+    !!pendingCancellation ||
+    !!pendingStateChange;
   const [moreActions, setMoreActions] = useState<Appointment | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const focusResults = useRef(false);
@@ -400,20 +419,28 @@ export function AppointmentsPage() {
       void latestReload.current();
     }
   }
-  async function update(
-    appointment: Appointment,
-    status: 'checked-in' | 'in-consultation' | 'completed' | 'no-show',
-  ) {
-    setBusy(appointment.id);
-    try {
-      await api(`/api/appointments/${appointment.id}`, { method: 'PATCH', body: { status } });
-      toast(`Appointment ${statusLabels[status].toLowerCase()}.`);
-      setMoreActions(null);
+  function openStateChange(appointmentId: string, status: AppointmentStateChangeStatus) {
+    if (hasPendingBooking) return;
+    setStateChangeResult(null);
+    setStateChange({ appointmentId, status });
+    setMoreActions(null);
+  }
+  function closeStateChange() {
+    if (stateChangeBusyNow.current) return;
+    setStateChange(null);
+    if (stateChangeResult) {
+      setSearch('');
+      changeFilters({
+        date: stateChangeResult.date,
+        allDates: null,
+        search: null,
+        doctorId: null,
+        status: null,
+        mode: null,
+        patientId: null,
+      });
+      setStateChangeResult(null);
       void latestReload.current();
-    } catch (e) {
-      toast(errorText(e), 'error');
-    } finally {
-      setBusy('');
     }
   }
   return (
@@ -509,6 +536,28 @@ export function AppointmentsPage() {
             onClick={() => setCancelling(pendingCancellation.source.appointment.id)}
           >
             Resume cancellation
+          </button>
+        </div>
+      )}
+      {pendingStateChange && !stateChange && (
+        <div className="notice visit-duration-pending">
+          <div>
+            <strong>A status update is awaiting confirmation.</strong>
+            <p>
+              The exact request is retained while this page stays open. Resume it before making
+              another appointment change.
+            </p>
+          </div>
+          <button
+            className="button button-secondary"
+            onClick={() =>
+              setStateChange({
+                appointmentId: pendingStateChange.source.appointment.id,
+                status: pendingStateChange.body.status,
+              })
+            }
+          >
+            Resume status update
           </button>
         </div>
       )}
@@ -778,27 +827,27 @@ export function AppointmentsPage() {
                         </button>
                         {a.status === 'scheduled' && a.date <= today() && (
                           <button
-                            disabled={busy === a.id}
+                            disabled={hasPendingBooking}
                             className="button button-secondary button-small"
-                            onClick={() => update(a, 'checked-in')}
+                            onClick={() => openStateChange(a.id, 'checked-in')}
                           >
                             Check in
                           </button>
                         )}
                         {a.status === 'checked-in' && clinician && (
                           <button
-                            disabled={busy === a.id}
+                            disabled={hasPendingBooking}
                             className="button button-primary button-small"
-                            onClick={() => update(a, 'in-consultation')}
+                            onClick={() => openStateChange(a.id, 'in-consultation')}
                           >
                             Start visit
                           </button>
                         )}
                         {a.status === 'in-consultation' && clinician && (
                           <button
-                            disabled={busy === a.id}
+                            disabled={hasPendingBooking}
                             className="button button-primary button-small"
-                            onClick={() => update(a, 'completed')}
+                            onClick={() => openStateChange(a.id, 'completed')}
                           >
                             <Check size={14} /> Complete
                           </button>
@@ -893,15 +942,15 @@ export function AppointmentsPage() {
             {moreActions.status === 'scheduled' && moreActions.date <= today() && (
               <button
                 className="button button-secondary"
-                disabled={busy === moreActions.id}
-                onClick={() => update(moreActions, 'no-show')}
+                disabled={hasPendingBooking}
+                onClick={() => openStateChange(moreActions.id, 'no-show')}
               >
                 Mark no-show
               </button>
             )}
             <button
               className="button button-danger"
-              disabled={hasPendingBooking || busy === moreActions.id}
+              disabled={hasPendingBooking}
               onClick={() => {
                 setCancellationResult(null);
                 setCancelling(moreActions.id);
@@ -1028,6 +1077,36 @@ export function AppointmentsPage() {
                 : cancellationResult
                   ? 'Close cancellation'
                   : 'Keep appointment'}
+            </button>
+          </div>
+        </Modal>
+      )}
+      {stateChange && (
+        <Modal title="Update appointment status" onClose={closeStateChange}>
+          <AppointmentStateChangeForm
+            key={`state-change:${location.key}:${session.user?.id}:${stateChange.appointmentId}:${stateChange.status}`}
+            appointmentId={stateChange.appointmentId}
+            status={stateChange.status}
+            pendingAttempt={pendingStateChange}
+            onPendingAttemptChange={setPendingStateChange}
+            onBusyChange={(value) => {
+              stateChangeBusyNow.current = value;
+              setStateChangeBusy(value);
+            }}
+            onConfirmed={(result) => setStateChangeResult(result.appointment)}
+          />
+          <div className="modal-actions">
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={stateChangeBusy}
+              onClick={closeStateChange}
+            >
+              {pendingStateChange
+                ? 'Close for now'
+                : stateChangeResult
+                  ? 'Close status update'
+                  : 'Keep current status'}
             </button>
           </div>
         </Modal>
