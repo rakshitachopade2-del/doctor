@@ -60,7 +60,14 @@ test('clinician documents a full longitudinal care journey with private images a
   await dialog
     .getByLabel('Plan and next steps', { exact: true })
     .fill('Review patient-reported progress at follow-up.');
+  await dialog
+    .getByLabel('I reviewed this clinical note and confirm it is ready to record.', { exact: true })
+    .check();
   await dialog.getByRole('button', { name: 'Save clinical note', exact: true }).click();
+  await expect(
+    dialog.getByRole('heading', { name: 'Clinical note recorded', exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close clinical record', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(
     page.getByText('Documentation workflow test; no diagnosis.', { exact: true }),

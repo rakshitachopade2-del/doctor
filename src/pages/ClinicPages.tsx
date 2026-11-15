@@ -24,12 +24,11 @@ import type {
   CarePlan,
   ClinicSettings,
   Doctor,
+  Encounter,
   Medication,
   Message,
   Patient,
-  PatientRecord,
 } from '../../shared/types';
-import type { PatientClinicalWorkflows } from '../../shared/clinical';
 import type { WaitlistEntry } from '../../shared/waitlist';
 import type { PatientDirectoryItem } from '../../shared/record-search';
 import type { AppointmentBookingResult } from '../../shared/appointment-booking';
@@ -47,6 +46,12 @@ import { AppointmentCancellationForm } from '../components/AppointmentCancellati
 import type { CancellationAttempt } from '../components/appointment-cancellation-helpers';
 import { AppointmentStateChangeForm } from '../components/AppointmentStateChangeForm';
 import type { StateChangeAttempt } from '../components/appointment-state-change-helpers';
+import { ConsultationNoteModal } from '../components/ConsultationNoteModal';
+import {
+  checkedConsultationRecord,
+  checkedConsultationWorkflows,
+  type ConsultationAttempt,
+} from '../components/consultation-recording-helpers';
 import {
   appointmentBookingHasChanged,
   isAppointmentBookingNotCreated,
@@ -1973,12 +1978,23 @@ function PatientModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
 type RecordTab = 'overview' | 'visits' | 'care' | 'workup' | 'images' | 'reports' | 'messages';
 export function PatientDetailPage() {
   const { id } = useParams();
-  const { data, loading, error, reload } = useResource<PatientRecord>(
-    id ? `/api/patients/${id}` : null,
+  const { session } = useSession();
+  const location = useLocation();
+  const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
+  const { data, loading, error, reload } = useAppointmentBookingData(
+    id ? `/api/patients/${encodeURIComponent(id)}` : null,
+    (value) => checkedConsultationRecord(value, id ?? ''),
   );
-  const clinical = useResource<PatientClinicalWorkflows>(
-    id ? `/api/patients/${id}/clinical-workflows` : null,
+  const clinicalRead = useAppointmentBookingData(
+    id ? `/api/patients/${encodeURIComponent(id)}/clinical-workflows` : null,
+    (value) => checkedConsultationWorkflows(value, id ?? ''),
   );
+  const clinical = {
+    ...clinicalRead,
+    reload: async () => {
+      await clinicalRead.reload();
+    },
+  };
   const settings = useResource<ClinicSettings>('/api/settings');
   const [recordParams, setRecordParams] = useSearchParams();
   const requestedTab = recordParams.get('tab');
@@ -2011,7 +2027,54 @@ export function PatientDetailPage() {
       { replace: true },
     );
   }
-  const [modal, setModal] = useState<'visit' | 'care' | 'image' | null>(null);
+  const [modal, setModal] = useState<'care' | 'image' | null>(null);
+  const [documentation, setDocumentation] = useState<{ source: Encounter | null } | null>(null);
+  const [pendingDocumentation, setPendingDocumentation] = useState<ConsultationAttempt | null>(
+    null,
+  );
+  const documentationOrigin = useRef({
+    key: location.key,
+    actorId: session.user?.id,
+    patientId: id,
+  });
+  useLayoutEffect(() => {
+    const recordPath = location.pathname.replace(/\/$/, '');
+    const clearDocumentation = () => {
+      setDocumentation(null);
+      setPendingDocumentation(null);
+    };
+    const navigateDocumentation = () => {
+      setDocumentation(null);
+      if (window.location.pathname.replace(/\/$/, '') !== recordPath) setPendingDocumentation(null);
+    };
+    window.addEventListener('popstate', navigateDocumentation);
+    window.addEventListener('hashchange', navigateDocumentation);
+    window.addEventListener('derma:session-invalidated', clearDocumentation);
+    window.addEventListener('derma:session-expired', clearDocumentation);
+    return () => {
+      window.removeEventListener('popstate', navigateDocumentation);
+      window.removeEventListener('hashchange', navigateDocumentation);
+      window.removeEventListener('derma:session-invalidated', clearDocumentation);
+      window.removeEventListener('derma:session-expired', clearDocumentation);
+    };
+  }, [location.pathname]);
+  useLayoutEffect(() => {
+    const previous = documentationOrigin.current;
+    if (
+      previous.key !== location.key ||
+      previous.actorId !== session.user?.id ||
+      previous.patientId !== id
+    ) {
+      documentationOrigin.current = { key: location.key, actorId: session.user?.id, patientId: id };
+      setDocumentation(null);
+      if (previous.actorId !== session.user?.id || previous.patientId !== id)
+        setPendingDocumentation(null);
+    }
+  }, [id, location.key, session.user?.id]);
+  function openDocumentation(source: Encounter | null) {
+    if (pendingDocumentation || !canDocument) return;
+    setDocumentation({ source });
+  }
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   useEffect(() => {
     setSelectedImages([]);
@@ -2072,15 +2135,40 @@ export function PatientDetailPage() {
             <Link className="button button-secondary" to={`/clinic/patients/${patient.id}/summary`}>
               Care summary
             </Link>
-            <button className="button button-secondary" onClick={() => setModal('care')}>
+            <button
+              className="button button-secondary"
+              disabled={!!pendingDocumentation}
+              onClick={() => setModal('care')}
+            >
               <Plus size={16} /> Care plan
             </button>
-            <button className="button button-primary" onClick={() => setModal('visit')}>
+            <button
+              className="button button-primary"
+              disabled={!canDocument || !!pendingDocumentation}
+              onClick={() => openDocumentation(null)}
+            >
               <ClipboardPlus size={16} /> Add visit note
             </button>
           </>
         }
       />
+      {pendingDocumentation && !documentation && (
+        <div className="notice visit-duration-pending">
+          <div>
+            <strong>A clinical record is awaiting confirmation.</strong>
+            <p>
+              The exact note or amendment is retained while this page stays open. Resume it before
+              recording another entry.
+            </p>
+          </div>
+          <button
+            className="button button-secondary"
+            onClick={() => setDocumentation({ source: pendingDocumentation.source })}
+          >
+            Resume clinical record
+          </button>
+        </div>
+      )}
       <div className="patient-summary">
         <Avatar name={patient.name} size="lg" />
         <div>
@@ -2278,11 +2366,11 @@ export function PatientDetailPage() {
                   <FieldValue label="Plan / next steps" value={e.plan} />
                   {clinical.data && (
                     <EncounterAmendments
-                      encounterId={e.id}
                       amendments={clinical.data.amendments.filter(
                         (amendment) => amendment.encounterId === e.id,
                       )}
-                      onChanged={clinical.reload}
+                      recordingPending={!!pendingDocumentation}
+                      onAdd={() => openDocumentation(e)}
                     />
                   )}
                 </Card>
@@ -2293,7 +2381,11 @@ export function PatientDetailPage() {
                 title="The care story starts here"
                 description="Document the history, examination, assessment and next steps after a consultation."
                 action={
-                  <button className="button button-primary" onClick={() => setModal('visit')}>
+                  <button
+                    className="button button-primary"
+                    disabled={!canDocument || !!pendingDocumentation}
+                    onClick={() => openDocumentation(null)}
+                  >
                     <Plus size={16} /> Add visit note
                   </button>
                 }
@@ -2466,14 +2558,21 @@ export function PatientDetailPage() {
           canSend={settings.data?.modules.followUp !== false}
         />
       )}
-      {modal === 'visit' && (
-        <VisitModal
-          record={data}
-          onClose={() => setModal(null)}
-          onSaved={() => {
-            setModal(null);
-            setTab('visits');
-            reload();
+      {documentation && (
+        <ConsultationNoteModal
+          key={`consultation:${id}:${location.key}:${session.user?.id}:${documentation.source?.id ?? 'create'}`}
+          patient={patient}
+          appointments={data.appointments}
+          source={documentation.source}
+          pendingAttempt={pendingDocumentation}
+          onPendingAttemptChange={setPendingDocumentation}
+          onClose={(saved) => {
+            setDocumentation(null);
+            if (saved) {
+              setTab('visits');
+              void reload();
+              void clinical.reload();
+            }
           }}
         />
       )}
@@ -2507,118 +2606,6 @@ export function PatientDetailPage() {
         />
       )}
     </>
-  );
-}
-
-function VisitModal({
-  record,
-  onClose,
-  onSaved,
-}: {
-  record: PatientRecord;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const toast = useToast();
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    if (!values.appointmentId) delete values.appointmentId;
-    setSaving(true);
-    setError('');
-    try {
-      await api('/api/encounters', {
-        method: 'POST',
-        body: { ...values, patientId: record.patient.id },
-      });
-      toast('Clinical note saved.');
-      onSaved();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <Modal title="Document consultation" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        {error && (
-          <div role="alert" className="notice notice-error">
-            {error}
-          </div>
-        )}
-        <Field label="Linked appointment">
-          <select name="appointmentId" defaultValue="">
-            <option value="">Standalone clinical note</option>
-            {record.appointments
-              .filter((a) => !['cancelled', 'no-show'].includes(a.status))
-              .map((a) => (
-                <option key={a.id} value={a.id}>
-                  {formatDate(a.date)} · {a.time} · {a.reason}
-                </option>
-              ))}
-          </select>
-        </Field>
-        <Field label="History">
-          <textarea
-            name="history"
-            required
-            rows={3}
-            maxLength={8000}
-            placeholder="Relevant history and patient-reported symptoms"
-          />
-        </Field>
-        <Field label="Examination">
-          <textarea
-            name="examination"
-            required
-            rows={3}
-            maxLength={8000}
-            placeholder="Your clinical observations"
-          />
-        </Field>
-        <Field label="Assessment">
-          <textarea
-            name="assessment"
-            required
-            rows={3}
-            maxLength={8000}
-            placeholder="Clinical assessment, uncertainty and differential considerations"
-          />
-        </Field>
-        <Field label="Investigations">
-          <textarea
-            name="investigations"
-            rows={2}
-            maxLength={8000}
-            placeholder="Results reviewed or investigations requested"
-          />
-        </Field>
-        <Field label="Plan and next steps">
-          <textarea
-            name="plan"
-            required
-            rows={3}
-            maxLength={8000}
-            placeholder="Treatment decisions, rationale and follow-up"
-          />
-        </Field>
-        <div className="notice">
-          This note becomes part of the permanent visit history. Review it before saving. Add a care
-          plan separately to give the patient structured instructions.
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="button button-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="button button-primary" disabled={saving}>
-            {saving ? 'Saving…' : 'Save clinical note'}
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 

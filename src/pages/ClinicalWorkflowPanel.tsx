@@ -1095,16 +1095,15 @@ function CancellationModal({
 }
 
 export function EncounterAmendments({
-  encounterId,
   amendments,
-  onChanged,
+  recordingPending,
+  onAdd,
 }: {
-  encounterId: string;
   amendments: EncounterAmendment[];
-  onChanged: () => void;
+  recordingPending: boolean;
+  onAdd: () => void;
 }) {
   const { session } = useSession();
-  const [adding, setAdding] = useState(false);
   const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
   return (
     <div className="cw-amendments">
@@ -1113,7 +1112,11 @@ export function EncounterAmendments({
           <History size={16} /> Additions & corrections
         </h3>
         {canDocument && (
-          <button className="button button-secondary button-small" onClick={() => setAdding(true)}>
+          <button
+            className="button button-secondary button-small"
+            disabled={recordingPending}
+            onClick={onAdd}
+          >
             <Plus size={14} /> Add amendment
           </button>
         )}
@@ -1136,35 +1139,6 @@ export function EncounterAmendments({
         <p className="muted small">
           No amendments. The original consultation note above is preserved.
         </p>
-      )}
-      {adding && (
-        <ClinicalForm
-          title="Amend the consultation record"
-          endpoint={`/api/encounters/${encounterId}/amendments`}
-          payload={(form) => ({ reason: form.get('reason'), text: form.get('text') })}
-          label="Save amendment"
-          onClose={() => setAdding(false)}
-          onSaved={() => {
-            setAdding(false);
-            onChanged();
-          }}
-        >
-          <Field label="Reason for amendment">
-            <input
-              name="reason"
-              required
-              maxLength={300}
-              placeholder="What needs clarification or correction?"
-            />
-          </Field>
-          <Field label="Correction or additional information">
-            <textarea name="text" required rows={5} maxLength={8000} />
-          </Field>
-          <div className="notice">
-            This adds a dated, attributed amendment. It does not overwrite or hide the original
-            note, and the amendment cannot be edited after saving.
-          </div>
-        </ClinicalForm>
       )}
     </div>
   );

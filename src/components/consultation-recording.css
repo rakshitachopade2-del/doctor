@@ -1,0 +1,59 @@
+.consultation-recording-form,
+.consultation-recording-result,
+.consultation-recording-source,
+.consultation-recording-amendment {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.consultation-recording-source,
+.consultation-recording-amendment {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1rem;
+  background: #f4f8f5;
+}
+.consultation-recording-source h3,
+.consultation-recording-amendment h3 {
+  margin-top: 0;
+}
+.consultation-recording-encounter h4,
+.consultation-recording-amendment h4 {
+  margin: 0.9rem 0 0.35rem;
+}
+.consultation-recording-encounter p,
+.consultation-recording-amendment p {
+  white-space: pre-wrap;
+  margin: 0.35rem 0;
+}
+.consultation-recording-form .notice,
+.consultation-recording-result .notice {
+  display: block;
+}
+.consultation-recording-form .notice > strong {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+.consultation-recording-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+.consultation-recording-confirm input[type='checkbox'] {
+  width: 16px;
+  min-width: 16px;
+  flex: 0 0 16px;
+  margin-top: 0.25rem;
+}
+.consultation-recording-confirm span {
+  min-width: 0;
+}
+@media (max-width: 580px) {
+  .consultation-recording-form .modal-actions,
+  .consultation-recording-result .modal-actions {
+    flex-wrap: wrap;
+  }
+  .consultation-recording-form .modal-actions .button,
+  .consultation-recording-result .modal-actions .button {
+    width: 100%;
+  }
+}

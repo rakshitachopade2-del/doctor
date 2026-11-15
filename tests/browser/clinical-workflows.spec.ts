@@ -65,7 +65,16 @@ test('clinician preserves amendments, reviews attached results, and documents a 
   const correction =
     'Additional synthetic history was supplied by the patient after the initial note.';
   await dialog.getByLabel('Correction or additional information', { exact: true }).fill(correction);
+  await dialog
+    .getByLabel('I reviewed the original note and this amendment before recording it.', {
+      exact: true,
+    })
+    .check();
   await dialog.getByRole('button', { name: 'Save amendment', exact: true }).click();
+  await expect(
+    dialog.getByRole('heading', { name: 'Amendment recorded', exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close clinical record', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText(correction, { exact: true })).toBeVisible();
   await expect(page.getByText(originalAssessment, { exact: true })).toBeVisible();

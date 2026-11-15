@@ -220,6 +220,11 @@ async function rehearseRecovery() {
       },
       201,
     );
+    await call(source, '/accounts/recovery-admin', admin, 'PATCH', { doctorId: doctor.id });
+    await call(source, '/auth/login', admin, 'POST', {
+      email: 'recovery-admin@example.test',
+      password,
+    });
     let visitDate = addDays(clinicToday(), 20);
     if (new Date(`${visitDate}T12:00:00Z`).getUTCDay() === 0) visitDate = addDays(visitDate, 1);
     const ordinaryCommand = {
@@ -422,6 +427,56 @@ async function rehearseRecovery() {
       ).appointment;
     }
     const retainedStateContext = await call(source, `${stateBase}/state-context`, admin);
+
+    const consultationInput = {
+      patientId,
+      appointmentId: stateVisit.id,
+      history: 'PRIVATE synthetic recovery consultation history',
+      examination: '',
+      assessment: 'PRIVATE synthetic recovery assessment',
+      investigations: '',
+      plan: 'PRIVATE synthetic recovery plan',
+      reviewedConfirmed: true,
+      requestId: randomUUID(),
+    };
+    const consultationRejectedInput = {
+      ...consultationInput,
+      appointmentId: randomUUID(),
+      requestId: randomUUID(),
+    };
+    const consultationRejected = await call(
+      source,
+      '/consultation-notes',
+      admin,
+      'POST',
+      consultationRejectedInput,
+      400,
+    );
+    assert.equal(consultationRejected.consultationOutcome, 'not-recorded');
+    const consultation = await call(
+      source,
+      '/consultation-notes',
+      admin,
+      'POST',
+      consultationInput,
+      201,
+    );
+    const consultationAmendmentPath = `/encounters/${consultation.encounter.id}/amendment-recordings`;
+    const consultationAmendmentInput = {
+      reason: 'PRIVATE synthetic recovery clarification',
+      text: 'PRIVATE synthetic retained amendment',
+      reviewedConfirmed: true,
+      requestId: randomUUID(),
+    };
+    const consultationAmendment = await call(
+      source,
+      consultationAmendmentPath,
+      admin,
+      'POST',
+      consultationAmendmentInput,
+      201,
+    );
+    assert.deepEqual(consultationAmendment.encounter, consultation.encounter);
 
     const imageBytes = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cWb0AAAAASUVORK5CYII=',
@@ -664,6 +719,41 @@ async function rehearseRecovery() {
       await call(target, `${cancellationBase}/cancellation-context`, newPatient),
       retainedCancellationContext,
     );
+    assert.deepEqual(
+      await call(target, '/consultation-notes', newAdmin, 'POST', consultationInput),
+      consultation,
+    );
+    assert.deepEqual(
+      await call(target, consultationAmendmentPath, newAdmin, 'POST', consultationAmendmentInput),
+      consultationAmendment,
+    );
+    assert.deepEqual(
+      await call(target, '/consultation-notes', newAdmin, 'POST', consultationRejectedInput, 400),
+      consultationRejected,
+    );
+    const restoredClinicalRecord = await call(target, `/patients/${patientId}`, newAdmin);
+    assert.deepEqual(restoredClinicalRecord.encounters, [consultation.encounter]);
+    const restoredWorkflows = await call(
+      target,
+      `/patients/${patientId}/clinical-workflows`,
+      newAdmin,
+    );
+    assert.deepEqual(restoredWorkflows.amendments, [consultationAmendment.amendment]);
+    assert.equal(
+      restoredDb.prepare('SELECT COUNT(*) count FROM consultationRecordingCommands').get().count,
+      3,
+    );
+    for (const projection of [
+      await call(target, `/patients/${patientId}`, newPatient),
+      await call(target, summaryPath, newPatient),
+    ])
+      for (const value of [
+        consultationInput.history,
+        consultationAmendmentInput.text,
+        consultationInput.requestId,
+        consultationAmendmentInput.requestId,
+      ])
+        assert.equal(JSON.stringify(projection).includes(value), false);
     const retainedAppointments = await call(target, '/appointments', newPatient);
     assert.deepEqual(
       await call(target, `${stateBase}/state-changes`, newAdmin, 'POST', stateCommand),
@@ -726,7 +816,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

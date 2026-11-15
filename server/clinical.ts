@@ -437,29 +437,6 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     });
     res.json(investigationView(order));
   });
-  app.post('/api/encounters/:id/amendments', (req: AuthRequest, res) => {
-    const identity = doctorIdentity(req),
-      encounterId = String(req.params.id);
-    const encounter = get<Encounter>(db, 'encounters', encounterId);
-    if (!encounter) return fail(404, 'Consultation record not found.');
-    patientAccess(req, encounter.patientId);
-    const input = z.object({ reason: text.min(1), text: text.min(1) }).parse(req.body);
-    const amendment: EncounterAmendment = {
-      ...input,
-      ...identity,
-      id: id(),
-      encounterId,
-      patientId: encounter.patientId,
-      createdAt: nowISO(),
-    };
-    transaction(() => {
-      db.prepare(
-        'INSERT INTO encounterAmendments(id,patientId,encounterId,data) VALUES (?,?,?,?)',
-      ).run(amendment.id, amendment.patientId, encounterId, JSON.stringify(amendment));
-      audit(req, 'added consultation amendment', 'encounter', encounterId);
-    });
-    res.status(201).json(amendment);
-  });
   app.post('/api/procedures', (req: AuthRequest, res) => {
     z.object({}).strict().parse(req.query);
     const input = z

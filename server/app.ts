@@ -49,6 +49,7 @@ import { registerAppointmentBookings } from './appointment-booking.ts';
 import { registerAppointmentRescheduling } from './appointment-rescheduling.ts';
 import { registerAppointmentCancellation } from './appointment-cancellation.ts';
 import { registerAppointmentStateChange } from './appointment-state-change.ts';
+import { registerConsultationRecording } from './consultation-recording.ts';
 import { registerAppointmentSeriesCancellations } from './appointment-series-cancellations.ts';
 import { registerAppointmentSeriesRescheduling } from './appointment-series-rescheduling.ts';
 import {
@@ -955,36 +956,6 @@ export function createApp(options: AppOptions = {}) {
     audit(req, 'submitted intake', 'intake', intake.id);
     res.status(201).json(intake);
   });
-  app.post('/api/encounters', (req: AuthRequest, res) => {
-    const doctorId = clinicianId(req);
-    const input = z
-      .object({
-        patientId: required,
-        appointmentId: required.optional(),
-        history: text.default(''),
-        examination: text.default(''),
-        assessment: text.min(1),
-        investigations: text.default(''),
-        plan: text.min(1),
-      })
-      .parse(req.body);
-    patientAccess(req, input.patientId);
-    if (input.appointmentId) {
-      const a = get<Appointment>(db, 'appointments', input.appointmentId);
-      if (!a || a.patientId !== input.patientId)
-        fail(400, 'The appointment must belong to this patient.');
-    }
-    const encounter = {
-      ...input,
-      id: id(),
-      doctorId,
-      doctorName: get<Doctor>(db, 'doctors', doctorId)!.name,
-      createdAt: nowISO(),
-    };
-    insert(db, 'encounters', encounter);
-    audit(req, 'recorded consultation', 'encounter', encounter.id);
-    res.status(201).json(encounter);
-  });
   app.get('/api/care-plans', (req: AuthRequest, res) => {
     const user = actor(req, ['admin', 'doctor', 'patient']);
     res.json(
@@ -1331,6 +1302,16 @@ export function createApp(options: AppOptions = {}) {
     clinicianId,
     audit,
     fail,
+  });
+  registerConsultationRecording(app, {
+    db,
+    actor,
+    patientAccess,
+    clinicianId,
+    audit,
+    fail,
+    businessFailure: (error) =>
+      error instanceof HttpError ? { status: error.status, message: error.message } : null,
   });
   registerImageAnnotations(app, {
     db,

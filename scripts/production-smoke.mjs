@@ -3685,6 +3685,187 @@ try {
     assert.equal(denied.stateChangeOutcome, undefined);
   }
 
+  // Original consultation text and amendments are permanent private records.
+  // Exact retries must recover their evidence without creating duplicate notes.
+  const consultationSmokePath = '/consultation-notes';
+  const consultationSmokePatient = registeredSession.user.patientId;
+  const consultationSmokeSummary = await reminderRead(reminderSummaryPath, patientHeaders);
+  const consultationSmokeInput = {
+    patientId: consultationSmokePatient,
+    appointmentId: stateSmokeVisits[0].id,
+    history: 'PRIVATE synthetic consultation history for smoke verification',
+    examination: 'PRIVATE synthetic observed findings, no clinical advice',
+    assessment: 'PRIVATE synthetic clinician-entered assessment',
+    investigations: '',
+    plan: 'PRIVATE synthetic documentation plan',
+    reviewedConfirmed: true,
+    requestId: randomUUID(),
+  };
+  const consultationSmokeRejectedInput = {
+    ...consultationSmokeInput,
+    appointmentId: randomUUID(),
+    requestId: randomUUID(),
+  };
+  const consultationSmokeRejected = await ordinaryWrite(
+    consultationSmokePath,
+    consultationSmokeRejectedInput,
+    verifiedHeaders,
+    400,
+  );
+  assert.equal(consultationSmokeRejected.consultationOutcome, 'not-recorded');
+  assert.equal(consultationSmokeRejected.encounterId, null);
+  const consultationSmokeCreated = await ordinaryWrite(
+    consultationSmokePath,
+    consultationSmokeInput,
+  );
+  assert.equal(consultationSmokeCreated.encounter.patientId, consultationSmokePatient);
+  assert.equal(consultationSmokeCreated.encounter.appointmentId, stateSmokeVisits[0].id);
+  assert.equal(consultationSmokeCreated.encounter.doctorId, visitDoctor.id);
+  assert.equal(consultationSmokeCreated.encounter.assessment, consultationSmokeInput.assessment);
+  assert.equal(consultationSmokeCreated.amendment, null);
+  assert.deepEqual(consultationSmokeCreated.receipt, {
+    requestId: consultationSmokeInput.requestId,
+    actorId: account.user.id,
+    operation: 'create',
+    patientId: consultationSmokePatient,
+    encounterId: consultationSmokeCreated.encounter.id,
+    amendmentId: null,
+    doctorId: visitDoctor.id,
+  });
+  const consultationSmokeAuthor = (await reminderRead('/doctors')).find(
+    (doctor) => doctor.id === visitDoctor.id,
+  );
+  await ordinaryWrite(
+    `/doctors/${visitDoctor.id}`,
+    {
+      ...consultationSmokeAuthor,
+      name: 'Later synthetic consultation author',
+    },
+    verifiedHeaders,
+    200,
+    'PATCH',
+  );
+  const consultationSmokeAmendmentPath = `/encounters/${consultationSmokeCreated.encounter.id}/amendment-recordings`;
+  const consultationSmokeAmendmentInput = {
+    reason: 'PRIVATE synthetic correction reason',
+    text: 'PRIVATE synthetic attributed correction without replacing the original',
+    reviewedConfirmed: true,
+    requestId: randomUUID(),
+  };
+  const consultationSmokeAmended = await ordinaryWrite(
+    consultationSmokeAmendmentPath,
+    consultationSmokeAmendmentInput,
+  );
+  assert.deepEqual(consultationSmokeAmended.encounter, consultationSmokeCreated.encounter);
+  assert.equal(
+    consultationSmokeAmended.amendment.doctorName,
+    'Later synthetic consultation author',
+  );
+  assert.equal(consultationSmokeAmended.amendment.text, consultationSmokeAmendmentInput.text);
+  assert.equal(consultationSmokeAmended.receipt.operation, 'amend');
+  assert.equal(consultationSmokeAmended.receipt.amendmentId, consultationSmokeAmended.amendment.id);
+  await ordinaryWrite(`/encounters/${consultationSmokeCreated.encounter.id}/amendments`, {
+    reason: 'PRIVATE synthetic later legacy clarification',
+    text: 'PRIVATE synthetic legacy amendment',
+  });
+  const { appointmentId: consultationSmokeLinkedId, ...consultationSmokeStandaloneInput } =
+    consultationSmokeInput;
+  assert.equal(consultationSmokeLinkedId, stateSmokeVisits[0].id);
+  const consultationSmokeStandalone = await ordinaryWrite(consultationSmokePath, {
+    ...consultationSmokeStandaloneInput,
+    requestId: randomUUID(),
+  });
+  assert.equal('appointmentId' in consultationSmokeStandalone.encounter, false);
+  assert.deepEqual(
+    await ordinaryWrite(consultationSmokePath, consultationSmokeInput, verifiedHeaders, 200),
+    consultationSmokeCreated,
+  );
+  assert.deepEqual(
+    await ordinaryWrite(
+      consultationSmokeAmendmentPath,
+      consultationSmokeAmendmentInput,
+      verifiedHeaders,
+      200,
+    ),
+    consultationSmokeAmended,
+  );
+  assert.deepEqual(
+    await ordinaryWrite(
+      consultationSmokePath,
+      consultationSmokeRejectedInput,
+      verifiedHeaders,
+      400,
+    ),
+    consultationSmokeRejected,
+  );
+  const consultationSmokeCollision = await ordinaryWrite(
+    consultationSmokeAmendmentPath,
+    {
+      ...consultationSmokeAmendmentInput,
+      requestId: consultationSmokeInput.requestId,
+    },
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(consultationSmokeCollision.consultationOutcome, undefined);
+  const consultationSmokeRecord = await reminderRead(`/patients/${consultationSmokePatient}`);
+  assert.deepEqual(
+    consultationSmokeRecord.encounters.find(
+      (note) => note.id === consultationSmokeCreated.encounter.id,
+    ),
+    consultationSmokeCreated.encounter,
+  );
+  assert.equal(consultationSmokeRecord.encounters.length, 2);
+  const consultationSmokeWorkflows = await reminderRead(
+    `/patients/${consultationSmokePatient}/clinical-workflows`,
+  );
+  assert.equal(
+    consultationSmokeWorkflows.amendments.filter(
+      (entry) => entry.encounterId === consultationSmokeCreated.encounter.id,
+    ).length,
+    2,
+  );
+  const consultationSmokeAudit = await reminderRead(
+    `/search/audit?entityType=encounter&entityId=${consultationSmokeCreated.encounter.id}`,
+  );
+  assert.equal(
+    consultationSmokeAudit.items.filter((entry) => entry.action === 'recorded consultation').length,
+    1,
+  );
+  assert.equal(
+    consultationSmokeAudit.items.filter((entry) => entry.action === 'added consultation amendment')
+      .length,
+    2,
+  );
+  assert.equal(
+    (await reminderRead(reminderSummaryPath, patientHeaders)).revision,
+    consultationSmokeSummary.revision,
+  );
+  for (const projection of [
+    await reminderRead(`/patients/${consultationSmokePatient}`, patientHeaders),
+    await reminderRead(`/patients/${consultationSmokePatient}/clinical-workflows`, patientHeaders),
+    await reminderRead(reminderSummaryPath, patientHeaders),
+    consultationSmokeAudit,
+  ])
+    for (const value of [
+      consultationSmokeInput.history,
+      consultationSmokeAmendmentInput.text,
+      consultationSmokeInput.requestId,
+      consultationSmokeAmendmentInput.requestId,
+    ])
+      assert.equal(JSON.stringify(projection).includes(value), false);
+  for (const [headers, status] of [
+    [publicHeaders, 401],
+    [patientHeaders, 403],
+  ])
+    for (const [path, body] of [
+      [consultationSmokePath, consultationSmokeInput],
+      [consultationSmokeAmendmentPath, consultationSmokeAmendmentInput],
+    ]) {
+      const denied = await ordinaryWrite(path, body, headers, status);
+      assert.equal(denied.consultationOutcome, undefined);
+    }
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -3787,6 +3968,13 @@ try {
     401,
   );
   assert.equal(stateSmokeLoggedOut.stateChangeOutcome, undefined);
+  for (const [path, body] of [
+    [consultationSmokePath, consultationSmokeInput],
+    [consultationSmokeAmendmentPath, consultationSmokeAmendmentInput],
+  ]) {
+    const denied = await ordinaryWrite(path, body, verifiedHeaders, 401);
+    assert.equal(denied.consultationOutcome, undefined);
+  }
   assert.equal(
     (await fetch(`${base}/api${reminderPolicyPath}`, { headers: verifiedHeaders })).status,
     401,
@@ -3796,7 +3984,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

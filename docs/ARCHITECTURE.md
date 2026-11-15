@@ -306,7 +306,13 @@ The billing projection contains only patient identity, procedure title, recorded
 
 Estimates are descriptive text and never parsed into invoice amounts. Staff enter agreed charges explicitly as positive integer paise, with server-derived totals and an unpaid initial state. A procedure does not automatically issue an invoice; an invoice does not record a received payment. Procedure cancellation preserves existing invoices and payments, with no automated refund, tax or payment-provider operation.
 
-### Amendments and clinical authorship
+### Consultation documentation and clinical authorship
+
+`server/consultation-recording.ts` owns reviewed original-note/amendment commands and their legacy adapters. Fresh session/CSRF/MFA, account, linked professional identity and patient checks run inside `BEGIN IMMEDIATE`. The service preserves existing same-patient appointment linkage and shared clinician permissions. Original note insertion now shares its audit transaction; both operations remain additive and leave clinical decisions to the author.
+
+`consultationRecordingCommands` binds actor, operation, patient, source encounter and normalized-content SHA-256 digest to one receipt or terminal rejection. It does not duplicate private clinical text. Existing encounter/amendment tables retain their original schema and immutable triggers. A savepoint removes all failed effects before persisting a known domain rejection; unknown errors roll back everything. Replays reauthorize and return original immutable records, even after another amendment or professional-profile change.
+
+The shared consultation modal validates source, author, complete submitted text and receipt identities before accepting success. Uncertain commands remain locked in page memory across Close/Resume, and final confirmation remains visible until closed. Record-scoped pending state cannot silently switch patients, notes or operations. Guarded record reads and response callbacks protect later navigation/session state. No patient notification, publication, billing action or appointment progression is inferred.
 
 `encounterAmendments` adds a reasoned, timestamped entry linked to the original consultation and patient. It never updates the original encounter and remains clinician-only. Clinical order, interpretation, amendment, procedure-plan and completion authorship requires a valid doctor profile linked to the authenticated account. An unlinked administrator can manage access and inspect authorized records but cannot be silently attributed to another doctor.
 

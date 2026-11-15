@@ -306,6 +306,23 @@ Interactive fulfillment uses `POST /appointment-bookings` with `waitlistId`, exp
 - `GET /messages?patientId=` → `Message[]` (clinician or owning patient).
 - `POST /messages {patientId?,body}` → `Message` (clinician or owning patient; follow-up module enabled). Messages have a 4,000-character limit and remain inside the platform.
 
+## Reviewed consultation documentation
+
+- `POST /consultation-notes {patientId,appointmentId?,history?,examination?,assessment,investigations?,plan,reviewedConfirmed:true,requestId}` records an original note.
+- `POST /encounters/:id/amendment-recordings {reason,text,reviewedConfirmed:true,requestId}` appends a correction or clarification to an original note.
+
+Both return `ConsultationRecordingResult {encounter,amendment,receipt}`, with `201` for a new recording and `200` for an exact replay. `amendment` is null for note creation; otherwise it is the original saved amendment. The receipt contains `requestId,actorId,operation:create|amend,patientId,encounterId,amendmentId:null|string,doctorId`. The receipt's doctor is the author of this operation, so an amendment may have a different author from its original note. Later amendments, appointment changes and author profile changes do not alter an earlier result.
+
+New routes reject unknown query/body fields. IDs trim to 1–300 characters; clinical text trims to at most 8,000 characters. Assessment and plan are required, while history, examination and investigations default blank. Amendment reason and text are required. Request UUIDs normalize to lowercase. The acknowledgment means the author reviewed this submitted content; it does not assert patient consent or clinical approval by someone else.
+
+Current session, expiry, CSRF, active account, required password rotation, MFA, doctor/administrator role, valid linked doctor profile and patient access are checked inside the writer transaction before recording or replay. A linked clinician may document any clinic patient or amend another clinician's note. Optional appointment linkage requires only the same patient; there is no new date, status or assigned-doctor condition. These are additive records, so no optimistic version or clinical-source review claim is introduced.
+
+A shared append-only command registry binds the UUID to the actor, operation, patient, source encounter and digest of all normalized input. It stores receipts or terminal rejections without copying clinical text into command metadata. Conflicting reuse returns `409` without an outcome marker. Note/amendment insertion, receipt and audit commit atomically. Legacy `POST /encounters` and `POST /encounters/:id/amendments` use the same fresh authorized atomic writers while preserving plain `201` responses, field stripping and absence of a UUID guarantee.
+
+Known domain `400/404/409` errors after source authorization and command-absence checks roll back attempted effects before saving `{error,consultationOutcome:'not-recorded',requestId,actorId,operation,patientId,encounterId}`. The encounter ID is null for creation or the source ID for amendment. An exact rejected request stays rejected even if its appointment link later becomes valid. A fresh reviewed attempt needs a new UUID. Missing private patients/encounters, authentication, clinician-link, schema, collision and unknown failures have no definitive marker. Clients match every marker identity before unlocking an uncertain request.
+
+Original notes and amendments remain immutable and clinician-only. They do not appear in patient/reception/public projections or patient-facing summaries, do not create notifications, and do not change appointments or care plans. No command-history endpoint is added. The shared staff form reviews exact text, locks uncertain submissions, supports Close/Resume within the current record, validates saved identities/content and guards navigation before response effects. Pending clinical text stays in page memory only.
+
 ## Follow-up review and worklist
 
 - `GET /follow-up-worklist?scope=mine|all` → `FollowUpWorkItem[]` (doctor/administrator). Defaults to `mine` for doctors and `all` for administrators. Ownership starts with the original care-plan doctor and follows the latest assignment; `all` uses the existing clinic-wide clinical permissions. Includes active and completed plans, sorted by due status, unreviewed count, next review date and patient name. Each item contains `carePlan`, `patient`, `ownerDoctorId`, `ownerDoctorName`, `revision`, `latestReview`, `unreviewedCheckIns`, `unreviewedCount` and `due`.
