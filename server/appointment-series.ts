@@ -221,6 +221,7 @@ export function registerAppointmentSeries(app: Express, context: Context) {
         input,
         patient,
         doctor,
+        scheduling.bookingStatusRevision(input.doctorId),
         schedule,
         closures,
         appointments,

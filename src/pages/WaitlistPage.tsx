@@ -230,6 +230,12 @@ export function WaitlistPage() {
                       <strong>{entry.doctorName}</strong>
                       <span className="table-sub">{modeLabel(entry.mode)}</span>
                       <span className="table-sub">{entry.reason}</span>
+                      {doctors.data?.find((doctor) => doctor.id === entry.doctorId)
+                        ?.acceptingNewBookings === false && (
+                        <span className="table-sub">
+                          <Badge tone="amber">New bookings paused</Badge>
+                        </span>
+                      )}
                     </td>
                     <td>
                       <strong>{formatDate(entry.startDate)}</strong>
@@ -247,7 +253,12 @@ export function WaitlistPage() {
                           <>
                             <button
                               className="button button-primary button-small"
-                              disabled={doctors.loading || !!doctors.error}
+                              disabled={
+                                doctors.loading ||
+                                !!doctors.error ||
+                                doctors.data?.find((doctor) => doctor.id === entry.doctorId)
+                                  ?.acceptingNewBookings === false
+                              }
                               onClick={() => setAction({ kind: 'book', entry })}
                             >
                               Find a slot
@@ -324,7 +335,9 @@ function WaitlistCreateModal({
 }) {
   const patients = useResource<Patient[]>('/api/patients');
   const [patientId, setPatientId] = useState('');
-  const [doctorId, setDoctorId] = useState(doctors[0]?.id ?? '');
+  const [doctorId, setDoctorId] = useState(
+    doctors.find((doctor) => doctor.acceptingNewBookings !== false)?.id ?? '',
+  );
   const [mode, setMode] = useState<WaitlistEntry['mode']>('in-person');
   const [startDate, setStartDate] = useState(today());
   const [endDate, setEndDate] = useState(shiftDate(today(), 7));
@@ -332,8 +345,16 @@ function WaitlistCreateModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const toast = useToast();
+  const newBookingPaused =
+    doctors.find((doctor) => doctor.id === doctorId)?.acceptingNewBookings === false;
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (newBookingPaused) {
+      setError(
+        'This doctor is not accepting new bookings or new waitlist requests. Choose another doctor.',
+      );
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -395,9 +416,15 @@ function WaitlistCreateModal({
               value={doctorId}
               onChange={(event) => setDoctorId(event.target.value)}
             >
+              <option value="">Select a doctor</option>
               {doctors.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>
+                <option
+                  key={doctor.id}
+                  value={doctor.id}
+                  disabled={doctor.acceptingNewBookings === false}
+                >
                   {doctor.name}
+                  {doctor.acceptingNewBookings === false ? ' · New bookings paused' : ''}
                 </option>
               ))}
             </select>
@@ -413,6 +440,12 @@ function WaitlistCreateModal({
             </select>
           </Field>
         </div>
+        {newBookingPaused && (
+          <p className="notice" role="status">
+            New bookings and waitlist requests are paused for this doctor. Choose another doctor.
+            Your selected doctor has not been changed.
+          </p>
+        )}
         <div className="wl-form-section">
           <h3>Dates that work for the patient</h3>
           <div className="wl-window-fields">
@@ -474,7 +507,14 @@ function WaitlistCreateModal({
           </button>
           <button
             className="button button-primary"
-            disabled={busy || patients.loading || !!patients.error || !patientId || !doctorId}
+            disabled={
+              busy ||
+              patients.loading ||
+              !!patients.error ||
+              !patientId ||
+              !doctorId ||
+              newBookingPaused
+            }
           >
             {busy ? 'Saving…' : 'Save waitlist request'}
           </button>

@@ -1527,3 +1527,27 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+.doctor-paused-copy {
+  max-width: 220px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #4d645a;
+}
+.booking-pause-notice {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 24px;
+  overflow-wrap: anywhere;
+}
+.booking-pause-notice p {
+  margin: 0;
+}
+.booking-pause-notice .button {
+  justify-self: start;
+}
+.booking-paused-label {
+  color: #425f52;
+  font-weight: 700;
+}

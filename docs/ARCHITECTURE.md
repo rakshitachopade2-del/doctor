@@ -130,6 +130,14 @@ Availability uses Asia/Kolkata and a 180-day booking horizon. Slot generation ex
 
 Schedule updates and closures run transactionally and reject changes that would invalidate active future bookings. Changing the default visit length does not rewrite existing appointments. Public clinic-hours text is separate from these bookable schedules.
 
+## Doctor booking status and existing-visit continuity
+
+`server/doctor-booking.ts` keeps `doctorBookingStatuses` separate from the mutable public doctor profile. A missing status means accepting; startup adds empty status/evidence tables without rewriting existing profiles or inventing an event. `doctorBookingChanges` and `doctorBookingCommands` retain immutable administrator evidence and actor-bound retry identities. Revisions include doctor identity, current boolean and latest event identity. Private context/history and reviewed commands revalidate current session/access under the scheduling transaction; state, evidence, receipt and audit are atomic.
+
+The public doctor projection includes only the accepting boolean alongside existing profile fields. Shared scheduling gates both slot generation and commit validation. A paused-doctor exception requires a stored scheduled appointment with the same doctor and patient; single-visit callers already authorize that appointment, while series rescheduling supplies an explicit internal source ID for each selected visit. New request fields cannot enable the exception, and batch exclusion IDs alone do not grant it. Existing duration, overlap, resource and booking-window checks still apply. Waitlist creation and conversion also recheck status under their transaction.
+
+New-series previews include status revision, rejecting previews made stale by a pause/resume cycle. Same-doctor rescheduling preserves its existing preview semantics and original clinical/billing/resource links. Earlier committed custom and series commands replay before current booking eligibility, without creating a duplicate visit. The UI keeps paused profiles available for history and existing care, blocks new assignments, and separates private administrator reasons/history from patient/staff status labels. Neither account access nor clinical responsibility changes automatically.
+
 ## Weekly availability revisions and history
 
 `server/weekly-availability.ts` registers private doctor-scoped context, reviewed saves and paginated history from `server/scheduling.ts`. The existing canonical schedule validator, effective-default reader, transaction and protected-appointment interval checks are reused. `doctorSchedules` remains the current source for booking, custom visits, recurring series and public duration/slot calculations.

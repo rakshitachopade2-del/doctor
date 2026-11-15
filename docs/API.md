@@ -60,7 +60,7 @@ Password change, recovery and account access changes invalidate pending MFA prep
 
 - `GET /users` → normalized account data (administrator; retained for staff and portal setup).
 - `POST /users {name,email,password,role,doctorId?}` → `User` (administrator). Roles are `doctor`, `receptionist` or `admin`; doctors require a profile. New accounts have `active:true` and `mustChangePassword:true`.
-- `GET /doctors` → `Doctor[]` (public). Each profile includes its current `appointmentDurationMinutes`.
+- `GET /doctors` → `Doctor[]` (public). Each profile includes its current `appointmentDurationMinutes` and safe `acceptingNewBookings` boolean. Paused profiles remain in the directory; private reasons/history/revisions are excluded.
 - `POST /doctors`, `PATCH /doctors/:id` → `Doctor` (administrator; full profile: name, title, qualifications, specialties, experience, fee, bio, languages, optional color).
 - `GET /settings` → `ClinicSettings` (public fields only).
 - `PATCH /settings` → `ClinicSettings` (administrator; compatibility API with partial clinic fields). Timezone remains `Asia/Kolkata`; module settings cover `intake`, `images` and `followUp`. Explicitly submitted fields merge into current settings under the write lock, with atomic legacy change history and audit. This unversioned API does not reject stale submitted fields. Unknown fields are stripped; a no-op creates no configuration change.
@@ -100,6 +100,20 @@ Defaults are Monday–Saturday, 09:00–18:00, thirty-minute appointments and bo
 A schedule change or closure that invalidates existing future bookings returns `409`, leaving both availability and appointments unchanged. Existing bookings must be rescheduled or cancelled first. Changing a schedule alone preserves their duration. Explicit rescheduling adopts the selected doctor's current duration for ordinary visits; `durationPolicy:'custom'` preserves saved custom minutes. Legacy appointments without `durationMinutes` are treated as thirty minutes, and omitted policy means `schedule`. Removing a closure restores the hours allowed by the weekly schedule.
 
 Temporary-password sessions receive anonymous slot availability: their patient-specific busy periods are not applied, and `excludeAppointmentId` is rejected until password rotation.
+
+## Doctor new-booking status
+
+- `GET /doctors/:doctorId/booking-status` → `{doctor:{id,name},acceptingNewBookings,revision,latestChange}` (administrator).
+- `POST /doctors/:doctorId/booking-status {acceptingNewBookings,reason,expectedRevision,requestId}` → `{context,change,receipt}` (administrator; 201 new / 200 exact retry).
+- `GET /doctors/:doctorId/booking-status/history?page&pageSize` → `{items,page,pageSize,total,totalPages}` (administrator). Defaults 1/25, sizes 10/25/50, page 1–1,000,000 clamped to the final page; stable newest timestamp/ID order with bounded SQL projection.
+
+Missing persisted status means accepting, with no invented baseline event. Existing and newly created profiles retain this default. Status is independent of profile/account edits, weekly sessions and time off. A revision binds doctor identity, the accepting boolean and latest immutable status event, so changes away and back invalidate an older draft. Doctor names and unrelated schedule/profile changes do not invalidate it. A new no-op returns 400; stale source and reused request identifiers return distinct 409 errors. Commands reject unknown fields, trim the private reason to 1–1000 characters, require a lowercase 64-character revision and normalize UUIDs to lowercase.
+
+Every private read/write/replay rechecks current administrator account, session, CSRF binding, password and MFA state under the transaction lock. Exact retry binds actor, doctor and normalized input including the original revision; it returns the original event/receipt alongside current context before stale/no-op checks. Changes retain doctor name, before/after booleans, reason, actor name and timestamp. Receipt fields are actorId, requestId, doctorId, expectedRevision and changeId. Status, event, receipt and audit writes commit or roll back together; history and command receipts are append-only.
+
+A paused doctor rejects new ordinary/custom appointments, new recurring series, new waitlist requests and fulfillment, and transfers from another doctor with 409. Public new-booking slot reads return an empty array. Existing scheduled same-doctor visits remain reschedulable and can change duration under all existing time, overlap and resource rules. This exception is derived from the authorized stored appointment's doctor, patient and scheduled status, never a client boolean or batch exclusion list. Authorized existing-appointment slot queries retain those choices. Moving away to an accepting doctor remains possible. Patient records, appointments, resources, procedures, weekly sessions, time off, reminders and login access are not changed by a pause.
+
+New-series previews bind the status event identity, including pause/resume changes away and back. Existing same-doctor series moves do not become stale merely because booking status changed. Existing custom-booking and series command receipts replay after a pause; this release adds no retry identity to the ordinary appointment or waitlist APIs. Existing waiting requests remain readable and withdrawable. Public projections, calendars and care summaries exclude private status evidence.
 
 ## Reviewed weekly availability
 

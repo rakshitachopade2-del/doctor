@@ -5,6 +5,7 @@ import type { Appointment, Doctor, Patient, User } from '../shared/types.ts';
 import type { WaitlistEntry } from '../shared/waitlist.ts';
 import { addDays, clinicToday, get, id, nowISO, type DB } from './db.ts';
 import { notifyPatient } from './activity.ts';
+import { doctorAcceptingNewBookings, DOCTOR_BOOKING_PAUSED } from './doctor-booking.ts';
 
 interface WaitlistContext {
   db: DB;
@@ -164,6 +165,7 @@ export function createWaitlist({
   ) {
     const value = entry(req, waitlistId);
     requireWaiting(value);
+    if (!doctorAcceptingNewBookings(db, value.doctorId)) return fail(409, DOCTOR_BOOKING_PAUSED);
     if (patientConfirmed !== true)
       fail(
         400,
@@ -241,6 +243,7 @@ export function createWaitlist({
         createdAt: nowISO(),
       };
       transaction(() => {
+        if (!doctorAcceptingNewBookings(db, doctor.id)) return fail(409, DOCTOR_BOOKING_PAUSED);
         // Expiry is derived from the clinic date; only the operational claim is removed.
         // The original request and its history remain intact.
         db.prepare('DELETE FROM waitlistActive WHERE endDate<?').run(today);

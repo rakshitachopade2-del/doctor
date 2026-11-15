@@ -14,6 +14,7 @@ import {
 } from '../components/ui';
 import type { Doctor, User, Patient } from '../../shared/types';
 import { ClinicConfigurationPanel } from '../components/ClinicConfigurationPanel';
+import { DoctorBookingStatusControls } from '../components/DoctorBookingStatus';
 export function SettingsPage() {
   const doctors = useResource<Doctor[]>('/api/doctors');
   const users = useResource<User[]>('/api/users');
@@ -145,23 +146,33 @@ export function SettingsPage() {
             ) : (
               <div className="team-list">
                 {doctors.data?.map((d) => (
-                  <div className="team-row" key={d.id}>
+                  <div
+                    className="team-row doctor-booking-team-row"
+                    key={d.id}
+                    data-doctor-id={d.id}
+                  >
                     <Avatar name={d.name} color={d.color} />
-                    <div className="grow">
+                    <div className="grow doctor-booking-team-main">
                       <strong>{d.name}</strong>
                       <small>
                         {d.qualifications} · {d.specialties.join(', ')}
                       </small>
                     </div>
-                    <button
-                      className="button button-secondary button-small"
-                      onClick={() => {
-                        setEditing(d);
-                        setModal('doctor');
-                      }}
-                    >
-                      Edit profile
-                    </button>
+                    <div className="doctor-booking-team-tools">
+                      <button
+                        className="button button-secondary button-small"
+                        onClick={() => {
+                          setEditing(d);
+                          setModal('doctor');
+                        }}
+                      >
+                        Edit profile
+                      </button>
+                      <DoctorBookingStatusControls
+                        doctor={d}
+                        onSaved={() => void doctors.reload()}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -184,7 +195,12 @@ export function SettingsPage() {
             {users.error ? (
               <ErrorState message={users.error} retry={users.reload} />
             ) : (
-              <div className="table-wrap">
+              <div
+                className="table-wrap"
+                role="region"
+                tabIndex={0}
+                aria-label="Team member accounts; scroll horizontally for all columns"
+              >
                 <table className="data-table">
                   <thead>
                     <tr>

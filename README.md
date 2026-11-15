@@ -37,6 +37,7 @@ These are intentionally public **development-only credentials**. Production star
 - **Waitlist:** patient and reception requests with a preferred clinician, mode and date window; explicit confirmation before booking; atomic appointment linkage, withdrawal and retained history. Requests do not reserve slots.
 - **Availability:** per-doctor weekly sessions, breaks, consultation modes, 15/20/30/45/60-minute consultation defaults, doctor leave, and clinic-wide closures. Reviewed weekly saves preserve drafts during conflicts, support safe retries and retain private before/after history while protecting existing bookings.
 - **Time-off management:** edit or cancel doctor leave and clinic holidays with safe retries, private change history and paginated upcoming, past and cancelled views. Cancellation retains the original record and respects other overlapping closures.
+- **Doctor booking controls:** administrators can pause or resume a doctor's new appointments and waitlist requests with private reasons/history, while existing same-doctor visits remain manageable.
 - **Clinic workspace:** daily dashboard, seven-day appointment activity, searchable patients, registration, and follow-up worklists.
 - **Record search:** paginated patient and appointment lists, historical appointment filters, and administrator audit search beyond the latest 500 entries. Staff views load 25 matching records per page.
 - **Staff attendance:** personal clock-in/out, private attendance history, administrator missed-entry corrections and voids, and filtered timesheets with CSV export. Original entries and reasons remain recorded.
@@ -126,6 +127,14 @@ In **Availability & time off**, use the time-off list to browse upcoming, past, 
 An entry's doctor or whole-clinic scope stays fixed. To correct its scope, cancel it and create a separate entry. Partial-day hours apply on every included date in India Standard Time. Edits that overlap protected appointments are rejected without changing any visits. Stale edits retain your draft for refreshed review; uncertain saves retain their exact request for retry.
 
 Cancelling time off keeps its dates, label and history. Hours become bookable only where the weekly schedule and any other closures permit. Cancelled entries cannot be restored; add a new entry when needed. Existing closures are retained without inventing earlier authorship, and records deleted before this release cannot be recovered automatically. No external service or manual setup is required.
+
+## Pause a doctor's new bookings
+
+In **Settings → Your team**, use the doctor's booking-status control to pause or resume new bookings. Each change requires a private reason and review; history is administrator-only. Stale drafts require refreshed review, and an uncertain save can be retried without creating another change.
+
+A pause blocks new ordinary/custom appointments, new recurring series, new waitlist requests and fulfillment, and transferring another doctor's appointment onto the paused doctor. Existing scheduled visits can still be rescheduled with the same doctor or have their length changed under the normal availability and resource rules. Moving a visit to an accepting doctor remains possible. Existing clinical records, appointments, waiting requests, reminders and account access are preserved.
+
+Paused profiles remain visible with a clear status. Patients cannot start a new booking or waiting request for them, but can manage their existing same-doctor visits. Weekly hours and time off remain intact. Existing and newly created profiles accept bookings by default; review their schedule before offering appointments. Profile editing and account suspension do not change booking status. No external service or manual migration is required.
 
 ## Protect sign-in with an authenticator
 
@@ -331,7 +340,7 @@ npm run test:e2e
 npm run test:production
 ```
 
-API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5209** and API ports **3011–3037**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5210** and API ports **3011–3038**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
 
 The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards. Follow-up and activity tests cover stale-review rejection, preserved check-in versions, same-day corrections, private assessment redaction, module pauses, recipient isolation, stable pagination, and read-state changes that leave clinical review work unchanged.
 

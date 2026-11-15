@@ -45,12 +45,21 @@ export function WaitlistJoinModal({
   const [reason, setReason] = useState(initialReason);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const selectedDoctor = doctors.data?.find((doctor) => doctor.id === doctorId);
+  const paused = selectedDoctor?.acceptingNewBookings === false;
   useEffect(() => {
-    if (!doctorId && doctors.data?.length) setDoctorId(doctors.data[0].id);
+    if (!doctorId && doctors.data?.length)
+      setDoctorId(doctors.data.find((doctor) => doctor.acceptingNewBookings !== false)?.id ?? '');
   }, [doctorId, doctors.data]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
+    if (paused || !selectedDoctor) {
+      setError(
+        'Choose a clinician who is accepting new bookings. Existing waiting requests remain available.',
+      );
+      return;
+    }
     if (!doctorId || !reason.trim() || endDate < startDate) {
       setError('Choose a clinician, a valid date range, and the reason for your visit.');
       return;
@@ -65,6 +74,7 @@ export function WaitlistJoinModal({
       onCreated(entry);
     } catch (problem) {
       setError(message(problem));
+      doctors.reload();
     } finally {
       setBusy(false);
     }
@@ -98,13 +108,35 @@ export function WaitlistJoinModal({
               disabled={busy}
               onChange={(event) => setDoctorId(event.target.value)}
             >
+              {!doctorId && <option value="">Choose a clinician</option>}
               {doctors.data.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>
+                <option
+                  key={doctor.id}
+                  value={doctor.id}
+                  disabled={doctor.acceptingNewBookings === false}
+                >
                   {doctor.name}
+                  {doctor.acceptingNewBookings === false ? ' · New bookings paused' : ''}
                 </option>
               ))}
             </select>
           </Field>
+          {(paused || doctors.data.every((doctor) => doctor.acceptingNewBookings === false)) && (
+            <div className="notice patient-waitlist-paused">
+              <p>
+                {paused
+                  ? `${selectedDoctor!.name} is not accepting new bookings or new waitlist requests. Choose another clinician or contact the clinic.`
+                  : 'No clinicians are accepting new waitlist requests right now. Contact the clinic for help.'}
+              </p>
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => void doctors.reload()}
+              >
+                Refresh booking status
+              </button>
+            </div>
+          )}
           <Field label="Preferred consultation mode">
             <select
               value={mode}
@@ -165,7 +197,7 @@ export function WaitlistJoinModal({
               {error}
             </div>
           )}
-          <button className="button button-primary" disabled={busy || !doctorId}>
+          <button className="button button-primary" disabled={busy || !selectedDoctor || paused}>
             {busy ? 'Saving request…' : 'Join waitlist'}
             <ListPlus size={16} />
           </button>
@@ -177,6 +209,7 @@ export function WaitlistJoinModal({
 
 export function PatientWaitlistPanel() {
   const requests = useResource<WaitlistEntry[]>('/api/waitlist');
+  const doctors = useResource<Doctor[]>('/api/doctors');
   const [join, setJoin] = useState(false);
   const [withdraw, setWithdraw] = useState<WaitlistEntry | null>(null);
   const [history, setHistory] = useState(false);
@@ -212,6 +245,8 @@ export function PatientWaitlistPanel() {
     return () => cancelAnimationFrame(frame);
   }, [selected, requests.data, requests.loading, join, withdraw]);
   function renderEntry(entry: WaitlistEntry) {
+    const doctor = doctors.data?.find((item) => item.id === entry.doctorId);
+    const paused = doctor?.acceptingNewBookings === false;
     return (
       <article
         className={`patient-waitlist-entry${selected === entry.id ? ' patient-waitlist-selected' : ''}`}
@@ -245,17 +280,36 @@ export function PatientWaitlistPanel() {
           <p className="patient-waitlist-reason">Withdrawal note: {entry.cancellationReason}</p>
         )}
         {entry.status === 'waiting' && (
-          <div className="patient-waitlist-actions">
-            <Link
-              className="button button-secondary button-small"
-              to={`/book?waitlist=${encodeURIComponent(entry.id)}`}
-            >
-              Choose an available time
-            </Link>
-            <button className="button button-ghost button-small" onClick={() => setWithdraw(entry)}>
-              Withdraw request
-            </button>
-          </div>
+          <>
+            {paused && (
+              <p className="patient-waitlist-help">
+                New bookings paused. Your waiting request is retained and can still be withdrawn.
+                Contact the clinic for help.
+              </p>
+            )}
+            {!doctors.loading && (doctors.error || !doctor) && (
+              <p className="patient-waitlist-help">
+                Booking status is unavailable. Refresh requests to try again; your request is
+                retained.
+              </p>
+            )}
+            <div className="patient-waitlist-actions">
+              {!doctors.loading && !doctors.error && doctor && !paused && (
+                <Link
+                  className="button button-secondary button-small"
+                  to={`/book?waitlist=${encodeURIComponent(entry.id)}`}
+                >
+                  Choose an available time
+                </Link>
+              )}
+              <button
+                className="button button-ghost button-small"
+                onClick={() => setWithdraw(entry)}
+              >
+                Withdraw request
+              </button>
+            </div>
+          </>
         )}
         {entry.status === 'booked' && (
           <Link className="text-link" to="/my-care/record?tab=visits">
@@ -299,7 +353,10 @@ export function PatientWaitlistPanel() {
           <button
             className="button button-ghost button-small"
             disabled={requests.loading}
-            onClick={requests.reload}
+            onClick={() => {
+              void requests.reload();
+              void doctors.reload();
+            }}
           >
             <RefreshCw size={14} />
             Refresh requests

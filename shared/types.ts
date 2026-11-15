@@ -28,6 +28,8 @@ export interface Doctor {
   languages: string[];
   color: string;
   appointmentDurationMinutes?: number;
+  /** Hydrated operational status; absent legacy values mean accepting new bookings. */
+  acceptingNewBookings?: boolean;
 }
 export interface Patient {
   id: string;

@@ -1,18 +1,24 @@
 # Release verification
 
-Release **1.32.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
+Release **1.33.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |
 | ------------------------------- | ------------------------------------------------------- |
 | TypeScript                      | Passed                                                  |
-| API and online-backup tests     | 574 passed                                              |
-| Browser and accessibility tests | 110 passed                                              |
+| API and online-backup tests     | 590 passed                                              |
+| Browser and accessibility tests | 114 passed                                              |
 | Production frontend build       | Passed                                                  |
 | Fresh production startup        | Passed                                                  |
 | Production dependency audit     | 0 vulnerabilities reported                              |
 | Prettier and whitespace checks  | Passed                                                  |
 | Docker Compose configuration    | Valid                                                   |
 | Docker image build/runtime      | Passed: image build and disposable production container |
+
+The 16 doctor-booking API checks cover legacy/new accepting defaults, independent status revisions, changes away and back, no-op rejection, strict inputs, exact actor/doctor/payload-bound retries and unchanged profile bytes. Pauses block new ordinary/custom/series appointments, waitlist joins/fulfillment and incoming doctor transfers. Existing same-doctor patient moves, custom length changes and real multi-visit series swaps remain usable, preserving resources and original booking receipts. Client flags, unrelated or terminal appointment IDs and batch exclusion IDs cannot enable the stored-visit exception. New-series previews detect pause/resume changes; existing same-doctor previews remain stable. Twenty-eight private-route account/session/MFA race combinations, external pauses before booking locks, atomic failure rollback, competing connections, immutable evidence, restart and bounded coherent history pages are checked. Public directory fields expose the status boolean without private evidence.
+
+Four doctor-booking browser journeys cover public paused profiles, direct patient booking links, new waitlist restrictions, retained requests and withdrawal, existing visit/calendar/resource continuity, staff custom and recurring bookings, and exact previously committed receipts after pause. Uncommitted custom and series attempts recover after definitive pause/stale errors while preserving draft details and requiring a new confirmed request. Administrator status drafts survive changes away and back, malformed confirmations, later errors and wrong-actor receipts; history is private and paginated. Held authorization and mutation responses cannot alter a later route. Paused patient booking and administrator history receive 320-pixel accessibility checks and screenshots; the team account table has keyboard access to horizontal scrolling.
+
+Local and disposable-container production smoke checks pause a synthetic doctor, reject new/custom/waitlist bookings and new waiting requests, preserve an existing request, and verify authorized same-doctor slots. A pause/resume cycle invalidates an earlier new-series preview, while legacy profile editing leaves status unchanged. An existing custom visit is rescheduled and its length changed while paused; original custom and status receipts remain usable. Resumption restores new slots. Private reasons and receipts stay out of public doctor profiles, calendars and care summaries; anonymous, patient and logged-out private access is rejected. All data is synthetic and nothing is deployed.
 
 The 17 time-off API checks cover reviewed creation, edits and retained cancellation; fixed identity/scope; strict date/time schemas; unchanged-value rejection; changes away and back; and actor/operation/record-bound retries after later cancellation, doctor renaming and actual date expiry. Overlapping entries remain independent and partial-day hours repeat on every inclusive date. Full recorded booking intervals, custom lengths and existing current-day active-visit rules are preserved. Sixty-three authentication and seven ownership race combinations revalidate current permissions under the lock. Twenty-six injected mutation failure points plus read failures verify atomic active projection, retained record, event, command and audit writes. Concurrent connections, legacy compatibility, unchanged migrated row bytes, immutable evidence, restart, indexed bounded list/history pagination and coherent count/page snapshots are checked. Closure changes invalidate stale recurring-series previews without rewriting their origins or appointments.
 

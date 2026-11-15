@@ -219,6 +219,11 @@ export function DiscoverPage() {
                   <span className="doctor-label">DERMATOLOGIST</span>
                 </div>
                 <h3>{doctor.name}</h3>
+                <Badge tone={doctor.acceptingNewBookings === false ? 'neutral' : 'green'}>
+                  {doctor.acceptingNewBookings === false
+                    ? 'New bookings paused'
+                    : 'Accepting new bookings'}
+                </Badge>
                 <p className="doctor-qualification">{doctor.qualifications}</p>
                 <p className="muted">
                   {doctor.title} · {doctor.experience} years of experience
@@ -244,9 +249,15 @@ export function DiscoverPage() {
                     <strong>{money(doctor.fee)}</strong>
                     <span>Consultation fee</span>
                   </div>
-                  <Link to={`/book?doctor=${doctor.id}`} className="button button-primary">
-                    View availability <ArrowUpRight size={16} />
-                  </Link>
+                  {doctor.acceptingNewBookings === false ? (
+                    <p className="doctor-paused-copy">
+                      Existing appointments remain booked. Contact the clinic for help.
+                    </p>
+                  ) : (
+                    <Link to={`/book?doctor=${doctor.id}`} className="button button-primary">
+                      View availability <ArrowUpRight size={16} />
+                    </Link>
+                  )}
                 </div>
               </Card>
             ))}
@@ -390,23 +401,31 @@ function BookingForm() {
   }, [waitlistEntry?.id, appointmentId]);
   useEffect(() => {
     if (!appointmentId && !waitlistId && !doctorId && doctors.data?.length)
-      setDoctorId(doctors.data[0].id);
+      setDoctorId(doctors.data.find((value) => value.acceptingNewBookings !== false)?.id ?? '');
   }, [doctors.data, doctorId, appointmentId, waitlistId]);
   const doctor = doctors.data?.find((value) => value.id === doctorId);
+  const sameDoctorVisit = existing?.status === 'scheduled' && existing.doctorId === doctorId;
+  const bookingPaused = doctor?.acceptingNewBookings === false && !sameDoctorVisit;
   const customLength = existing?.durationPolicy === 'custom';
   const durationMinutes = customLength
     ? (existing.durationMinutes ?? 30)
     : (doctor?.appointmentDurationMinutes ?? 30);
   const slots = useResource<string[]>(
-    doctorId && date
+    doctorId && date && !bookingPaused
       ? `/api/slots?doctorId=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}&mode=${mode}${appointmentId ? `&excludeAppointmentId=${encodeURIComponent(appointmentId)}` : ''}`
       : null,
   );
-  const availableSlots = [...(slots.data ?? [])];
+  const availableSlots = bookingPaused ? [] : [...(slots.data ?? [])];
   availableSlots.sort();
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy || slots.loading) return;
+    if (bookingPaused) {
+      setError(
+        'This doctor is not accepting new bookings. Choose another doctor or contact the clinic.',
+      );
+      return;
+    }
     if (!time || !availableSlots.includes(time)) {
       setTime('');
       setError('Choose an available appointment time.');
@@ -448,6 +467,7 @@ function BookingForm() {
       setError(errorMessage(problem));
       setTime('');
       slots.reload();
+      doctors.reload();
       if (waitlistId) waitlist.reload();
     } finally {
       setBusy(false);
@@ -609,6 +629,33 @@ function BookingForm() {
           </span>
         </div>
       )}
+      {doctor?.acceptingNewBookings === false && (
+        <section className="notice booking-pause-notice" aria-label="Doctor booking status">
+          <strong>New bookings paused</strong>
+          <p>
+            {sameDoctorVisit
+              ? `${doctor.name} is not accepting new bookings. You can still change the time of your existing visit, subject to availability. Your appointment stays booked until a change is confirmed.`
+              : waitlistEntry
+                ? `${doctor.name} is not accepting new bookings. Your waiting request is retained and can still be withdrawn. Contact the clinic for help; no appointment has been reserved.`
+                : `${doctor.name} is not accepting new bookings or new waitlist requests. Choose another dermatologist below or contact the clinic. Existing appointments remain booked.`}
+          </p>
+          {waitlistEntry && (
+            <Link
+              className="text-link"
+              to={`/my-care?waitlist=${encodeURIComponent(waitlistEntry.id)}`}
+            >
+              View my waitlist requests
+            </Link>
+          )}
+          <button
+            type="button"
+            className="button button-secondary button-small"
+            onClick={() => void doctors.reload()}
+          >
+            Refresh booking status
+          </button>
+        </section>
+      )}
       <form onSubmit={submit} className="booking-grid">
         <div className="stack">
           <Card>
@@ -626,7 +673,10 @@ function BookingForm() {
                       name="doctor"
                       value={item.id}
                       checked={doctorId === item.id}
-                      disabled={!!waitlistEntry}
+                      disabled={
+                        !!waitlistEntry ||
+                        (item.acceptingNewBookings === false && existing?.doctorId !== item.id)
+                      }
                       onChange={() => {
                         setDoctorId(item.id);
                         setTime('');
@@ -636,6 +686,9 @@ function BookingForm() {
                     <span>
                       <strong>{item.name}</strong>
                       <small>{item.specialties.join(' · ')}</small>
+                      {item.acceptingNewBookings === false && (
+                        <small className="booking-paused-label">New bookings paused</small>
+                      )}
                     </span>
                     <strong>{money(item.fee)}</strong>
                   </label>
@@ -647,6 +700,14 @@ function BookingForm() {
                 description="Contact the clinic to arrange your visit."
               />
             )}
+            {!!doctors.data?.length &&
+              !doctorId &&
+              doctors.data.every((item) => item.acceptingNewBookings === false) && (
+                <p className="notice">
+                  No doctors are accepting new bookings right now. Existing appointments remain
+                  booked. Contact the clinic for help.
+                </p>
+              )}
           </Card>
           <Card>
             <h2 className="section-title">02 / A convenient time</h2>
@@ -671,7 +732,11 @@ function BookingForm() {
             <p className="slot-label">
               Available start times <span className="muted">· Asia/Kolkata</span>
             </p>
-            {slots.loading ? (
+            {bookingPaused ? (
+              <p className="muted">
+                New appointment times are unavailable while this doctor’s new bookings are paused.
+              </p>
+            ) : slots.loading ? (
               <Loading />
             ) : slots.error && doctorId ? (
               <ErrorState message={slots.error} retry={slots.reload} />
@@ -791,6 +856,7 @@ function BookingForm() {
               type="submit"
               disabled={
                 busy ||
+                bookingPaused ||
                 slots.loading ||
                 !!slots.error ||
                 !doctorId ||
@@ -818,7 +884,7 @@ function BookingForm() {
                 <button
                   type="button"
                   className="button button-secondary full-width"
-                  disabled={!doctorId}
+                  disabled={!doctorId || bookingPaused}
                   onClick={() => setJoinWaitlist(true)}
                 >
                   Join waitlist

@@ -41,6 +41,8 @@ Existing walk-in records can receive portal accounts only after an administrator
 
 Configure each doctor in **Availability & time off** before opening bookings. New and existing profiles without a saved schedule default to Monday–Saturday, 09:00–18:00 with 30-minute appointments. Choose weekly sessions, consultation mode per session, and a 15/20/30/45/60-minute duration; add breaks by splitting a day into sessions. Administrators can add whole-clinic holidays, and linked doctors can manage their own availability and time off. Reception has read-only access. Schedule changes that conflict with existing future appointments are rejected; arrange the affected visits first.
 
+Doctor booking-status tables are created automatically, with existing and newly created profiles accepting by default. Administrators can pause new appointments and waitlist requests in **Settings → Your team**, retaining existing visits and allowing same-doctor rescheduling under normal rules. Private status history and retry identities are included in the ordinary SQLite backup. Account suspension, public profile edits and schedules remain separate controls. No provider, environment setting or manual migration is required.
+
 A database seeded in demo mode is deliberately rejected by production. Keep demo and production databases separate; importing fictional records is not a production migration.
 
 Clinic details and care modules use independent forms in Clinic settings. Each reviewed change needs a private reason; use Configuration history to inspect retained before/after values. Review current values after a stale edit, and use the pending request's retry after an uncertain response. Public hours are descriptive; configure bookable hours separately under Scheduling.

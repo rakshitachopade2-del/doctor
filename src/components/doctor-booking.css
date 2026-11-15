@@ -1,0 +1,112 @@
+.doctor-booking-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.doctor-booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.doctor-booking-source,
+.doctor-booking-latest,
+.doctor-booking-change,
+.doctor-booking-empty {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  min-width: 0;
+}
+.doctor-booking-source {
+  background: #f4f8f5;
+}
+.doctor-booking-source p,
+.doctor-booking-change p {
+  margin: 0;
+}
+.doctor-booking-reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.doctor-booking-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.doctor-booking-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+.doctor-booking-confirm input {
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+}
+.doctor-booking-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0.8rem 0 0;
+}
+.doctor-booking-comparison dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.doctor-booking-comparison dd {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+}
+.doctor-booking-form,
+.doctor-booking-history,
+.doctor-booking-notice,
+.doctor-booking-conflict {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.doctor-booking-notice {
+  display: block;
+}
+.doctor-booking-form button,
+.doctor-booking-history button,
+.doctor-booking-controls button {
+  white-space: normal;
+}
+.doctor-booking-team-row {
+  flex-wrap: wrap;
+}
+.doctor-booking-team-main {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.doctor-booking-team-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.doctor-booking-schedule {
+  margin-bottom: 1rem;
+}
+@media (max-width: 520px) {
+  .doctor-booking-comparison {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.65rem;
+  }
+  .doctor-booking-team-tools,
+  .doctor-booking-controls {
+    width: 100%;
+  }
+  .doctor-booking-controls .badge {
+    white-space: normal;
+  }
+  .doctor-booking-actions {
+    width: 100%;
+  }
+  .doctor-booking-actions .button {
+    flex: 1 1 130px;
+  }
+}

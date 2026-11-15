@@ -873,7 +873,7 @@ export function ClinicBookingModal({
     pendingCustomBooking?.body.doctorId ||
       waitlist?.doctorId ||
       appointment?.doctorId ||
-      doctors[0]?.id ||
+      doctors.find((doctor) => doctor.acceptingNewBookings !== false)?.id ||
       '',
   );
   const minimumDate = waitlist && waitlist.startDate > today() ? waitlist.startDate : today();
@@ -891,6 +891,9 @@ export function ClinicBookingModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const locked = saving || uncertain;
+  const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+  const sameDoctorVisit = !!appointment && appointment.doctorId === doctorId;
+  const newBookingPaused = selectedDoctor?.acceptingNewBookings === false && !sameDoctorVisit;
   const patients = useResource<Patient[]>('/api/patients');
   const customQuery = new URLSearchParams({
     doctorId,
@@ -901,7 +904,10 @@ export function ClinicBookingModal({
     durationMinutes: customMinutes,
   });
   const slots = useVisitData(
-    doctorId && date && (!waitlist || (date >= minimumDate && date <= waitlist.endDate))
+    doctorId &&
+      date &&
+      !newBookingPaused &&
+      (!waitlist || (date >= minimumDate && date <= waitlist.endDate))
       ? customBooking
         ? patientId && validCustomMinutes(Number(customMinutes))
           ? `/api/visit-duration/slots?${customQuery}`
@@ -926,6 +932,10 @@ export function ClinicBookingModal({
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (saving) return;
+    if (newBookingPaused && !attempt)
+      return setError(
+        'This doctor is not accepting new bookings. Choose another doctor or contact the clinic.',
+      );
     if (!time) return setError('Choose an available appointment time.');
     if (!attempt && (slots.loading || slots.error || !slots.data?.includes(time)))
       return setError('Choose a currently available appointment time.');
@@ -995,10 +1005,14 @@ export function ClinicBookingModal({
       setError(errorText(e));
       if (customBooking && sent) {
         const known =
-          !uncertain &&
-          !isVisitRequestCollision(e) &&
-          e instanceof ApiError &&
-          [400, 401, 403, 404, 409].includes(e.status);
+          (e instanceof ApiError &&
+            e.status === 409 &&
+            e.message ===
+              'This doctor is not accepting new bookings. Choose another doctor or contact the clinic.') ||
+          (!uncertain &&
+            !isVisitRequestCollision(e) &&
+            e instanceof ApiError &&
+            [400, 401, 403, 404, 409].includes(e.status));
         if (!known) {
           setAttempt(sent);
           setUncertain(true);
@@ -1095,8 +1109,13 @@ export function ClinicBookingModal({
             >
               <option value="">Select a doctor</option>
               {doctors.map((d) => (
-                <option key={d.id} value={d.id}>
+                <option
+                  key={d.id}
+                  value={d.id}
+                  disabled={d.acceptingNewBookings === false && appointment?.doctorId !== d.id}
+                >
                   {d.name}
+                  {d.acceptingNewBookings === false ? ' · New bookings paused' : ''}
                 </option>
               ))}
             </select>
@@ -1113,6 +1132,15 @@ export function ClinicBookingModal({
             />
           </Field>
         </div>
+        {selectedDoctor?.acceptingNewBookings === false && (
+          <p className="notice" role="status">
+            {sameDoctorVisit
+              ? 'New bookings are paused for this doctor. This existing visit can still be rescheduled with the same doctor, subject to available hours and time off.'
+              : waitlist
+                ? 'New bookings are paused for this doctor. This waitlist request remains saved and can be withdrawn; it cannot be booked while the pause is in effect.'
+                : 'New bookings are paused for this doctor. Choose another doctor. Your selected doctor has not been changed.'}
+          </p>
+        )}
         {!appointment && (
           <Field label="Consultation mode">
             <select
@@ -1253,6 +1281,7 @@ export function ClinicBookingModal({
             className="button button-primary"
             disabled={
               saving ||
+              (!uncertain && newBookingPaused) ||
               (!uncertain && (slots.loading || !!slots.error)) ||
               !time ||
               !patientId ||

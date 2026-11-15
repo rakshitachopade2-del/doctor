@@ -189,7 +189,7 @@ export function registerAppointmentSeriesRescheduling(app: Express, context: Con
             customDurationMinutes:
               before.durationPolicy === 'custom' ? (before.durationMinutes ?? 30) : undefined,
           },
-          { excludeAppointmentIds: selectedIds, asOf },
+          { excludeAppointmentIds: selectedIds, existingAppointmentId: before.id, asOf },
         );
       } catch (error) {
         if (!knownConflict(error)) throw error;
@@ -422,7 +422,7 @@ export function registerAppointmentSeriesRescheduling(app: Express, context: Con
                   ? (visit.before.durationMinutes ?? 30)
                   : undefined,
             },
-            { excludeAppointmentIds: selectedIds },
+            { excludeAppointmentIds: selectedIds, existingAppointmentId: visit.before.id },
           );
         } catch (error) {
           if (!knownConflict(error)) throw error;

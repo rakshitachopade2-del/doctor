@@ -610,6 +610,7 @@ export function createApp(options: AppOptions = {}) {
         .map((doctor) => ({
           ...doctor,
           appointmentDurationMinutes: scheduling.schedule(doctor.id).durationMinutes,
+          acceptingNewBookings: scheduling.acceptingNewBookings(doctor.id),
         })),
     ),
   );

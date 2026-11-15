@@ -98,6 +98,8 @@ export function AppointmentSeriesModal({
     [busy, setBusy] = useState<'preview' | 'save' | null>(null),
     [error, setError] = useState('');
   const locked = !!busy || phase !== 'editing';
+  const newBookingPaused =
+    doctors.data?.find((doctor) => doctor.id === doctorId)?.acceptingNewBookings === false;
   function invalidate() {
     setPreview(null);
     setPatientConfirmed(false);
@@ -167,6 +169,12 @@ export function AppointmentSeriesModal({
       await book(attempt);
       return;
     }
+    if (newBookingPaused) {
+      setError(
+        'This doctor is not accepting new bookings. Choose another doctor or contact the clinic.',
+      );
+      return;
+    }
     if (!preview) {
       await prepare();
       return;
@@ -207,16 +215,21 @@ export function AppointmentSeriesModal({
     } catch (cause) {
       if (!current()) return;
       setError(seriesFailure(cause));
-      if (unknown) setPhase('uncertain');
-      else if (
+      if (
         cause instanceof ApiError &&
         cause.status === 409 &&
-        !/request (?:id|identifier)|idempot|already used|different.*payload/i.test(cause.message)
+        (cause.message === 'The series preview changed. Review every visit again before booking.' ||
+          (!unknown &&
+            !/request (?:id|identifier)|idempot|already used|different.*payload/i.test(
+              cause.message,
+            )))
       ) {
         setPhase('conflict');
+        setAttempt(null);
         setPatientConfirmed(false);
         setReviewed(false);
-      } else if (cause instanceof ApiError && [400, 403, 404, 422, 429].includes(cause.status)) {
+      } else if (unknown) setPhase('uncertain');
+      else if (cause instanceof ApiError && [400, 403, 404, 422, 429].includes(cause.status)) {
         setAttempt(null);
         setPhase('editing');
         setPatientConfirmed(false);
@@ -271,12 +284,23 @@ export function AppointmentSeriesModal({
             >
               <option value="">Select a doctor</option>
               {doctors.data?.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>
+                <option
+                  key={doctor.id}
+                  value={doctor.id}
+                  disabled={doctor.acceptingNewBookings === false}
+                >
                   {doctor.name}
+                  {doctor.acceptingNewBookings === false ? ' · New bookings paused' : ''}
                 </option>
               ))}
             </select>
           </Field>
+          {newBookingPaused && (
+            <p className="notice" role="status">
+              New bookings are paused for this doctor. Choose another doctor to create a recurring
+              series. Your selected doctor has not been changed.
+            </p>
+          )}
           <div className="appointment-series-field-row">
             <Field label="First visit date">
               <input
@@ -482,6 +506,7 @@ export function AppointmentSeriesModal({
             className="button button-primary"
             disabled={
               !!busy ||
+              (phase !== 'uncertain' && newBookingPaused) ||
               phase === 'conflict' ||
               patients.loading ||
               doctors.loading ||

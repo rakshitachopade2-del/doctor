@@ -7,6 +7,7 @@ import { useResource, useSession } from '../lib';
 import { Avatar, Card, EmptyState, ErrorState, Field, Loading, PageHeader } from '../components/ui';
 import './scheduling.css';
 import { TimeOffPanel } from '../components/TimeOffPanel';
+import { DoctorBookingBadge } from '../components/DoctorBookingStatus';
 import {
   WeeklyAvailabilityEditor,
   WeeklyAvailabilityReadonly,
@@ -115,6 +116,21 @@ export function SchedulingPage() {
               </span>
             </div>
           </div>
+          {selectedDoctor && (
+            <div className="notice doctor-booking-schedule">
+              <div>
+                <DoctorBookingBadge accepting={selectedDoctor.acceptingNewBookings !== false} />
+                <p>
+                  {selectedDoctor.acceptingNewBookings === false
+                    ? 'New appointments and waitlist requests are paused for this doctor. Existing visits can still be managed and rescheduled with the same doctor. Weekly hours and time off remain in effect.'
+                    : 'Weekly hours and time off determine available times for new and existing visits.'}
+                </p>
+                {isAdmin && (
+                  <Link to="/clinic/settings?tab=team">Manage doctor booking status</Link>
+                )}
+              </div>
+            </div>
+          )}
           {!canEdit && (
             <div className="notice schedule-readonly">
               <CalendarClock size={18} />

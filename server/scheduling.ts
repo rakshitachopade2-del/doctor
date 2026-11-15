@@ -6,6 +6,14 @@ import type { DoctorSchedule, ScheduleClosure, SchedulingData } from '../shared/
 import { addDays, clinicToday, get, list, type DB } from './db.ts';
 import { registerWeeklyAvailability } from './weekly-availability.ts';
 import { registerTimeOff } from './time-off.ts';
+import {
+  initializeDoctorBooking,
+  registerDoctorBooking,
+  doctorAcceptingNewBookings,
+  doctorAllowsBooking,
+  doctorBookingRevision,
+  DOCTOR_BOOKING_PAUSED,
+} from './doctor-booking.ts';
 
 type Fail = (status: number, message: string) => never;
 interface SchedulingContext {
@@ -24,6 +32,8 @@ interface SlotQuery {
   customDurationMinutes?: number;
 }
 interface BookingValidationOptions {
+  /** Internal stored source for batch rescheduling; never inferred from excluded IDs. */
+  existingAppointmentId?: string;
   /** Internal batch-only exclusions. Never accepted by a public request schema. */
   excludeAppointmentIds?: readonly string[];
   /** A coherent preview instant; commit callers must revalidate with the live clock. */
@@ -43,6 +53,7 @@ const modeMatches = (windowMode: 'in-person' | 'online' | 'both', mode?: 'in-per
 
 export function createScheduling(context: SchedulingContext) {
   const { db, fail } = context;
+  initializeDoctorBooking(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS doctorSchedules (id TEXT PRIMARY KEY REFERENCES doctors(id), data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS scheduleClosures (id TEXT PRIMARY KEY, doctorId TEXT REFERENCES doctors(id), startDate TEXT NOT NULL, endDate TEXT NOT NULL, data TEXT NOT NULL);
@@ -140,6 +151,8 @@ export function createScheduling(context: SchedulingContext) {
   }
   function availableSlots(query: SlotQuery): string[] {
     const value = schedule(query.doctorId);
+    if (!doctorAllowsBooking(db, query.doctorId, query.excludeAppointmentId, query.patientId))
+      return [];
     const duration = query.customDurationMinutes ?? value.durationMinutes;
     const cadence = query.customDurationMinutes === undefined ? value.durationMinutes : 5;
     const today = clinicToday();
@@ -188,6 +201,15 @@ export function createScheduling(context: SchedulingContext) {
         month: '2-digit',
         day: '2-digit',
       }).format(new Date(asOf));
+    if (
+      !doctorAllowsBooking(
+        db,
+        query.doctorId,
+        options.existingAppointmentId ?? query.excludeAppointmentId,
+        query.patientId,
+      )
+    )
+      return fail(409, DOCTOR_BOOKING_PAUSED);
     const duration = query.customDurationMinutes ?? value.durationMinutes;
     const cadence = query.customDurationMinutes === undefined ? value.durationMinutes : 5;
     if (query.date < today || query.date > addDays(today, 180))
@@ -248,6 +270,7 @@ export function createScheduling(context: SchedulingContext) {
       staff(req);
       res.json(schedule(String(req.params.doctorId)));
     });
+    registerDoctorBooking(app, { ...context, transaction });
     registerWeeklyAvailability(app, {
       ...context,
       transaction,
@@ -285,5 +308,13 @@ export function createScheduling(context: SchedulingContext) {
       },
     });
   }
-  return { schedule, availableSlots, validateBooking, register, transaction };
+  return {
+    schedule,
+    availableSlots,
+    validateBooking,
+    register,
+    transaction,
+    acceptingNewBookings: (doctorId: string) => doctorAcceptingNewBookings(db, doctorId),
+    bookingStatusRevision: (doctorId: string) => doctorBookingRevision(db, doctorId),
+  };
 }

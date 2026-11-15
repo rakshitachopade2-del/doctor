@@ -947,6 +947,186 @@ try {
   for (const path of [timeOffListUrl, timeOffUrl, `${timeOffUrl}/history`])
     assert.equal((await fetch(path)).status, 401);
 
+  const doctorBookingPath = `/doctors/${visitDoctor.id}/booking-status`;
+  const doctorBookingUrl = `${base}/api${doctorBookingPath}`;
+  const privateDoctorBookingReason = 'Synthetic private pause of new doctor bookings';
+  const pausedBookingError =
+    'This doctor is not accepting new bookings. Choose another doctor or contact the clinic.';
+  async function doctorBookingRead(suffix = '') {
+    const response = await fetch(`${doctorBookingUrl}${suffix}`, { headers: apiHeaders });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('cache-control'), /no-store/);
+    return response.json();
+  }
+  const acceptingDoctor = await doctorBookingRead();
+  assert.equal(acceptingDoctor.acceptingNewBookings, true);
+  assert.equal(acceptingDoctor.latestChange, null);
+  assert.equal((await doctorBookingRead('/history')).total, 0);
+  const pausedDoctorCommand = {
+    acceptingNewBookings: false,
+    reason: privateDoctorBookingReason,
+    expectedRevision: acceptingDoctor.revision,
+    requestId: randomUUID(),
+  };
+  await visitWrite(
+    doctorBookingPath,
+    { ...pausedDoctorCommand, acceptingNewBookings: true, requestId: randomUUID() },
+    400,
+  );
+  const retainedWaiting = await visitWrite(
+    '/waitlist',
+    {
+      patientId: patient.id,
+      doctorId: visitDoctor.id,
+      mode: 'in-person',
+      startDate: visitDay,
+      endDate: visitDay,
+      reason: 'Synthetic retained waiting request',
+    },
+    201,
+  );
+  const bookingPolicySeriesInput = {
+    patientId: patient.id,
+    doctorId: visitDoctor.id,
+    firstDate: visitDay,
+    time: '14:05',
+    mode: 'in-person',
+    reason: 'Synthetic series for doctor booking status',
+    count: 2,
+    intervalWeeks: 1,
+    durationPolicy: 'custom',
+    durationMinutes: 45,
+  };
+  const beforePauseSeries = await visitWrite(
+    '/appointment-series/preview',
+    bookingPolicySeriesInput,
+  );
+  assert.equal(beforePauseSeries.canBook, true);
+  const pausedDoctor = await visitWrite(doctorBookingPath, pausedDoctorCommand, 201);
+  assert.equal(pausedDoctor.context.acceptingNewBookings, false);
+  assert.equal(pausedDoctor.change.before, true);
+  assert.equal(pausedDoctor.change.after, false);
+  assert.equal(pausedDoctor.receipt.actorId, account.user.id);
+  const pausedPublicDoctors = await (await fetch(`${base}/api/doctors`)).json();
+  assert.equal(
+    pausedPublicDoctors.find((doctor) => doctor.id === visitDoctor.id).acceptingNewBookings,
+    false,
+  );
+  for (const privateValue of [
+    privateDoctorBookingReason,
+    pausedDoctorCommand.requestId,
+    pausedDoctor.change.id,
+  ])
+    assert.equal(JSON.stringify(pausedPublicDoctors).includes(privateValue), false);
+  assert.deepEqual(await timeOffSlots(), []);
+  const sameDoctorSlots = await (
+    await fetch(
+      `${base}/api/slots?doctorId=${visitDoctor.id}&date=${visitDay}&mode=in-person&excludeAppointmentId=${customVisit.appointment.id}`,
+      { headers: apiHeaders },
+    )
+  ).json();
+  assert.ok(sameDoctorSlots.includes('09:05'));
+  assert.ok(sameDoctorSlots.includes('09:10'));
+  const deniedNewBooking = await visitWrite(
+    '/appointments',
+    {
+      patientId: patient.id,
+      doctorId: visitDoctor.id,
+      date: visitDay,
+      time: '12:00',
+      mode: 'in-person',
+      reason: 'Synthetic blocked new appointment',
+      waitlistId: retainedWaiting.id,
+      patientConfirmed: true,
+    },
+    409,
+  );
+  assert.equal(deniedNewBooking.error, pausedBookingError);
+  assert.equal(
+    (
+      await visitWrite(
+        '/visit-duration/bookings',
+        { ...customBookingBody, time: '12:05', requestId: randomUUID() },
+        409,
+      )
+    ).error,
+    pausedBookingError,
+  );
+  assert.equal(
+    (
+      await visitWrite(
+        '/waitlist',
+        {
+          patientId: patient.id,
+          doctorId: visitDoctor.id,
+          mode: 'online',
+          startDate: visitDay,
+          endDate: visitDay,
+          reason: 'Synthetic blocked new waiting request',
+        },
+        409,
+      )
+    ).error,
+    pausedBookingError,
+  );
+  const waitingWhilePaused = await (
+    await fetch(`${base}/api/waitlist`, { headers: apiHeaders })
+  ).json();
+  assert.deepEqual(
+    waitingWhilePaused.find((entry) => entry.id === retainedWaiting.id),
+    retainedWaiting,
+  );
+  const pausedSeriesPreview = await visitWrite(
+    '/appointment-series/preview',
+    bookingPolicySeriesInput,
+  );
+  assert.equal(pausedSeriesPreview.canBook, false);
+  assert.ok(
+    pausedSeriesPreview.visits.every((visit) => visit.blockedReason === pausedBookingError),
+  );
+  await visitWrite(`/doctors/${visitDoctor.id}`, visitDoctor, 200, 'PATCH');
+  assert.deepEqual(await doctorBookingRead(), pausedDoctor.context);
+  const resumedDoctor = await visitWrite(
+    doctorBookingPath,
+    {
+      acceptingNewBookings: true,
+      reason: 'Synthetic resume for booking-status preview review',
+      expectedRevision: pausedDoctor.context.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const afterResumeSeries = await visitWrite(
+    '/appointment-series/preview',
+    bookingPolicySeriesInput,
+  );
+  assert.equal(afterResumeSeries.canBook, true);
+  assert.notEqual(afterResumeSeries.revision, beforePauseSeries.revision);
+  await visitWrite(
+    '/appointment-series',
+    {
+      input: bookingPolicySeriesInput,
+      expectedRevision: beforePauseSeries.revision,
+      patientConfirmed: true,
+      privateNote: '',
+      requestId: randomUUID(),
+    },
+    409,
+  );
+  const pausedDoctorAgain = await visitWrite(
+    doctorBookingPath,
+    {
+      ...pausedDoctorCommand,
+      expectedRevision: resumedDoctor.context.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  assert.deepEqual(await availabilityRead(), beforeBlockedAvailability);
+  assert.deepEqual(await timeOffRead(), cancelledTimeOff.context);
+  for (const path of [doctorBookingUrl, `${doctorBookingUrl}/history`])
+    assert.equal((await fetch(path)).status, 401);
+
   const customReplay = await visitWrite('/visit-duration/bookings', customBookingBody);
   assert.equal(customReplay.event.id, customVisit.event.id);
   const movedVisit = await visitWrite(
@@ -974,6 +1154,7 @@ try {
   assert.ok(calendarText.includes(`LOCATION:${profileCommand.profile.address}`));
   assert.equal(calendarText.includes(privateAvailabilityReason), false);
   assert.equal(calendarText.includes(privateTimeOffReason), false);
+  assert.equal(calendarText.includes(privateDoctorBookingReason), false);
   assert.ok(calendarText.includes(`DTEND:${calendarStamp(visitStart + 90 * 60000)}`));
   const durationUrl = `${base}/api/appointments/${movedVisit.id}/duration`;
   const durationResponse = await fetch(durationUrl, { headers: apiHeaders });
@@ -991,6 +1172,26 @@ try {
   });
   assert.equal(restoredDuration.appointment.durationMinutes, 20);
   assert.equal(restoredDuration.appointment.durationPolicy, 'schedule');
+  assert.deepEqual(await doctorBookingRead(), pausedDoctorAgain.context);
+  const finalResumedDoctor = await visitWrite(
+    doctorBookingPath,
+    {
+      acceptingNewBookings: true,
+      reason: 'Synthetic resume after existing-visit continuity checks',
+      expectedRevision: pausedDoctorAgain.context.revision,
+      requestId: randomUUID(),
+    },
+    201,
+  );
+  const originalPauseReplay = await visitWrite(doctorBookingPath, pausedDoctorCommand);
+  assert.deepEqual(originalPauseReplay.change, pausedDoctor.change);
+  assert.deepEqual(originalPauseReplay.receipt, pausedDoctor.receipt);
+  assert.deepEqual(originalPauseReplay.context, finalResumedDoctor.context);
+  assert.equal((await doctorBookingRead('/history?pageSize=10')).total, 4);
+  assert.ok((await timeOffSlots()).includes('12:00'));
+  await visitWrite(`/waitlist/${retainedWaiting.id}/cancel`, {
+    reason: 'Synthetic waiting request withdrawn after pause verification',
+  });
   assert.equal((await fetch(durationUrl)).status, 401);
   const privateSeriesNote = 'Synthetic private recurring booking note';
   const seriesInput = {
@@ -1680,6 +1881,9 @@ try {
   assert.equal(JSON.stringify(summary).includes(privateTimeOffReason), false);
   assert.equal(JSON.stringify(summary).includes(timeOffCommand.requestId), false);
   assert.equal(JSON.stringify(summary).includes(createdTimeOff.change.id), false);
+  assert.equal(JSON.stringify(summary).includes(privateDoctorBookingReason), false);
+  assert.equal(JSON.stringify(summary).includes(pausedDoctorCommand.requestId), false);
+  assert.equal(JSON.stringify(summary).includes(pausedDoctor.change.id), false);
   assert.equal(JSON.stringify(summary).includes(privateSchedulingReason), false);
   assert.equal(JSON.stringify(summary).includes(privateSeriesNote), false);
   assert.equal(JSON.stringify(summary).includes(privateCancellationReason), false);
@@ -2111,6 +2315,8 @@ try {
     assert.equal((await fetch(path, { headers: apiHeaders })).status, 401);
   for (const path of [timeOffListUrl, timeOffUrl, `${timeOffUrl}/history`])
     assert.equal((await fetch(path, { headers: apiHeaders })).status, 401);
+  for (const path of [doctorBookingUrl, `${doctorBookingUrl}/history`])
+    assert.equal((await fetch(path, { headers: apiHeaders })).status, 401);
   assert.equal((await fetch(seriesUrl, { headers: apiHeaders })).status, 401);
   for (const privateCancellationUrl of [cancellationUrl, `${cancellationUrl}/context`])
     assert.equal((await fetch(privateCancellationUrl, { headers: apiHeaders })).status, 401);
@@ -2216,6 +2422,14 @@ try {
     assert.equal((await fetch(path, { headers: patientHeaders })).status, 403);
   for (const path of [timeOffListUrl, timeOffUrl, `${timeOffUrl}/history`])
     assert.equal((await fetch(path, { headers: patientHeaders })).status, 403);
+  for (const path of [doctorBookingUrl, `${doctorBookingUrl}/history`])
+    assert.equal((await fetch(path, { headers: patientHeaders })).status, 403);
+  const patientBookingStatusWrite = await fetch(doctorBookingUrl, {
+    method: 'POST',
+    headers: patientHeaders,
+    body: JSON.stringify(pausedDoctorCommand),
+  });
+  assert.equal(patientBookingStatusWrite.status, 403);
   const patientTimeOffWrite = await fetch(`${base}/api/time-off`, {
     method: 'POST',
     headers: patientHeaders,
@@ -2819,7 +3033,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

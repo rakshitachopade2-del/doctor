@@ -120,3 +120,14 @@
     display: none;
   }
 }
+
+.patient-waitlist-paused {
+  display: grid;
+  gap: 10px;
+}
+.patient-waitlist-paused p {
+  margin: 0;
+}
+.patient-waitlist-paused .button {
+  justify-self: start;
+}
