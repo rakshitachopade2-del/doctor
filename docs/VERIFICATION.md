@@ -1,5 +1,17 @@
 # Release verification
 
+## 1.40.0 · Private care messages
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **690 API, backup and recovery tests** and **143 browser journeys** passed. Browser projects ran in batches against separate synthetic databases. The affected messaging, activity, patient, clinic and configuration journeys passed again after the final composer correction.
+
+The seven new API groups exercise sends in both directions, exact retries across separate database connections, changed sender/patient/text collisions and a restart. They check current authority for conversation reads, both writers and replay of both stored outcomes. Failures injected at the message, audit, recipient notice and command writes roll back the send. After the clinic resumes messaging, a request rejected during the pause still returns its original rejection.
+
+Five new browser journeys exercise locked drafts, lost replies after commit, mismatched confirmations, new attempts after a proven rejection and recovery across navigation. They check late read/write responses after leaving and returning, clearing pending text on sign-out and keyboard access to scrollable conversations. When an administrator pauses an open conversation, a recovered confirmation stays visible through a slow or failed availability check and new sends stay disabled. The 320-pixel checks include axe and a hit test on the action control.
+
+The production smoke check sends messages in both directions, confirms one message, audit and inbox update per send and checks that the private text stays out of the care summary and activity feed. A backup restored into a separate database returns the original receipt during a pause and the original rejection after resumption. TypeScript, the production build, local startup, the recovery rehearsal, formatting and Compose configuration passed. The production dependency audit reported zero vulnerabilities. Container image and runtime checks were unavailable on this machine because it has no Docker engine.
+
+## Previous release evidence
+
 Release **1.39.0**, verified locally on **15 November 2026** using Node.js **24.13.0** and Google Chrome through Playwright.
 
 | Check                           | Result                                                  |

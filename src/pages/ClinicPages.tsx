@@ -13,7 +13,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Send,
   UserPlus,
   Video,
   X,
@@ -22,11 +21,9 @@ import type {
   Appointment,
   AppointmentStatus,
   CarePlan,
-  ClinicSettings,
   Doctor,
   Encounter,
   Medication,
-  Message,
   Patient,
 } from '../../shared/types';
 import type { WaitlistEntry } from '../../shared/waitlist';
@@ -37,6 +34,8 @@ import { useSearchPage } from '../record-search';
 import { Pagination } from '../components/Pagination';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
 import { DocumentsPanel } from '../components/DocumentsPanel';
+import { CareMessageComposer } from '../components/CareMessageComposer';
+import { checkedMessageSettings, useCareMessages } from '../components/care-message-helpers';
 import { AppointmentResourcesModal } from '../components/AppointmentResourcesModal';
 import { VisitDurationModal } from '../components/VisitDurationModal';
 import { AppointmentSeriesModal } from '../components/AppointmentSeriesModal';
@@ -1995,7 +1994,7 @@ export function PatientDetailPage() {
       await clinicalRead.reload();
     },
   };
-  const settings = useResource<ClinicSettings>('/api/settings');
+  const settings = useAppointmentBookingData('/api/settings', checkedMessageSettings);
   const [recordParams, setRecordParams] = useSearchParams();
   const requestedTab = recordParams.get('tab');
   const validTabs: RecordTab[] = [
@@ -2551,13 +2550,18 @@ export function PatientDetailPage() {
           </p>
         </Card>
       )}
-      {tab === 'messages' && (
-        <PatientMessages
-          patientId={patient.id}
-          patientName={patient.name}
-          canSend={settings.data?.modules.followUp !== false}
-        />
-      )}
+      {tab === 'messages' &&
+        (settings.loading ? (
+          <Loading />
+        ) : settings.error ? (
+          <ErrorState message={settings.error} retry={settings.reload} />
+        ) : (
+          <PatientMessages
+            patientId={patient.id}
+            patientName={patient.name}
+            canSend={settings.data?.modules.followUp === true}
+          />
+        ))}
       {documentation && (
         <ConsultationNoteModal
           key={`consultation:${id}:${location.key}:${session.user?.id}:${documentation.source?.id ?? 'create'}`}
@@ -3000,27 +3004,7 @@ function PatientMessages({
   patientName: string;
   canSend: boolean;
 }) {
-  const { data, loading, error, reload } = useResource<Message[]>(
-    `/api/messages?patientId=${patientId}`,
-  );
-  const [body, setBody] = useState('');
-  const [saving, setSaving] = useState(false);
-  const toast = useToast();
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    if (!body.trim()) return;
-    setSaving(true);
-    try {
-      await api('/api/messages', { method: 'POST', body: { patientId, body: body.trim() } });
-      setBody('');
-      reload();
-      toast('Message added to the patient’s inbox.');
-    } catch (e) {
-      toast(errorText(e), 'error');
-    } finally {
-      setSaving(false);
-    }
-  }
+  const { data, loading, error, reload } = useCareMessages(patientId);
   return (
     <Card>
       <div className="clinic-panel-heading">
@@ -3042,7 +3026,12 @@ function PatientMessages({
           description="Send a follow-up question or clarify an instruction for your patient."
         />
       ) : (
-        <div className="clinical-messages">
+        <div
+          className="clinical-messages"
+          role="region"
+          aria-label="Conversation history"
+          tabIndex={0}
+        >
           {data.map((m) => (
             <div
               key={m.id}
@@ -3057,32 +3046,7 @@ function PatientMessages({
           ))}
         </div>
       )}
-      {canSend ? (
-        <form className="stack clinic-message-composer" onSubmit={send}>
-          <Field label="Message to patient">
-            <textarea
-              required
-              rows={3}
-              value={body}
-              maxLength={4000}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Write a clear, patient-friendly message…"
-            />
-          </Field>
-          <div className="row between">
-            <span className="muted small">In-app delivery. No SMS or WhatsApp is sent.</span>
-            <button className="button button-primary" disabled={saving || !body.trim()}>
-              <Send size={16} />
-              {saving ? 'Sending…' : 'Send message'}
-            </button>
-          </div>
-        </form>
-      ) : (
-        <div className="notice">
-          New messages are paused because the clinic has disabled the follow-up module. Previous
-          messages remain available.
-        </div>
-      )}
+      <CareMessageComposer patientId={patientId} canSend={canSend} onSaved={reload} />
     </Card>
   );
 }

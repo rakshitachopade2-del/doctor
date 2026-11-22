@@ -31,7 +31,6 @@ import type {
   ClinicSettings,
   Doctor,
   Intake,
-  Message,
   PatientRecord,
 } from '../../shared/types';
 import { api, formatDate, money, today, useResource, useSession, useToast } from '../lib';
@@ -48,6 +47,8 @@ import {
 } from '../components/ui';
 import './patient.css';
 import { DocumentsPanel } from '../components/DocumentsPanel';
+import { CareMessageComposer } from '../components/CareMessageComposer';
+import { checkedMessageSettings, useCareMessages } from '../components/care-message-helpers';
 import { PatientWorkflowPanel } from './PatientWorkflowPanel';
 import type { WaitlistEntry } from '../../shared/waitlist';
 import { PatientWaitlistPanel, WaitlistJoinModal } from '../components/PatientWaitlist';
@@ -2379,7 +2380,7 @@ function UploadModal({
 
 export function MessagesPage() {
   const { session } = useSession();
-  const settings = useResource<ClinicSettings>('/api/settings');
+  const settings = useAppointmentBookingData('/api/settings', checkedMessageSettings);
   if (!session?.user) return <Navigate to="/login?next=%2Fmy-care%2Fmessages" replace />;
   if (session.user.role !== 'patient' || !session.user.patientId)
     return <Navigate to="/clinic/follow-ups" replace />;
@@ -2389,27 +2390,7 @@ export function MessagesPage() {
 }
 
 function PatientMessages({ patientId, settings }: { patientId: string; settings: ClinicSettings }) {
-  const messages = useResource<Message[]>(`/api/messages?patientId=${patientId}`);
-  const [body, setBody] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const toast = useToast();
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!body.trim()) return;
-    setBusy(true);
-    setError('');
-    try {
-      await api('/api/messages', { method: 'POST', body: { patientId, body: body.trim() } });
-      setBody('');
-      messages.reload();
-      toast('Message saved to your clinic’s inbox.');
-    } catch (problem) {
-      setError(errorMessage(problem));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const messages = useCareMessages(patientId);
   return (
     <div className="patient-messages-page">
       <PageHeader
@@ -2435,7 +2416,13 @@ function PatientMessages({ patientId, settings }: { patientId: string; settings:
               Refresh
             </button>
           </div>
-          <div className="patient-message-thread" aria-live="polite">
+          <div
+            className="patient-message-thread"
+            role="region"
+            aria-label="Conversation history"
+            aria-live="polite"
+            tabIndex={0}
+          >
             {messages.loading ? (
               <Loading />
             ) : messages.error ? (
@@ -2471,38 +2458,11 @@ function PatientMessages({ patientId, settings }: { patientId: string; settings:
               />
             )}
           </div>
-          {settings.modules.followUp ? (
-            <form onSubmit={submit} className="message-composer">
-              <Field label="Your message">
-                <textarea
-                  className="textarea"
-                  rows={3}
-                  required
-                  maxLength={2000}
-                  value={body}
-                  onChange={(event) => setBody(event.target.value)}
-                  placeholder="Write a question or update for your clinic…"
-                />
-              </Field>
-              {error && (
-                <div role="alert" className="notice notice-error">
-                  {error}
-                </div>
-              )}
-              <div className="row between">
-                <span className="muted small">{body.length}/2000</span>
-                <button className="button button-primary" disabled={busy || !body.trim()}>
-                  {busy ? 'Sending…' : 'Send message'}
-                  <ArrowUpRight size={17} />
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="notice">
-              Messaging is paused. Your existing conversation remains available. Contact the clinic
-              directly for new questions.
-            </div>
-          )}
+          <CareMessageComposer
+            patientId={patientId}
+            canSend={settings.modules.followUp}
+            onSaved={messages.reload}
+          />
         </Card>
         <aside className="stack">
           <Card>

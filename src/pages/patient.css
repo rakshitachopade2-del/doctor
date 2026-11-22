@@ -1178,6 +1178,10 @@
   display: grid;
   gap: 14px;
 }
+.message-composer .care-message-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .patient-message-layout aside h3 {
   font-size: 15px;
   margin: 16px 0 10px;

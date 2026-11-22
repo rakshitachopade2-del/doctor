@@ -38,8 +38,8 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
-import { useSession, api, useToast, useResource } from './lib';
-import type { ActivityFeed } from '../shared/activity';
+import { useSession, api, useToast } from './lib';
+import { useAppointmentBookingData } from './components/appointment-booking-helpers';
 import './pages/activity.css';
 import { Avatar, Badge, ErrorState, Loading } from './components/ui';
 import './operations.css';
@@ -270,12 +270,21 @@ function WorkspaceLayout({ patient = false }: { patient?: boolean }) {
   const [menu, setMenu] = useState(false);
   const [query, setQuery] = useState('');
   const user = session.user!;
-  const activity = useResource<ActivityFeed>(
+  const activity = useAppointmentBookingData(
     user.role !== 'receptionist' ? '/api/activity?limit=1' : null,
+    (value) => {
+      if (
+        !value ||
+        typeof value !== 'object' ||
+        !('unreadCount' in value) ||
+        typeof value.unreadCount !== 'number' ||
+        !Number.isSafeInteger(value.unreadCount) ||
+        value.unreadCount < 0
+      )
+        throw new Error('The unread activity count could not be loaded.');
+      return { unreadCount: value.unreadCount };
+    },
   );
-  useEffect(() => {
-    if (user.role !== 'receptionist') void activity.reload();
-  }, [location.pathname, activity.reload, user.role]);
   useEffect(() => {
     const refresh = () => {
       if (user.role !== 'receptionist') void activity.reload();

@@ -515,6 +515,29 @@ async function rehearseRecovery() {
     const copy = await call(source, `${summaryPath}/copies`, patient, 'POST', copyInput, 201);
     const copyPath = `${summaryPath}/copies/${copy.copy.id}/download`;
     const copyBytes = await call(source, copyPath, patient, 'GET', undefined, 200, true);
+    const messagePath = '/messages/send';
+    const messageCommand = {
+      requestId: randomUUID(),
+      patientId,
+      body: 'Private synthetic message retained through recovery',
+    };
+    const sentMessage = await call(source, messagePath, patient, 'POST', messageCommand, 201);
+    const { modules } = await call(source, '/settings', admin);
+    await call(source, '/settings', admin, 'PATCH', { modules: { ...modules, followUp: false } });
+    const pausedMessageCommand = {
+      ...messageCommand,
+      requestId: randomUUID(),
+      body: 'Synthetic draft submitted while messaging was paused',
+    };
+    const pausedMessage = await call(
+      source,
+      messagePath,
+      patient,
+      'POST',
+      pausedMessageCommand,
+      403,
+    );
+    assert.equal(pausedMessage.code, 'MESSAGE_NOT_SENT');
     const grant = await call(
       source,
       `/accounts/${registered.user.id}/recovery`,
@@ -733,6 +756,23 @@ async function rehearseRecovery() {
     );
     const restoredClinicalRecord = await call(target, `/patients/${patientId}`, newAdmin);
     assert.deepEqual(restoredClinicalRecord.encounters, [consultation.encounter]);
+    assert.deepEqual(
+      await call(target, messagePath, newPatient, 'POST', messageCommand),
+      sentMessage,
+    );
+    await call(target, '/settings', newAdmin, 'PATCH', { modules });
+    assert.deepEqual(
+      await call(target, messagePath, newPatient, 'POST', pausedMessageCommand, 403),
+      pausedMessage,
+    );
+    const thread = await call(target, `/messages?patientId=${patientId}`, newPatient);
+    assert.deepEqual(thread, [sentMessage.receipt.message]);
+    const restoredSummary = await call(target, summaryPath, newPatient);
+    assert.equal(restoredSummary.revision, summary.revision);
+    for (const command of [messageCommand, pausedMessageCommand]) {
+      assert.equal(JSON.stringify(restoredSummary).includes(command.body), false);
+      assert.equal(JSON.stringify(restoredClinicalRecord).includes(command.requestId), false);
+    }
     const restoredWorkflows = await call(
       target,
       `/patients/${patientId}/clinical-workflows`,

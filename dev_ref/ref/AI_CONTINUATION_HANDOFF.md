@@ -1,5 +1,7 @@
 # Dermatology platform: complete AI continuation handoff
 
+**Continuation checkpoint, 23 November 2026 (v1.40.0).** Both portal composers now support reliable private care-message sends. Section 7A and the v1.39 continuation prompt below are historical. On the next “continue,” start with **section 7B, reliable patient intake submission**. Inspect the current checkout, including local commits ahead of GitHub, before beginning work. The latest release checks and environment limitations are in [VERIFICATION](../../docs/VERIFICATION.md).
+
 Prepared on **20 November 2026**, Asia/Kolkata, for a new AI chat taking over this repository.
 
 This is a repository-grounded transfer of the product state, user preferences, completed work, remaining work, implementation constraints, and release process. Read this before proposing another feature. It is a snapshot; verify Git and source before assuming it is still current. Linked repository documentation contains the detailed contracts and evidence, so keep that documentation alongside this file.

@@ -305,6 +305,9 @@ Interactive fulfillment uses `POST /appointment-bookings` with `waitlistId`, exp
 - `GET /images/:id/file` → private image bytes with ownership checks.
 - `GET /messages?patientId=` → `Message[]` (clinician or owning patient).
 - `POST /messages {patientId?,body}` → `Message` (clinician or owning patient; follow-up module enabled). Messages have a 4,000-character limit and remain inside the platform.
+- `POST /messages/send {requestId,patientId,body}` → `{receipt:{requestId,actorId,actorName,actorRole,patientId,message}}`. Both portal composers use this endpoint. Send one UUID per intention and retry with the same patient and trimmed text (1–4,000 characters). A new send returns 201. An exact retry returns 200 with the original message, including its ID, timestamp and author at send time.
+
+The server checks current access before returning an earlier outcome. A reused UUID with a different actor, patient or text returns 409 to an otherwise authorized caller. A new command submitted while follow-up is paused receives 403 with `{code:'MESSAGE_NOT_SENT',requestId,actorId,patientId,body,message}`. This stored rejection remains final for that command after messaging resumes. Existing successes remain recoverable during the pause. An error without a matching rejection leaves the outcome uncertain.
 
 ## Reviewed consultation documentation
 

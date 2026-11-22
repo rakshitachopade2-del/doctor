@@ -14,6 +14,7 @@ import {
   receptionPatient,
   safeAllergyHistory,
 } from './patient-profile.ts';
+import { registerCareMessages } from './care-message.ts';
 import { registerCareSummary } from './care-summary.ts';
 import { registerCareSummaryCopies } from './care-summary-copies.ts';
 import {
@@ -1147,54 +1148,7 @@ export function createApp(options: AppOptions = {}) {
     );
     res.type(image.mimeType).send(Buffer.from(row.bytes));
   });
-  app.get('/api/messages', (req: AuthRequest, res) => {
-    const input = z.object({ patientId: required.optional() }).parse(req.query);
-    const patientId = ownPatient(req, input.patientId);
-    patientAccess(req, patientId);
-    res.json(list<Message>(db, 'messages', patientId).reverse());
-  });
-  app.post('/api/messages', (req: AuthRequest, res) => {
-    moduleEnabled('followUp');
-    const user = actor(req);
-    const input = z
-      .object({ patientId: required.optional(), body: text.min(1).max(4000) })
-      .parse(req.body);
-    const patientId = ownPatient(req, input.patientId);
-    patientAccess(req, patientId);
-    const message: Message = {
-      id: id(),
-      patientId,
-      body: input.body,
-      authorName: user.name,
-      authorRole: user.role,
-      createdAt: nowISO(),
-    };
-    scheduling.transaction(() => {
-      insert(db, 'messages', message);
-      audit(req, 'sent care message', 'message', message.id);
-      if (user.role === 'patient')
-        notifyClinicians(
-          db,
-          patientId,
-          `message:${message.id}`,
-          {
-            kind: 'message',
-            title: 'A patient sent a message',
-            detail: user.name,
-            href: `/clinic/patients/${patientId}?tab=messages`,
-          },
-          { excludeActorId: user.id },
-        );
-      else
-        notifyPatient(db, patientId, `message:${message.id}`, {
-          kind: 'message',
-          title: 'Your clinic sent a message',
-          detail: 'Open your private conversation to read it.',
-          href: '/my-care/messages',
-        });
-    });
-    res.status(201).json(message);
-  });
+  registerCareMessages(app, { db, ownPatient, patientAccess, audit, fail });
   app.get('/api/audit', (req: AuthRequest, res) => {
     actor(req, ['admin']);
     res.json(

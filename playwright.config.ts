@@ -182,6 +182,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)consultation-notes\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5215' },
     },
+    {
+      name: 'care-messages',
+      testMatch: /(?:^|\/)care-messages\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5216' },
+    },
   ],
   webServer: [
     {
@@ -381,6 +386,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3043 E2E_VITE_PORT=5215 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5215',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3044 E2E_VITE_PORT=5216 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5216',
       reuseExistingServer: false,
       timeout: 60000,
     },

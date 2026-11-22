@@ -3866,6 +3866,58 @@ try {
       assert.equal(denied.consultationOutcome, undefined);
     }
 
+  const messagePath = '/messages/send';
+  const threadPath = `/messages?patientId=${registeredSession.user.patientId}`;
+  const threadBefore = await reminderRead(threadPath, patientHeaders);
+  for (const [sender, headers, recipientHeaders] of [
+    [registeredSession.user, patientHeaders, verifiedHeaders],
+    [verified.user, verifiedHeaders, patientHeaders],
+  ]) {
+    const body = `Private synthetic message from ${sender.role}`;
+    const command = { patientId: registeredSession.user.patientId, body, requestId: randomUUID() };
+    const inboxPath = '/activity?limit=1';
+    const previousInbox = await reminderRead(inboxPath, recipientHeaders);
+    const saved = await ordinaryWrite(messagePath, command, headers);
+    const { message } = saved.receipt;
+    assert.match(message.id, /^[a-f0-9-]{36}$/);
+    assert.equal(new Date(message.createdAt).toISOString(), message.createdAt);
+    assert.deepEqual(saved.receipt, {
+      requestId: command.requestId,
+      actorId: sender.id,
+      actorName: sender.name,
+      actorRole: sender.role,
+      patientId: command.patientId,
+      message: {
+        id: message.id,
+        patientId: command.patientId,
+        body,
+        authorName: sender.name,
+        authorRole: sender.role,
+        createdAt: message.createdAt,
+      },
+    });
+    assert.deepEqual(await ordinaryWrite(messagePath, command, headers, 200), saved);
+    const inbox = await reminderRead(inboxPath, recipientHeaders);
+    assert.equal(inbox.unreadCount, previousInbox.unreadCount + 1);
+    assert.equal(inbox.items[0].kind, 'message');
+    assert.equal(JSON.stringify(inbox).includes(body), false);
+    const thread = await reminderRead(threadPath, patientHeaders);
+    assert.deepEqual(
+      thread.filter((item) => item.id === message.id),
+      [message],
+    );
+    const audits = await reminderRead(`/search/audit?entityType=message&entityId=${message.id}`);
+    assert.deepEqual(
+      audits.items.map((item) => item.action),
+      ['sent care message'],
+    );
+    const summary = await reminderRead(reminderSummaryPath, patientHeaders);
+    assert.equal(summary.revision, consultationSmokeSummary.revision);
+    assert.equal(JSON.stringify(summary).includes(body), false);
+    assert.equal(JSON.stringify(thread).includes(command.requestId), false);
+  }
+  assert.equal((await reminderRead(threadPath)).length, threadBefore.length + 2);
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,

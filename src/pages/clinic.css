@@ -474,10 +474,14 @@
   color: #626c5d;
 }
 .clinical-message p {
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
   font-size: 14px;
   line-height: 1.7;
   margin: 10px 0 0;
+}
+.clinic-message-composer .care-message-status {
+  display: block;
 }
 .clinic-message-composer {
   border-top: 1px solid #e3e9df;
