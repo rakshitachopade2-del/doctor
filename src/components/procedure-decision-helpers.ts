@@ -57,7 +57,15 @@ export function checkedDecisionProcedure(
     throw bad();
   const matches = value.procedures.filter((p) => p.id === procedureId);
   if (matches.length !== 1) throw bad();
-  const p = matches[0] as Record<string, unknown>;
+  return checkedProcedureRecord(matches[0], patientId, procedureId);
+}
+
+export function checkedProcedureRecord(
+  p: unknown,
+  patientId: string,
+  procedureId: string,
+): ProcedureRecord {
+  if (!object(p) || p.id !== procedureId || p.patientId !== patientId) throw bad();
   if (
     !text(p.title) ||
     !text(p.doctorName) ||

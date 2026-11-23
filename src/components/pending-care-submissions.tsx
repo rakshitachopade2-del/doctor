@@ -2,6 +2,7 @@ import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } f
 import type { CareMessageCommand } from '../../shared/care-message';
 import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
 import type { CarePlanAttempt } from './care-plan-creation-helpers';
+import type { CompletionAttempt } from './procedure-completion-helpers';
 import type { DecisionAttempt } from './procedure-decision-helpers';
 import type { ResultAttempt } from './investigation-result-helpers';
 import type { ReviewAttempt } from './follow-up-review-helpers';
@@ -13,6 +14,7 @@ import { useSession } from '../lib';
 
 interface PendingCareSubmissions {
   procedureDecisions: Map<string, DecisionAttempt>;
+  procedureCompletions: Map<string, CompletionAttempt>;
   investigationResults: Map<string, ResultAttempt>;
   followUpReviews: Map<string, ReviewAttempt>;
   checkInSubmission: { current: ReviewedCheckIn | null };
@@ -31,6 +33,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   const pending = useMemo(
     () => ({
       procedureDecisions: new Map<string, DecisionAttempt>(),
+      procedureCompletions: new Map<string, CompletionAttempt>(),
       investigationResults: new Map<string, ResultAttempt>(),
       followUpReviews: new Map<string, ReviewAttempt>(),
       checkInSubmission: { current: null as ReviewedCheckIn | null },
@@ -52,6 +55,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const clear = () => {
       pending.procedureDecisions.clear();
+      pending.procedureCompletions.clear();
       pending.investigationResults.clear();
       pending.followUpReviews.clear();
       pending.checkInSubmission.current = null;

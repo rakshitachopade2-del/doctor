@@ -232,6 +232,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)procedure-decision-recording\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5225' },
     },
+    {
+      name: 'procedure-completion-recording',
+      testMatch: /(?:^|\/)procedure-completion-recording\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5226' },
+    },
   ],
   webServer: [
     {
@@ -491,6 +496,13 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3053 E2E_VITE_PORT=5225 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5225',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command:
+        'E2E_API_PORT=3054 E2E_VITE_PORT=5226 E2E_APPOINTMENT_STATE_FIXTURES=1 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5226',
       reuseExistingServer: false,
       timeout: 60000,
     },

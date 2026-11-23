@@ -213,7 +213,10 @@ test('clinician preserves amendments, reviews attached results, and documents a 
   await dialog
     .getByLabel('Final aftercare instructions', { exact: true })
     .fill('Synthetic final instructions recorded and shared with the test patient.');
+  await dialog.getByRole('button', { name: 'Review completion', exact: true }).click();
+  await dialog.getByRole('checkbox').check();
   await dialog.getByRole('button', { name: 'Save procedure completion', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(procedure.getByText('Completed', { exact: true })).toBeVisible();
   await expect(

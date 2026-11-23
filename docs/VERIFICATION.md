@@ -1,5 +1,19 @@
 # Release verification
 
+## 1.50.0 · Procedure completion and aftercare
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **763 API, backup and recovery tests** and **198 browser journeys across 44 projects** passed. The production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for a container runtime check.
+
+On v1.49, a clinician completed a procedure linked to a past visit. The server stored the outcome, final aftercare, clinician and visit and sent one patient notice. Retrying the same request returned 409 with no original confirmation. The new clinic flow recovers that completion through the original reviewed request.
+
+Eight API regression groups exercise competing clinicians, exact concurrent retries, changing decisions and visit links, the clinic-time start boundary and current account access. Injected failures verify that the completion, audit, patient activity and command roll back together.
+
+Seven new Chrome journeys exercise an interrupted reply after commit, a request that never arrived, a renewed agreement, a future visit, cancellation, a competing clinician’s completion and a late reply while another procedure is open. They check that the original confirmation identifies the performing clinician and the recorded visit even after the live appointment changes. The review, retry, refusal and confirmation screens were exercised at 320 pixels with axe.
+
+The production smoke test exercises a patient withdrawing agreement before a clinician submits, then agreeing again. The first completion request retains its refusal. After reviewing the newer agreement, the clinician records the outcome and aftercare against the correct historical visit. Exact recovery leaves one completion audit and one aftercare notice. The linked appointment and patient invoices stay unchanged throughout.
+
+A v1.49 database was reopened with its existing completed and planned procedures. The old completion and linked visit survived exactly. A clinician completed the previously planned procedure using its existing agreement and recovered the new receipt. The backup rehearsal separately checked that the accepted completion, original appointment snapshot and stale refusal survived restoration.
+
 ## 1.49.0 · Recording and changing a procedure decision
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **755 API, backup and recovery tests** and **191 browser journeys across 43 projects** passed. The production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for a container runtime check.

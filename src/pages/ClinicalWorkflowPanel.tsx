@@ -29,6 +29,7 @@ import { useInvestigationResultSubmission } from '../components/InvestigationRes
 import { usePatientDocuments } from '../components/private-upload-helpers';
 import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
 import { ProcedureAppointmentModal } from '../components/ProcedureAppointmentModal';
+import { useProcedureCompletionRecording } from '../components/ProcedureCompletionModal';
 import { useProcedureDecisionRecording } from '../components/ProcedureDecisionModal';
 import { decisionMethods } from '../components/procedure-decision-helpers';
 import { ProcedurePlanModal } from '../components/ProcedurePlanModal';
@@ -46,7 +47,7 @@ type WorkflowAction =
   | { kind: 'cancel-investigation'; investigation: Investigation }
   | { kind: 'review'; investigation: Investigation; result: InvestigationResult }
   | {
-      kind: 'complete' | 'cancel-procedure' | 'scheduling';
+      kind: 'cancel-procedure' | 'scheduling';
       procedure: ProcedureRecord;
     };
 const failure = (error: unknown) =>
@@ -116,6 +117,7 @@ export function ClinicalWorkflowPanel({
     void resource.reload();
     void documents.reload();
   });
+  const completions = useProcedureCompletionRecording(patientId, patientName, resource.reload);
   const decisions = useProcedureDecisionRecording(patientId, patientName, resource.reload);
   const [action, setAction] = useState<WorkflowAction | null>(null);
   const [busy, setBusy] = useState('');
@@ -220,6 +222,7 @@ export function ClinicalWorkflowPanel({
       <div>
         {resultSubmission.controls}
         {decisions.controls}
+        {completions.controls}
         <Loading />
       </div>
     );
@@ -228,6 +231,7 @@ export function ClinicalWorkflowPanel({
       <div>
         {resultSubmission.controls}
         {decisions.controls}
+        {completions.controls}
         <ErrorState message={resource.error} retry={resource.reload} />
       </div>
     );
@@ -236,6 +240,7 @@ export function ClinicalWorkflowPanel({
       <>
         {resultSubmission.controls}
         {decisions.controls}
+        {completions.controls}
       </>
     );
   const investigations = data.investigations.filter(
@@ -246,6 +251,7 @@ export function ClinicalWorkflowPanel({
     <div className="cw-workspace">
       {resultSubmission.controls}
       {decisions.controls}
+      {completions.controls}
       <div className="cw-intro">
         <span className="cw-intro-icon">
           <Stethoscope size={24} />
@@ -695,13 +701,16 @@ export function ClinicalWorkflowPanel({
                             <MessageSquareText size={14} /> Record patient decision
                           </button>
                         )}
-                        <button
-                          className="button button-primary button-small"
-                          disabled={latest?.decision !== 'agreed'}
-                          onClick={() => setAction({ kind: 'complete', procedure })}
-                        >
-                          Document completion
-                        </button>
+                        {!completions.hasPending(procedure.id) && (
+                          <button
+                            data-procedure-completion={procedure.id}
+                            className="button button-primary button-small"
+                            disabled={latest?.decision !== 'agreed'}
+                            onClick={() => completions.open(procedure.id)}
+                          >
+                            Document completion
+                          </button>
+                        )}
                         <button
                           className="button button-ghost button-small"
                           onClick={() => setAction({ kind: 'cancel-procedure', procedure })}
@@ -754,13 +763,6 @@ export function ClinicalWorkflowPanel({
           procedureId={action.procedure.id}
           onClose={() => setAction(null)}
           onSaved={resource.reload}
-        />
-      )}
-      {action?.kind === 'complete' && (
-        <CompletionModal
-          procedure={action.procedure}
-          onClose={() => setAction(null)}
-          onSaved={afterSave}
         />
       )}
       {action?.kind === 'cancel-investigation' && (
@@ -885,45 +887,6 @@ function OrderModal({ patientId, ...callbacks }: ModalCallbacks & { patientId: s
       <div className="notice">
         This records your order and instructions. It does not send a request to a laboratory or
         interpret a result.
-      </div>
-    </ClinicalForm>
-  );
-}
-
-function CompletionModal({
-  procedure,
-  ...callbacks
-}: ModalCallbacks & { procedure: ProcedureRecord }) {
-  return (
-    <ClinicalForm
-      title="Document procedure completion"
-      endpoint={`/api/procedures/${procedure.id}/complete`}
-      payload={(form) => ({ outcome: form.get('outcome'), aftercare: form.get('aftercare') })}
-      label="Save procedure completion"
-      {...callbacks}
-    >
-      <p className="muted">{procedure.title}</p>
-      <Field label="Procedure outcome and notes">
-        <textarea
-          name="outcome"
-          required
-          rows={5}
-          maxLength={8000}
-          placeholder="What was performed, observations, and any relevant events"
-        />
-      </Field>
-      <Field label="Final aftercare instructions">
-        <textarea
-          name="aftercare"
-          required
-          rows={4}
-          maxLength={8000}
-          defaultValue={procedure.aftercare}
-        />
-      </Field>
-      <div className="notice">
-        Completion is preserved as a clinical record. Review the outcome and aftercare before
-        saving.
       </div>
     </ClinicalForm>
   );

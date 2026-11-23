@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test as base, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import type { ActivityFeed } from '../../shared/activity';
 import type {
   PatientClinicalWorkflows,
@@ -11,81 +10,34 @@ import type {
   ProcedureDecisionCommand,
   ProcedureDecisionResponse,
 } from '../../shared/procedure-decision';
-import type { Session } from '../../shared/types';
+import {
+  type Actor,
+  test,
+  patientId,
+  portal,
+  clinic,
+  workflows,
+  path,
+  dialog,
+  button,
+  title,
+  field,
+  checkbox,
+  login,
+  read,
+  post,
+  planFor,
+  current,
+  card,
+  mobile,
+  deferred,
+} from './procedure-fixtures';
 
-const patientId = 'patient-ananya';
-const portal = '/my-care/record?tab=workflows';
-const clinic = '/clinic/patients/' + patientId + '?tab=workup';
-const workflows = '/api/patients/' + patientId + '/clinical-workflows';
 const patientSave = 'Record my decision';
 const clinicSave = 'Save patient decision';
 const retry = 'Retry exact decision';
 const resume = 'Resume procedure decision';
-const path = (plan: ProcedureRecord) => '/api/procedures/' + plan.id;
 const recordPath = (plan: ProcedureRecord) => path(plan) + '/agreements/record';
-const dialog = (page: Page) => page.getByRole('dialog');
-const button = (page: Page, name: string) =>
-  dialog(page).getByRole('button', { name, exact: true });
-const title = (page: Page, name: string) =>
-  dialog(page).getByRole('heading', { name, exact: true });
-const field = (page: Page, name: string) => dialog(page).getByLabel(name, { exact: true });
-const checkbox = (page: Page) => dialog(page).getByRole('checkbox');
-type Actor = { api: APIRequestContext; session: Session };
-
-async function login(api: APIRequestContext, role: 'admin' | 'doctor' | 'patient'): Promise<Actor> {
-  const response = await api.post('/api/auth/login', {
-    data: { email: role + '@derma.demo', password: 'DemoClinic2026!' },
-  });
-  expect(response.status(), await response.text()).toBe(200);
-  return { api, session: await response.json() };
-}
-const test = base.extend<{ admin: Actor; patient: Actor }>({
-  admin: async ({ playwright, baseURL }, use) => {
-    const api = await playwright.request.newContext({ baseURL });
-    try {
-      await use(await login(api, 'admin'));
-    } finally {
-      await api.dispose();
-    }
-  },
-  patient: async ({ playwright, baseURL }, use) => {
-    const api = await playwright.request.newContext({ baseURL });
-    try {
-      await use(await login(api, 'patient'));
-    } finally {
-      await api.dispose();
-    }
-  },
-});
-async function read<T>(who: Actor, url: string): Promise<T> {
-  const response = await who.api.get(url);
-  expect(response.status(), await response.text()).toBe(200);
-  return response.json();
-}
-async function post<T>(who: Actor, url: string, data: unknown, status = 201): Promise<T> {
-  const response = await who.api.post(url, {
-    headers: { 'X-CSRF-Token': who.session.csrfToken! },
-    data,
-  });
-  expect(response.status(), await response.text()).toBe(status);
-  return response.json();
-}
-async function planFor(admin: Actor) {
-  return post<ProcedureRecord>(admin, '/api/procedures', {
-    patientId,
-    title: 'Procedure ' + randomUUID().slice(0, 8),
-    indication: 'Synthetic decision workflow.',
-    benefits: 'Discussed potential benefit.',
-    risks: 'Discussed potential risk.',
-    alternatives: 'Discussed other options.',
-    aftercare: 'Synthetic aftercare.',
-    estimatedCost: 'No charge for this test.',
-  });
-}
-async function current(who: Actor, plan: ProcedureRecord) {
-  const record = await read<PatientClinicalWorkflows>(who, workflows);
-  return record.procedures.find((p) => p.id === plan.id)!;
-}
 async function effects(
   admin: Actor,
   patient: Actor,
@@ -115,11 +67,6 @@ async function effects(
       (r) => r.title === 'Your procedure discussion was recorded' && r.detail === plan.title,
     ),
   ).toHaveLength(decisions.filter((r) => r.recordedByRole !== 'patient').length);
-}
-function card(page: Page, plan: ProcedureRecord, role: 'patient' | 'doctor' = 'patient') {
-  return page
-    .locator(role === 'patient' ? '.patient-procedure-card' : '.cw-procedure')
-    .filter({ has: page.getByRole('heading', { name: plan.title, exact: true }) });
 }
 async function open(
   page: Page,
@@ -166,25 +113,6 @@ async function send(page: Page, plan: ProcedureRecord, action: string, status: n
   expect(response.status()).toBe(status);
   return response;
 }
-async function mobile(page: Page, action: string, screenshot: string) {
-  await page.setViewportSize({ width: 320, height: 800 });
-  const target = button(page, action);
-  await target.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
-  await expect(target).toBeInViewport({ ratio: 1 });
-  expect(
-    await target.evaluate((el) => {
-      const b = el.getBoundingClientRect();
-      return el.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2));
-    }),
-  ).toBe(true);
-  expect(await dialog(page).evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-  expect(
-    (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze())
-      .violations,
-  ).toEqual([]);
-  await page.screenshot({ path: screenshot });
-}
-
 test('the portal recovers an earlier declined decision after a phone agreement and completion', async ({
   page,
   admin,
@@ -515,13 +443,6 @@ test('unresolved decision notes and request identities clear on reload and sign-
   await effects(admin, patient, plan, []);
 });
 
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
 test('a delayed reply for one procedure leaves another procedure’s reviewed decision and session intact', async ({
   page,
   admin,

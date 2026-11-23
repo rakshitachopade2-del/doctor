@@ -32,11 +32,13 @@ export function ProcedureVisit({
   linked,
   completed = false,
   planned = false,
+  patientView = true,
 }: {
   appointment: ProcedureAppointmentSnapshot | null | undefined;
   linked: boolean;
   completed?: boolean;
   planned?: boolean;
+  patientView?: boolean;
 }) {
   const [hours, minutes] = (appointment?.time ?? '00:00').split(':').map(Number);
   const end = hours * 60 + minutes + (appointment?.durationMinutes ?? 0);
@@ -62,7 +64,7 @@ export function ProcedureVisit({
             {appointment.durationPolicy === 'custom' && ' · Custom length'}
           </p>
           <p>Appointment status: {appointment.status.replaceAll('-', ' ')}</p>
-          {needsAttention && (
+          {needsAttention && patientView && (
             <p>Contact the clinic to confirm the visit for this planned procedure.</p>
           )}
         </>
@@ -75,7 +77,7 @@ export function ProcedureVisit({
               : 'No appointment is currently linked to this procedure.'}
         </p>
       )}
-      {!completed && (
+      {!completed && patientView && (
         <p className="small muted">
           A visit link does not change your recorded procedure decision.
           {appointment && (

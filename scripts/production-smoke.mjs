@@ -4602,6 +4602,150 @@ try {
     );
   }
 
+  const completionPlan = await ordinaryWrite('/procedures', {
+    patientId: resultPatient,
+    appointmentId: stateSmokeVisits[0].id,
+    title: 'Synthetic completion confirmation rehearsal',
+    indication: 'Synthetic indication',
+    benefits: 'Synthetic benefits',
+    risks: 'Synthetic risks',
+    alternatives: 'Synthetic alternatives',
+    aftercare: 'Planned synthetic instructions',
+  });
+  const completionBase = '/procedures/' + completionPlan.id;
+  const completionPath = completionBase + '/completions';
+  const completionContext = () => reminderRead(completionBase + '/completion-context');
+  const recordPortalChoice = (decision) =>
+    ordinaryWrite(
+      completionBase + '/agreements',
+      {
+        decision,
+        method: 'portal',
+        note: 'Synthetic procedure discussion.',
+      },
+      patientHeaders,
+    );
+  await recordPortalChoice('agreed');
+  const originalContext = await completionContext();
+  assert.equal(originalContext.allowed, true);
+  assert.equal(originalContext.procedure.scheduledAppointment.id, stateSmokeVisits[0].id);
+  const completionInput = {
+    requestId: randomUUID(),
+    patientId: resultPatient,
+    procedureId: completionPlan.id,
+    doctorId: originalContext.doctorId,
+    recordedByRole: verified.user.role,
+    expectedRevision: originalContext.revision,
+    expectedDecisionId: originalContext.procedure.agreements.at(-1).id,
+    outcome: 'Synthetic outcome as performed',
+    aftercare: 'Synthetic final instructions for the patient',
+    reviewedConfirmed: true,
+  };
+  const invoiceSnapshot = await reminderRead('/invoices', patientHeaders);
+  const withdrawalBeforeCompletion = await recordPortalChoice('declined');
+  assert.equal((await completionContext()).allowed, false);
+  const staleCompletion = await ordinaryWrite(
+    completionPath,
+    completionInput,
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(staleCompletion.code, 'PROCEDURE_COMPLETION_NOT_RECORDED');
+  assert.deepEqual(staleCompletion.command, completionInput);
+  assert.deepEqual(staleCompletion.observed, {
+    decisionId: withdrawalBeforeCompletion.agreements.at(-1).id,
+    status: 'planned',
+  });
+  await recordPortalChoice('agreed');
+  const freshReview = await completionContext();
+  assert.equal(freshReview.allowed, true);
+  const reviewedCompletion = {
+    ...completionInput,
+    requestId: randomUUID(),
+    expectedRevision: freshReview.revision,
+    expectedDecisionId: freshReview.procedure.agreements.at(-1).id,
+  };
+  assert.notEqual(reviewedCompletion.expectedDecisionId, completionInput.expectedDecisionId);
+  assert.deepEqual(
+    await ordinaryWrite(completionPath, completionInput, verifiedHeaders, 409),
+    staleCompletion,
+  );
+  const confirmedCompletion = await ordinaryWrite(completionPath, reviewedCompletion);
+  const completion = confirmedCompletion.receipt.completion;
+  assert.equal(new Date(completion.completedAt).toISOString(), completion.completedAt);
+  assert.deepEqual(confirmedCompletion.receipt, {
+    requestId: reviewedCompletion.requestId,
+    actorId: verified.user.id,
+    patientId: resultPatient,
+    procedureId: completionPlan.id,
+    expectedRevision: freshReview.revision,
+    decisionId: reviewedCompletion.expectedDecisionId,
+    completion: {
+      outcome: reviewedCompletion.outcome,
+      aftercare: reviewedCompletion.aftercare,
+      doctorId: freshReview.doctorId,
+      doctorName: freshReview.doctorName,
+      completedAt: completion.completedAt,
+      appointment: freshReview.procedure.scheduledAppointment,
+    },
+  });
+  assert.deepEqual(
+    await ordinaryWrite(completionPath, reviewedCompletion, verifiedHeaders, 200),
+    confirmedCompletion,
+  );
+  const terminalAttempt = { ...reviewedCompletion, requestId: randomUUID() };
+  const terminalRefusal = await ordinaryWrite(
+    completionPath,
+    terminalAttempt,
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(terminalRefusal.code, 'PROCEDURE_COMPLETION_NOT_RECORDED');
+  assert.deepEqual(terminalRefusal.observed, {
+    decisionId: reviewedCompletion.expectedDecisionId,
+    status: 'completed',
+  });
+  assert.equal((await completionContext()).allowed, false);
+  const patientWorkflows = await reminderRead(
+    '/patients/' + resultPatient + '/clinical-workflows',
+    patientHeaders,
+  );
+  const patientCompletion = patientWorkflows.procedures.find((row) => row.id === completionPlan.id);
+  assert.deepEqual(patientCompletion.completion, completion);
+  assert.deepEqual(patientCompletion.agreements, freshReview.procedure.agreements);
+  for (const attempt of [reviewedCompletion, completionInput, terminalAttempt])
+    assert.equal(JSON.stringify(patientWorkflows).includes(attempt.requestId), false);
+  assert.deepEqual(await reminderRead('/invoices', patientHeaders), invoiceSnapshot);
+  assert.deepEqual(
+    (await reminderRead(stateSmokeBase + '/state-context')).appointment,
+    stateSmokeLatest.appointment,
+  );
+  const completionAudit = await reminderRead(
+    '/search/audit?entityType=procedure&entityId=' + completionPlan.id,
+  );
+  assert.equal(
+    completionAudit.items.filter(
+      (row) => row.action === 'completed procedure and recorded aftercare',
+    ).length,
+    1,
+  );
+  const completionActivity = await reminderRead('/activity?limit=100', patientHeaders);
+  assert.equal(
+    completionActivity.items.filter(
+      (item) =>
+        item.title === 'Your procedure aftercare is available' &&
+        item.detail === completionPlan.title,
+    ).length,
+    1,
+  );
+  const patientCompletionResponse = await ordinaryWrite(
+    completionPath,
+    reviewedCompletion,
+    patientHeaders,
+    403,
+  );
+  assert.equal(patientCompletionResponse.receipt, undefined);
+  assert.equal(patientCompletionResponse.command, undefined);
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -4726,7 +4870,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

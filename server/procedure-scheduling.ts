@@ -23,6 +23,7 @@ interface Dependencies {
 }
 interface PlanLink {
   id: string;
+  patientId: string;
   appointmentId: string | null;
 }
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -101,7 +102,8 @@ export function effectiveProcedureAppointment(db: DB, plan: PlanLink) {
     : undefined;
   return {
     effectiveAppointmentId,
-    scheduledAppointment: appointment ? procedureAppointmentSnapshot(appointment) : null,
+    scheduledAppointment:
+      appointment?.patientId === plan.patientId ? procedureAppointmentSnapshot(appointment) : null,
   };
 }
 const appointmentSelection = (alias: string) => `json_object(

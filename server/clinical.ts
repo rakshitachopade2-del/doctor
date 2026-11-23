@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Express } from 'express';
 import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
+import { registerProcedureCompletion } from './procedure-completion.ts';
 import type { Appointment, Doctor, Encounter, Patient, User } from '../shared/types.ts';
 import type {
   EncounterAmendment,
@@ -808,58 +809,17 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     });
     res.status(outcome.status).json(outcome.body);
   });
-  app.post('/api/procedures/:id/complete', (req: AuthRequest, res) => {
-    const identity = doctorIdentity(req),
-      plan = procedureAccess(req, String(req.params.id));
-    const input = z.object({ outcome: text.min(1), aftercare: text.min(1) }).parse(req.body);
-    transaction(() => {
-      requirePlannedProcedure(plan);
-      const latest = events<ProcedureAgreement>('procedureAgreements', 'procedureId', plan.id).at(
-        -1,
-      );
-      if (!latest || latest.decision !== 'agreed')
-        fail(
-          409,
-          'Record the patient agreement before completing this procedure. The latest recorded decision must be agreed.',
-        );
-      const effective = effectiveProcedureAppointment(db, plan);
-      if (effective.effectiveAppointmentId) {
-        const appointment = effective.scheduledAppointment;
-        if (!appointment)
-          fail(
-            409,
-            'The linked appointment is missing. Review the procedure appointment association.',
-          );
-        if (['cancelled', 'no-show'].includes(appointment!.status))
-          fail(
-            409,
-            'The linked appointment is cancelled or marked as a no-show. Update the procedure appointment association.',
-          );
-        if (Date.parse(`${appointment!.date}T${appointment!.time}:00+05:30`) > Date.now())
-          fail(
-            409,
-            'The linked appointment is in the future. Complete the procedure after the visit starts.',
-          );
-      }
-      const completion: ProcedureCompletion = {
-        ...input,
-        ...identity,
-        completedAt: nowISO(),
-        appointment: effective.scheduledAppointment,
-      };
-      db.prepare('INSERT INTO procedureCompletions(id,data) VALUES (?,?)').run(
-        plan.id,
-        JSON.stringify(completion),
-      );
-      audit(req, 'completed procedure and recorded aftercare', 'procedure', plan.id);
-      notifyPatient(db, plan.patientId, `procedure-completed:${plan.id}`, {
-        kind: 'procedure',
-        title: 'Your procedure aftercare is available',
-        detail: plan.title,
-        href: '/my-care/record?tab=workflows',
-      });
-    });
-    res.json(procedureView(plan));
+  registerProcedureCompletion(app, {
+    db,
+    transaction,
+    audit,
+    fail,
+    authorize(req) {
+      const user = context.currentCareUser(req);
+      const identity = doctorIdentity(req);
+      const procedure = procedureView(procedureAccess(req, String(req.params.id)));
+      return { user, ...identity, procedure };
+    },
   });
   app.post('/api/procedures/:id/cancel', (req: AuthRequest, res) => {
     doctorIdentity(req);

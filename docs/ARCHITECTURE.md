@@ -66,7 +66,8 @@ flowchart LR
 | `server/private-upload.ts`                     | Image and PDF validation, authorized saves, original attribution and upload receipts       |
 | `server/documents.ts`                          | Immutable PDF storage, patient-scoped report lists and attachment downloads                |
 | `server/procedure-catalogue.ts`                | Private versioned procedure templates, publication, availability and creation receipts     |
-| `server/clinical.ts`                           | Investigation review/publication, procedure agreement/completion, encounter amendments     |
+| `server/clinical.ts`                           | Investigation review/publication, procedure decisions and encounter amendments             |
+| `server/procedure-completion.ts`               | Reviewed procedure completion, aftercare, visit snapshots and confirmations                |
 | `server/follow-up.ts`                          | Review snapshots, owner assignments, optimistic revisions, plan state and worklist         |
 | `server/follow-up-escalation.ts`               | Operational policies, exact previews, immutable notices, dedupe and local scheduled checks |
 | `src/components/FollowUpEscalations.tsx`       | Policy controls, recipient previews, guarded retries and exact-plan notice histories       |
@@ -286,6 +287,10 @@ Both decision routes recheck the signed-in account, patient access and clinical 
 `procedureCompletions` and `procedureCancellations` are separate terminal events. Completion requires the latest decision to be agreed and records outcome, aftercare and the responsible doctor. A linked visit cannot be cancelled/no-show or have a start time still in the future. Decision, cancellation and completion checks use immediate transactions so a concurrent withdrawal cannot leave a completed record whose latest decision is declined. Completion or cancellation leaves the linked appointment unchanged.
 
 These events record communication and reported decisions; they are not an electronic signature system or an assurance that all consent requirements have been met. Medication safety checks, clinical protocol validation, pathology interpretation and external laboratory connections remain outside this implementation.
+
+The clinic completion form reads its own context from `server/procedure-completion.ts`. The revision includes the performing profile, latest decision ID, latest visit association event, effective visit snapshot, procedure status and eligibility. A change of decision back to agreement, or a visit unlinked and relinked to the same procedure, requires another review. The write checks the current session, role, profile, patient record, revision and visit eligibility inside one SQLite transaction. Time is checked against the visit’s start in the clinic time zone.
+
+`procedureCompletionCommands` binds a UUID to the account, procedure and normalized command. Each accepted command references the immutable completion. The completion, audit, patient activity and receipt commit together. For a refused command, the service retains the observed procedure state and latest decision ID. The form checks that a refreshed history includes that evidence before offering another review. Recovery returns the recorded outcome after checking current access. Existing completed procedures retain the evidence they had when recorded. Patient histories contain the clinical outcome and aftercare, while command details remain on the clinician endpoint.
 
 ### Procedure catalogue and patient snapshots
 
