@@ -286,6 +286,12 @@ Voided refunds no longer consume the original payment's refundable amount. A pay
 
 Patients and authorized staff see the correction in invoice history, print and the live care summary; older saved summaries retain their original content and bytes. Reports exclude a voided refund from its original recording period. The correction creates no new collection or refund in the date period when the void was entered.
 
+## Issue an invoice
+
+In **Billing & payments**, choose **Create invoice**, select the patient and enter the line items. You can link an eligible procedure. Choose **Review invoice**, check the quantities, unit prices and total, acknowledge the review, then choose **Issue invoice**.
+
+If the confirmation is interrupted, use **Resume invoice entry** in the same signed-in tab and choose **Retry exact issuance**. The confirmation shows the invoice as it was issued. **Open current invoice** shows subsequent payments and corrections. Reloading the tab or signing out clears its pending request, so check Billing before starting a new invoice. If a procedure is already invoiced or cancelled, a confirmed rejection lets you review the draft again.
+
 ## Correct billing entries
 
 Open an invoice in **Billing** to review its current charges, recorded payments and retained history. Administrators can correct line items with a reason shared with the patient; the issued charges, invoice number, patient snapshot and procedure link remain intact. The corrected total cannot fall below the net recorded payments. Removing every charge requires explicit confirmation and a zero recorded-payment balance, and displays **No charges**.
@@ -406,7 +412,7 @@ npm run test:production
 npm run test:recovery
 ```
 
-API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5219** and API ports **3011–3047**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5220** and API ports **3011–3048**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
 
 The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards. Follow-up and activity tests cover stale-review rejection, preserved check-in versions, same-day corrections, private assessment redaction, module pauses, recipient isolation, stable pagination, and read-state changes that leave clinical review work unchanged.
 

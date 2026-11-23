@@ -4,6 +4,8 @@ The supplied concept is source material, not an instruction to make unsupported 
 
 ## Release scope
 
+Clinic staff review itemized charges before issuing a standalone or procedure-linked invoice. If the reply is lost, the issuer can recover the original confirmation. Patients see one invoice and, for an eligible patient account, one creation notice. Billing detail continues to show later charge corrections and payments.
+
 Clinicians review the patient, their own professional profile, dates, instructions and treatment items before sharing a care plan. An interrupted confirmation can be recovered without creating a second plan or repeating the creation notice. Later reviews, completion and handovers remain visible in the current follow-up record.
 
 Patients can review and share their structured history, recover the original submission after an interrupted response and see the answers saved to their record. Intake allergy answers remain patient-reported history. Changes to the clinical allergy record use the separate clinician workflow.

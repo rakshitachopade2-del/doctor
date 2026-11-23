@@ -433,6 +433,10 @@ API tests create isolated databases and real temporary HTTP servers. They assert
 
 Implementation references: [Node.js SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html), [Express production security guidance](https://expressjs.com/en/advanced/best-practice-security.html). The code and tests define this release's actual guarantees.
 
+## Invoice issuance
+
+`server/invoice-issuance.ts` handles both invoice creation routes. An immediate SQLite transaction checks the session and current staff role, looks up the patient and procedure, allocates the invoice number and records the invoice, optional procedure link, audit and patient notice. The immutable `invoiceIssuanceCommands` row binds a UUID to the issuer, patient and a digest of the procedure and ordered charges. Successful rows retain the originally issued invoice. A later payment or correction changes the live detail. A reviewed procedure rejection stores a final outcome for that UUID without consuming a number. Pre-upgrade invoices retain their records and existing UUIDs without acquiring a guessed issuer.
+
 ## Invoice corrections, erroneous entries and external refunds
 
 `server/billing-corrections.ts` adds immutable `invoiceIssuedCharges`, `invoiceCorrections`, `paymentReversals`, `paymentRefunds`, `paymentRefundVoids` and `billingCorrectionCommands` tables. Existing invoices retain their current data; the known original charge lines are captured before the first correction, without inventing an issue author or date. Source payment rows remain append-only. A composite payment/invoice foreign key and unique payment reversal prevent cross-invoice or duplicate reversals. Current invoice identity, patient-name snapshot, issue date and procedure linkage stay fixed while charges, net paid and derived status change.

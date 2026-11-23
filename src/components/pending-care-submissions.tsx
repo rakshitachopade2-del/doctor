@@ -2,10 +2,12 @@ import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } f
 import type { CareMessageCommand } from '../../shared/care-message';
 import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
 import type { CarePlanAttempt } from './care-plan-creation-helpers';
+import type { InvoiceIssuanceAttempt } from './invoice-issuance-helpers';
 import type { UploadAttempt } from './private-upload-helpers';
 import { useSession } from '../lib';
 
 interface PendingCareSubmissions {
+  issuance: { current: InvoiceIssuanceAttempt | null };
   uploads: Map<string, UploadAttempt>;
   plans: Map<string, CarePlanAttempt>;
   messages: Map<string, CareMessageCommand>;
@@ -18,6 +20,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
   const pending = useMemo(
     () => ({
+      issuance: { current: null as InvoiceIssuanceAttempt | null },
       uploads: new Map<string, UploadAttempt>(),
       plans: new Map<string, CarePlanAttempt>(),
       messages: new Map<string, CareMessageCommand>(),
@@ -27,6 +30,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   );
   useLayoutEffect(() => {
     const clear = () => {
+      pending.issuance.current = null;
       pending.uploads.clear();
       pending.plans.clear();
       pending.messages.clear();

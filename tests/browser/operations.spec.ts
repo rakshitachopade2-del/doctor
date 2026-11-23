@@ -17,7 +17,10 @@ test('invoice amounts keep paise, payments update balance, patients see only the
   await dialog.getByLabel('Service or item').fill('Browser test consultation');
   await dialog.getByLabel('Quantity').fill('2');
   await dialog.getByLabel('Unit price (₹)').fill('800.55');
-  await dialog.getByRole('button', { name: 'Create invoice', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Review invoice', exact: true }).click();
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button', { name: 'Issue invoice', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Open current invoice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Invoice INV-/ })).toBeVisible();
   dialog = page.getByRole('dialog');
   await expect(dialog.locator('.invoice-totals')).toContainText('₹1,601.10');

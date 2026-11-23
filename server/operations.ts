@@ -6,18 +6,19 @@ import type { Patient, User } from '../shared/types.ts';
 import type { Invoice, KnowledgeArticle, Payment } from '../shared/operations.ts';
 import type { ProcedureRecord } from '../shared/clinical.ts';
 import { notifyPatient } from './activity.ts';
+import { registerInvoiceIssuance } from './invoice-issuance.ts';
 import { registerKnowledgeAuthoring } from './knowledge-authoring.ts';
 import {
   invoiceDetail,
-  invoiceItemSchema,
   invoicePaymentStatus,
-  issuedInvoiceCharges,
   registerBillingCorrections,
 } from './billing-corrections.ts';
 
 interface OperationsContext {
   db: DB;
   demoMode: boolean;
+  authorizeInvoiceIssuer: (req: AuthRequest) => User;
+  transaction: <T>(work: () => T) => T;
   actor: (req: AuthRequest, roles?: User['role'][]) => User;
   patientAccess: (req: AuthRequest, patientId: string, allowReception?: boolean) => Patient;
   audit: (req: AuthRequest, action: string, entityType: string, entityId: string) => void;
@@ -115,7 +116,6 @@ export function registerOperations(app: Express, context: OperationsContext) {
   };
   registerBillingCorrections(app, { db, actor, invoiceAccess, audit, fail });
   const detail = (invoice: Invoice) => invoiceDetail(db, invoice);
-  const item = invoiceItemSchema;
   app.get('/api/invoices', (req: AuthRequest, res) => {
     const user = actor(req);
     const invoices = list<Invoice>(
@@ -152,95 +152,7 @@ export function registerOperations(app: Express, context: OperationsContext) {
       }),
     );
   });
-  app.post('/api/invoices', (req: AuthRequest, res) => {
-    staff(req);
-    const input = z
-      .object({
-        patientId: z.string().min(1),
-        items: z.array(item).min(1).max(100),
-        requestId: z.string().uuid().optional(),
-        procedureId: z.string().min(1).optional(),
-      })
-      .parse(req.body);
-    const patient = patientAccess(req, input.patientId, true);
-    const totalPaise = input.items.reduce(
-      (sum, line) => sum + line.quantity * line.unitAmountPaise,
-      0,
-    );
-    if (!Number.isSafeInteger(totalPaise) || totalPaise > 1_000_000_000)
-      return fail(400, 'Invoice total must be at most ₹1,00,00,000.');
-    let invoice: Invoice;
-    let duplicate = false;
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const previous = input.requestId
-        ? (db.prepare('SELECT data FROM invoices WHERE requestId=?').get(input.requestId) as
-            { data: string } | undefined)
-        : undefined;
-      if (previous) {
-        invoice = JSON.parse(previous.data) as Invoice;
-        if (
-          invoice.patientId !== input.patientId ||
-          invoice.procedureId !== input.procedureId ||
-          JSON.stringify(issuedInvoiceCharges(db, invoice).items) !== JSON.stringify(input.items)
-        )
-          fail(409, 'This invoice request was already used with different details.');
-        duplicate = true;
-      } else {
-        const procedure = input.procedureId
-          ? get<ProcedureRecord>(db, 'procedures', input.procedureId)
-          : undefined;
-        if (input.procedureId) {
-          if (!procedure || procedure.patientId !== input.patientId)
-            fail(400, 'The procedure must belong to this patient.');
-          if (db.prepare('SELECT 1 FROM procedureCancellations WHERE id=?').get(input.procedureId))
-            fail(409, 'A cancelled procedure cannot be linked to a new invoice.');
-          if (
-            db
-              .prepare('SELECT 1 FROM procedureInvoiceLinks WHERE procedureId=?')
-              .get(input.procedureId)
-          )
-            fail(409, 'This procedure already has a linked invoice. Open the existing invoice.');
-        }
-        const serial = Number(
-          db.prepare('SELECT nextValue FROM invoiceSequence WHERE id=1').get()!.nextValue,
-        );
-        invoice = {
-          id: id(),
-          patientId: patient.id,
-          patientName: patient.name,
-          number: `INV-${String(serial).padStart(6, '0')}`,
-          items: input.items,
-          totalPaise,
-          paidPaise: 0,
-          status: 'unpaid',
-          createdAt: nowISO(),
-          ...(procedure ? { procedureId: procedure.id, procedureTitle: procedure.title } : {}),
-        };
-        db.prepare(
-          'INSERT INTO invoices(id,patientId,invoiceNumber,data,requestId) VALUES (?,?,?,?,?)',
-        ).run(invoice.id, patient.id, serial, JSON.stringify(invoice), input.requestId ?? null);
-        if (procedure)
-          db.prepare('INSERT INTO procedureInvoiceLinks(procedureId,invoiceId) VALUES (?,?)').run(
-            procedure.id,
-            invoice.id,
-          );
-        db.prepare('UPDATE invoiceSequence SET nextValue=nextValue+1 WHERE id=1').run();
-        audit(req, 'created invoice', 'invoice', invoice.id);
-        notifyPatient(db, invoice.patientId, `invoice-created:${invoice.id}`, {
-          kind: 'billing',
-          title: 'Your clinic created an invoice',
-          detail: invoice.number,
-          href: `/my-care/invoices?invoice=${invoice.id}`,
-        });
-      }
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
-    res.status(duplicate ? 200 : 201).json(invoice);
-  });
+  registerInvoiceIssuance(app, context);
   app.get('/api/invoices/:id', (req: AuthRequest, res) => {
     const invoice = invoiceAccess(req, String(req.params.id));
     audit(req, 'viewed invoice', 'invoice', invoice.id);

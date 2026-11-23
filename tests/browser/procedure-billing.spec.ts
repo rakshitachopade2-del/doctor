@@ -102,7 +102,7 @@ test('reception bills a procedure with explicit charges and reopens its existing
       dialog.getByText(/Recorded estimate: ₹5,000 estimate; confirm agreed charge/),
     ).toBeVisible();
     expect(await dialog.textContent()).not.toContain(privateMarker);
-    await dialog.getByRole('button', { name: 'Create invoice', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Review invoice', exact: true }).click();
     await expect(
       dialog.getByRole('heading', { name: 'Create an invoice', exact: true }),
     ).toBeVisible();
@@ -113,15 +113,18 @@ test('reception bills a procedure with explicit charges and reopens its existing
     ).toBeTruthy();
     await dialog.getByLabel('Quantity', { exact: true }).fill('2');
     await dialog.getByLabel('Unit price (₹)', { exact: true }).fill('1250.55');
+    await dialog.getByRole('button', { name: 'Review invoice', exact: true }).click();
+    await dialog.getByRole('checkbox').check();
     const invoiceResponse = page.waitForResponse(
       (response) =>
-        new URL(response.url()).pathname === '/api/invoices' &&
+        new URL(response.url()).pathname === '/api/invoices/issue' &&
         response.request().method() === 'POST',
     );
-    await dialog.getByRole('button', { name: 'Create invoice', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Issue invoice', exact: true }).click();
     const response = await invoiceResponse;
     expect(response.status()).toBe(201);
-    const invoice = (await response.json()) as Invoice;
+    const invoice = (await response.json()).receipt.invoice as Invoice;
+    await dialog.getByRole('button', { name: 'Open current invoice', exact: true }).click();
     expect(invoice).toMatchObject({
       patientId: 'patient-ananya',
       procedureId: procedure.id,

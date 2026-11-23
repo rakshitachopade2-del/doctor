@@ -1,5 +1,17 @@
 # Release verification
 
+## 1.44.0 · Staff invoice issuance
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **718 API, backup and recovery tests** and **164 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A Docker engine was unavailable for container runtime testing.
+
+On v1.43 a second staff account could replay reception’s request for the same invoice. After a payment, replaying creation returned the current paid status. Eight new API test groups cover the issuer, patient, optional procedure, ordered charges and original invoice. They exercise concurrent writers, access changes inside the write transaction, failures during sequence allocation and other writes, and replay after correction, payment, procedure cancellation or restart.
+
+A database created with v1.43 contained an invoice issued under an uppercase request UUID and a partial cash payment. Opening that database with v1.44 preserved the full invoice detail and payment. Both creation routes rejected the old UUID for both staff accounts, including its lowercase form. Issuing a new invoice then used the next consecutive number.
+
+Five browser journeys cover issuance review, recovery of an interrupted save after a correction and payment, and a procedure invoiced by another staff account while its draft was open. The issuer could review the retained charges again after the confirmed rejection. Late reads and writes across navigation left the new page and session intact. Reload and sign-out cleared the outstanding request from the tab. At 320 pixels, accessibility checks, button hit tests and text-boundary checks passed for the review, retry and confirmation screens. Quantity, unit price and amount were visible for each line.
+
+The production smoke test recovered the original procedure-linked invoice after payment, charge correction and removal of charges. It also checked the live balance, a single creation audit and the stored rejection of a second invoice for the procedure. Restoring a backup recovered the original standalone invoice and its rejected command. The patient saw the partial payment and one creation notice. Retry evidence stayed out of the patient’s care summary.
+
 ## 1.43.0 · Private image and PDF uploads
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **710 API, backup and recovery tests** and **159 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A Docker engine was unavailable for container runtime verification.

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type FormEvent } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, type FormEvent } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
@@ -21,7 +21,16 @@ import type {
   Payment,
   ProcedureBillingItem,
 } from '../../shared/operations';
-import type { Patient } from '../../shared/types';
+import { usePendingCareSubmissions } from '../components/pending-care-submissions';
+import {
+  checkedBillingPatients,
+  checkedBillingProcedures,
+  type InvoiceIssuanceAttempt,
+} from '../components/invoice-issuance-helpers';
+import {
+  useAppointmentBookingData,
+  useAppointmentBookingGuard,
+} from '../components/appointment-booking-helpers';
 import type { PaymentRefund, PaymentRefundVoid } from '../../shared/billing-corrections';
 import { api, ApiError, formatDate, money, useResource, useSession, useToast } from '../lib';
 import {
@@ -349,21 +358,17 @@ function checkedInvoiceDetail(value: unknown, id: string): InvoiceDetail {
   return detail;
 }
 type CreationDraft = {
-  requestId: string;
   source: ProcedureBillingItem | null;
   patientId: string;
   procedureId: string;
   items: LineDraft[];
-  attempt: Record<string, unknown> | null;
   error: string;
 };
 const createDraft = (source: ProcedureBillingItem | null = null): CreationDraft => ({
-  requestId: crypto.randomUUID(),
   source,
   patientId: source?.patientId ?? '',
   procedureId: source?.id ?? '',
   items: [{ description: source?.title ?? '', quantity: '1', amount: '' }],
-  attempt: null,
   error: '',
 });
 type BillingDraft = {
@@ -416,16 +421,33 @@ const billingDraft = (
 
 export function BillingPage() {
   const { session } = useSession();
+  return <BillingRegister key={JSON.stringify([session.user?.id, session.csrfToken])} />;
+}
+
+function BillingRegister() {
+  const { session } = useSession();
+  const { issuance } = usePendingCareSubmissions();
   const location = useLocation();
-  const staff = session.user?.role !== 'patient';
-  const invoices = useBillingData('/api/invoices', (value) => {
+  const staff = !!session.user && ['admin', 'doctor', 'receptionist'].includes(session.user.role);
+  const invoices = useAppointmentBookingData('/api/invoices', (value) => {
     if (!Array.isArray(value)) throw new Error('The invoice list could not be confirmed.');
     const rows = value.map((invoice) => checkedInvoice(invoice));
     if (!uniqueBillingIds(rows)) throw new Error('The invoice list contains duplicate records.');
     return rows;
   });
   const [creation, setCreation] = useState<CreationDraft | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creationOrigin, setCreationOrigin] = useState<string | null>(null);
+  const creating = creationOrigin === location.key;
+  const hasCreation = !!creation || !!issuance.current;
+  useLayoutEffect(() => {
+    const close = () => setCreationOrigin(null);
+    window.addEventListener('popstate', close);
+    window.addEventListener('hashchange', close);
+    return () => {
+      window.removeEventListener('popstate', close);
+      window.removeEventListener('hashchange', close);
+    };
+  }, []);
   const [draft, setDraft] = useState<BillingDraft | null>(null);
   const [selection, setSelection] = useState<{ id: string; origin: string } | null>(null);
   const selected = selection?.origin === location.key ? selection.id : null;
@@ -441,7 +463,10 @@ export function BillingPage() {
   useEffect(() => {
     setSelection(invoiceId ? { id: invoiceId, origin: location.key } : null);
   }, [invoiceId, location.key]);
-  const procedures = useResource<ProcedureBillingItem[]>(staff ? '/api/procedure-billing' : null);
+  const procedures = useAppointmentBookingData(
+    staff ? '/api/procedure-billing' : null,
+    checkedBillingProcedures,
+  );
   useEffect(() => {
     if (!procedureId) {
       sourceOpened.current = '';
@@ -453,7 +478,7 @@ export function BillingPage() {
       !procedures.data ||
       sourceOpened.current === procedureId ||
       draft ||
-      creation
+      hasCreation
     )
       return;
     const procedure = procedures.data.find((item) => item.id === procedureId);
@@ -463,9 +488,9 @@ export function BillingPage() {
     } else if (procedure && procedure.status !== 'cancelled') {
       sourceOpened.current = procedureId;
       setCreation(createDraft(procedure));
-      setCreating(true);
+      setCreationOrigin(location.key);
     }
-  }, [staff, invoiceId, procedureId, procedures.data, draft, creation]);
+  }, [staff, invoiceId, procedureId, procedures.data, draft, hasCreation, location.key]);
   function closeSource() {
     if (params.size) setParams({}, { replace: true });
   }
@@ -502,13 +527,12 @@ export function BillingPage() {
               className="button button-primary"
               disabled={!!draft}
               onClick={() => {
-                closeSource();
                 if (!creation) setCreation(createDraft());
-                setCreating(true);
+                setCreationOrigin(location.key);
               }}
             >
               <Plus size={17} />
-              {creation ? 'Resume invoice entry' : 'Create invoice'}
+              {hasCreation ? 'Resume invoice entry' : 'Create invoice'}
             </button>
           ) : undefined
         }
@@ -672,21 +696,26 @@ export function BillingPage() {
           initiated here.
         </span>
       </div>
-      {creation && creating && (
+      {staff && creation && creating && (
         <InvoiceForm
+          key={location.key}
           draft={creation}
           onChange={setCreation}
           onClose={() => {
-            setCreating(false);
+            setCreationOrigin(null);
             closeSource();
           }}
           onDiscard={() => {
-            setCreating(false);
+            setCreationOrigin(null);
             setCreation(null);
             closeSource();
           }}
+          onConfirmed={() => {
+            void invoices.reload();
+            void procedures.reload();
+          }}
           onCreated={(id) => {
-            setCreating(false);
+            setCreationOrigin(null);
             setCreation(null);
             if (params.size) setParams({ invoice: id }, { replace: true });
             else setSelected(id);
@@ -702,7 +731,7 @@ export function BillingPage() {
           staff={staff}
           draft={draft}
           onDraftChange={setDraft}
-          otherEntryPending={!!creation}
+          otherEntryPending={hasCreation}
           onClose={() => {
             setSelected(null);
             closeSource();
@@ -799,199 +828,417 @@ function InvoiceLineEditor({
   );
 }
 
+function originalIssuedInvoice(value: unknown, attempt: InvoiceIssuanceAttempt, actorId: string) {
+  const { command } = attempt;
+  if (!billingRecord(value) || !billingRecord(value.receipt)) return null;
+  const receipt = value.receipt;
+  if (
+    receipt.actorId !== actorId ||
+    receipt.requestId !== command.requestId ||
+    receipt.patientId !== command.patientId
+  )
+    return null;
+  const invoice = checkedInvoice(receipt.invoice);
+  if (
+    invoice.patientId !== command.patientId ||
+    invoice.procedureId !== command.procedureId ||
+    (command.procedureId
+      ? !billingText(invoice.procedureTitle)
+      : invoice.procedureTitle !== undefined) ||
+    !sameBillingValue(invoice.items, command.items) ||
+    invoice.totalPaise !== chargeTotal(command.items) ||
+    invoice.status !== 'unpaid' ||
+    invoice.paidPaise !== 0 ||
+    !/^INV-(?:[0-9]{6}|[1-9][0-9]{6,})$/.test(invoice.number) ||
+    invoice.number === 'INV-000000' ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(invoice.id) ||
+    new Date(invoice.createdAt).toISOString() !== invoice.createdAt
+  )
+    return null;
+  return invoice;
+}
+
 function InvoiceForm({
   draft,
   onChange,
   onClose,
   onDiscard,
   onCreated,
+  onConfirmed,
 }: {
   draft: CreationDraft;
   onChange: (draft: CreationDraft) => void;
   onClose: () => void;
   onDiscard: () => void;
   onCreated: (id: string) => void;
+  onConfirmed: () => void;
 }) {
-  const patients = useResource<Patient[]>('/api/patients');
-  const procedures = useResource<ProcedureBillingItem[]>(
-    draft.patientId
+  const { session } = useSession();
+  const { issuance } = usePendingCareSubmissions();
+  const [phase, setPhase] = useState<'edit' | 'review' | 'pending' | 'rejected' | 'saved'>(
+    issuance.current ? 'pending' : 'edit',
+  );
+  const [review, setReview] = useState<InvoiceIssuanceAttempt | null>(issuance.current);
+  const [saved, setSaved] = useState<Invoice | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const working = useRef(false),
+    dismissed = useRef(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const capture = useAppointmentBookingGuard();
+  const patients = useAppointmentBookingData(
+    phase === 'edit' ? '/api/patients' : null,
+    checkedBillingPatients,
+  );
+  const procedures = useAppointmentBookingData(
+    phase === 'edit' && draft.patientId
       ? `/api/procedure-billing?patientId=${encodeURIComponent(draft.patientId)}`
       : null,
+    (value) => checkedBillingProcedures(value, draft.patientId),
   );
-  const linked = procedures.data?.find((item) => item.id === draft.procedureId) ?? draft.source;
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  const mounted = useRef(false);
+  const linked = procedures.data?.find((item) => item.id === draft.procedureId);
+  const eligibleProcedure = !!linked && !linked.invoiceId && linked.status !== 'cancelled';
   useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  const locked = busy || !!draft.attempt;
-  async function submit(event: FormEvent) {
+    if (phase !== 'edit') heading.current?.focus();
+  }, [phase]);
+  function close() {
+    dismissed.current = true;
+    if (saved) onDiscard();
+    else onClose();
+  }
+  function reviewDraft(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
-    let body: Record<string, unknown>;
-    try {
-      body = draft.attempt ?? {
-        requestId: draft.requestId,
-        patientId: draft.patientId,
-        ...(draft.procedureId ? { procedureId: draft.procedureId } : {}),
-        items: invoiceItems(draft.items),
-      };
-    } catch (problem) {
-      onChange({ ...draft, error: billingError(problem) });
+    if (phase !== 'edit') return;
+    const patient = patients.data?.find((row) => row.id === draft.patientId);
+    if (!patient) return;
+    if (draft.procedureId && !eligibleProcedure) {
+      onChange({ ...draft, error: 'Select an available procedure or remove the procedure link.' });
       return;
     }
-    onChange({ ...draft, attempt: body, error: '' });
-    setBusy(true);
     try {
-      const result = checkedInvoice(await api<unknown>('/api/invoices', { method: 'POST', body }));
-      if (result.patientId !== body.patientId || result.procedureId !== body.procedureId)
-        throw new Error(
-          'The invoice response did not match the submitted patient and procedure. Retry the same request.',
-        );
-      if (!mounted.current) return;
-      toast('Invoice created.');
-      onCreated(result.id);
+      const items = invoiceItems(draft.items);
+      setReview({
+        patientName: patient.name,
+        ...(linked ? { procedureTitle: linked.title } : {}),
+        command: {
+          requestId: crypto.randomUUID(),
+          reviewedConfirmed: true,
+          patientId: patient.id,
+          ...(draft.procedureId ? { procedureId: draft.procedureId } : {}),
+          items,
+        },
+      });
+      setAcknowledged(false);
+      setMessage('');
+      setPhase('review');
     } catch (problem) {
-      if (!mounted.current) return;
-      const definitive =
-        problem instanceof ApiError &&
-        ([400, 403, 404, 422].includes(problem.status) ||
-          (problem.status === 409 && !/request.*already used/i.test(problem.message)));
-      onChange({ ...draft, attempt: definitive ? null : body, error: billingError(problem) });
-    } finally {
-      if (mounted.current) setBusy(false);
+      onChange({ ...draft, error: billingError(problem) });
     }
   }
+  async function issue() {
+    const actorId = session.user?.id;
+    const attempt =
+      phase === 'pending' ? issuance.current : phase === 'review' && acknowledged ? review : null;
+    if (
+      !attempt ||
+      !actorId ||
+      working.current ||
+      dismissed.current ||
+      (issuance.current && issuance.current !== attempt)
+    )
+      return;
+    const origin = capture();
+    const current = () => !dismissed.current && origin() && issuance.current === attempt;
+    working.current = true;
+    issuance.current = attempt;
+    setBusy(true);
+    setMessage('');
+    setPhase('pending');
+    try {
+      const response = await api<unknown>('/api/invoices/issue', {
+        method: 'POST',
+        body: attempt.command,
+        isCurrent: current,
+      });
+      if (!current()) return;
+      const invoice = originalIssuedInvoice(response, attempt, actorId);
+      if (!invoice) return;
+      issuance.current = null;
+      setSaved(invoice);
+      setPhase('saved');
+      onConfirmed();
+    } catch (problem) {
+      if (!current()) return;
+      const data = problem instanceof ApiError ? problem.responseData : null;
+      if (
+        problem instanceof ApiError &&
+        [400, 409].includes(problem.status) &&
+        billingRecord(data) &&
+        data.code === 'INVOICE_NOT_ISSUED' &&
+        data.actorId === actorId &&
+        billingText(data.message) &&
+        sameBillingValue(data.command, attempt.command)
+      ) {
+        issuance.current = null;
+        onChange({
+          ...createDraft(),
+          patientId: attempt.command.patientId,
+          items: draftLines(attempt.command.items),
+        });
+        setMessage(data.message);
+        setPhase('rejected');
+      }
+    } finally {
+      if (!dismissed.current && origin()) {
+        working.current = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  const snapshot = saved ?? review?.command;
   return (
-    <Modal
-      title="Create an invoice"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <form className="stack billing-create-form" onSubmit={submit}>
-        {draft.error && (
-          <p className="form-error" role="alert">
-            {draft.error}
-          </p>
-        )}
-        {patients.error && <ErrorState message={patients.error} retry={patients.reload} />}
-        <Field label="Patient">
-          <select
-            required
-            value={draft.patientId}
-            disabled={!!draft.source || locked}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                patientId: event.target.value,
-                procedureId: '',
-                items: [{ description: '', quantity: '1', amount: '' }],
-              })
-            }
-          >
-            <option value="">Select a patient</option>
-            {patients.data?.map((patient) => (
-              <option key={patient.id} value={patient.id}>
-                {patient.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {procedures.error && <ErrorState message={procedures.error} retry={procedures.reload} />}
-        {draft.patientId && (
-          <Field
-            label="Link a procedure (optional)"
-            hint="Each procedure can have one linked invoice. Set the agreed charges below; estimates are not charged automatically."
-          >
+    <Modal title="Create an invoice" onClose={close}>
+      {phase === 'edit' ? (
+        <form className="stack billing-create-form" onSubmit={reviewDraft}>
+          {draft.error && (
+            <p className="form-error" role="alert">
+              {draft.error}
+            </p>
+          )}
+          {patients.error && <ErrorState message={patients.error} retry={patients.reload} />}
+          <Field label="Patient">
             <select
-              value={draft.procedureId}
-              disabled={!!draft.source || procedures.loading || locked}
-              onChange={(event) => {
-                const procedure = procedures.data?.find((item) => item.id === event.target.value);
+              required
+              value={draft.patientId}
+              disabled={!!draft.source}
+              onChange={(event) =>
                 onChange({
                   ...draft,
-                  procedureId: event.target.value,
-                  ...(procedure
-                    ? { items: [{ description: procedure.title, quantity: '1', amount: '' }] }
-                    : {}),
-                });
-              }}
+                  patientId: event.target.value,
+                  procedureId: '',
+                  items: [{ description: '', quantity: '1', amount: '' }],
+                })
+              }
             >
-              <option value="">No procedure link</option>
-              {procedures.data?.map((item) => (
-                <option
-                  key={item.id}
-                  value={item.id}
-                  disabled={!!item.invoiceId || item.status === 'cancelled'}
-                >
-                  {item.title}
-                  {item.invoiceNumber
-                    ? ` · ${item.invoiceNumber}`
-                    : item.status === 'cancelled'
-                      ? ' · cancelled'
-                      : ''}
+              <option value="">Select a patient</option>
+              {patients.data?.map((patient) => (
+                <option key={patient.id} value={patient.id}>
+                  {patient.name}
                 </option>
               ))}
             </select>
           </Field>
-        )}
-        {draft.procedureId && linked && (
-          <div className="notice">
-            <span>
-              Linked procedure: <strong>{linked.title}</strong>
-              <br />
-              Recorded estimate: {linked.estimatedCost || 'Not recorded'}. Creating an invoice
-              records a charge; it does not record a received payment.
-            </span>
-          </div>
-        )}
-        <InvoiceLineEditor
-          items={draft.items}
-          locked={locked}
-          onChange={(items) => onChange({ ...draft, items })}
-        />
-        <p className="muted">
-          Confirm the patient, procedure and amounts before creating the invoice. Tax and money
-          transfers are not automated.
-        </p>
-        {draft.attempt && !busy && (
-          <div className="notice billing-retry">
-            <strong>The save outcome could not be confirmed.</strong>
-            <p>
-              The exact entry and request ID are retained. Retry the same request to check its
-              outcome without creating another invoice.
-            </p>
-          </div>
-        )}
-        <div className="billing-form-actions">
-          <button
-            type="button"
-            className="button button-secondary"
-            disabled={busy}
-            onClick={onClose}
-          >
-            Close for now
-          </button>
-          {!draft.attempt && (
+          {procedures.error && <ErrorState message={procedures.error} retry={procedures.reload} />}
+          {draft.patientId && (
+            <Field
+              label="Link a procedure (optional)"
+              hint="Each procedure can have one linked invoice. Set the agreed charges below; estimates are not charged automatically."
+            >
+              <select
+                value={draft.procedureId}
+                disabled={!!draft.source || procedures.loading}
+                onChange={(event) => {
+                  const procedure = procedures.data?.find((item) => item.id === event.target.value);
+                  const line = draft.items[0];
+                  const suggestItem =
+                    draft.items.length === 1 &&
+                    line.quantity === '1' &&
+                    !line.amount.trim() &&
+                    (!line.description.trim() || line.description === linked?.title);
+                  onChange({
+                    ...draft,
+                    procedureId: event.target.value,
+                    ...(procedure && suggestItem
+                      ? { items: [{ description: procedure.title, quantity: '1', amount: '' }] }
+                      : {}),
+                  });
+                }}
+              >
+                <option value="">No procedure link</option>
+                {procedures.data?.map((item) => (
+                  <option
+                    key={item.id}
+                    value={item.id}
+                    disabled={!!item.invoiceId || item.status === 'cancelled'}
+                  >
+                    {item.title}
+                    {item.invoiceNumber
+                      ? ` · ${item.invoiceNumber}`
+                      : item.status === 'cancelled'
+                        ? ' · cancelled'
+                        : ''}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          {draft.procedureId && linked && (
+            <div className="notice">
+              <span>
+                Linked procedure: <strong>{linked.title}</strong>
+                <br />
+                Recorded estimate: {linked.estimatedCost || 'Not recorded'}. Creating an invoice
+                records a charge; it does not record a received payment.
+              </span>
+            </div>
+          )}
+          <InvoiceLineEditor
+            items={draft.items}
+            locked={false}
+            onChange={(items) => onChange({ ...draft, items })}
+          />
+
+          {draft.source && procedures.data && !eligibleProcedure && (
             <button
               type="button"
-              className="button button-ghost"
-              disabled={busy}
-              onClick={onDiscard}
+              className="button button-secondary"
+              onClick={() => onChange({ ...draft, source: null, procedureId: '', error: '' })}
             >
-              Cancel invoice draft
+              Remove unavailable procedure link
             </button>
           )}
-          <button className="button button-primary" disabled={busy}>
-            {busy ? 'Creating…' : draft.attempt ? 'Retry same request' : 'Create invoice'}
-          </button>
-        </div>
-      </form>
+          <div className="billing-form-actions">
+            <button type="button" className="button button-secondary" onClick={close}>
+              Close for now
+            </button>
+            <button type="button" className="button button-ghost" onClick={onDiscard}>
+              Cancel invoice draft
+            </button>
+            <button
+              className="button button-primary"
+              disabled={!patients.data || (!!draft.procedureId && !eligibleProcedure)}
+            >
+              Review invoice
+            </button>
+          </div>
+        </form>
+      ) : (
+        snapshot && (
+          <div className="stack billing-create-form billing-issue-summary">
+            <h3 ref={heading} tabIndex={-1}>
+              {saved
+                ? 'Invoice issued'
+                : phase === 'rejected'
+                  ? 'Invoice was not issued'
+                  : phase === 'pending'
+                    ? 'Invoice confirmation pending'
+                    : 'Review invoice'}
+            </h3>
+            {saved && (
+              <p>
+                <strong>{saved.number}</strong> · Originally issued {billingStamp(saved.createdAt)}
+              </p>
+            )}
+            <p>
+              Patient · <strong>{saved?.patientName ?? review?.patientName}</strong>
+              <br />
+              Procedure · {saved?.procedureTitle ?? review?.procedureTitle ?? 'No procedure link'}
+            </p>
+            <ol
+              className="billing-issue-items"
+              aria-label={saved ? 'Originally issued charges' : 'Invoice line items'}
+            >
+              {snapshot.items.map((item, index) => (
+                <li key={index}>
+                  <strong>{item.description}</strong>
+                  <dl>
+                    <div>
+                      <dt>Quantity</dt>
+                      <dd>{item.quantity}</dd>
+                    </div>
+                    <div>
+                      <dt>Unit price</dt>
+                      <dd>{money(item.unitAmountPaise / 100)}</dd>
+                    </div>
+                    <div>
+                      <dt>Line amount</dt>
+                      <dd>{money((item.quantity * item.unitAmountPaise) / 100)}</dd>
+                    </div>
+                  </dl>
+                </li>
+              ))}
+            </ol>
+            <p>
+              Total · <strong>{money(chargeTotal(snapshot.items) / 100)}</strong>
+            </p>
+            {saved && <p>At issuance · Unpaid · {money(0)} paid</p>}
+            {phase === 'review' && (
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(e) => setAcknowledged(e.target.checked)}
+                />
+                <span>
+                  I reviewed the patient and charges and confirm this invoice is ready to issue.
+                </span>
+              </label>
+            )}
+            {phase === 'pending' && (
+              <p role="status">
+                {busy
+                  ? 'Waiting for the clinic to confirm the invoice.'
+                  : 'Retry the same request to confirm issuance. This signed-in tab retains it until you reload or sign out.'}
+              </p>
+            )}
+            {phase === 'rejected' && <p role="status">{message}</p>}
+            <div className="billing-form-actions">
+              <button type="button" className="button button-secondary" onClick={close}>
+                {saved ? 'Close confirmation' : 'Close for now'}
+              </button>
+              {phase === 'review' && (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => {
+                    setAcknowledged(false);
+                    setPhase('edit');
+                  }}
+                >
+                  Edit invoice
+                </button>
+              )}
+              {phase === 'review' || phase === 'pending' ? (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={busy || (phase === 'review' && !acknowledged)}
+                  onClick={() => void issue()}
+                >
+                  {busy
+                    ? 'Issuing…'
+                    : phase === 'pending'
+                      ? 'Retry exact issuance'
+                      : 'Issue invoice'}
+                </button>
+              ) : saved ? (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => onCreated(saved.id)}
+                >
+                  Open current invoice
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => {
+                    setAcknowledged(false);
+                    setReview(null);
+                    setMessage('');
+                    setPhase('edit');
+                  }}
+                >
+                  Review draft
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      )}
     </Modal>
   );
 }

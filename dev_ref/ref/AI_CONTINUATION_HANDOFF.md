@@ -1,6 +1,6 @@
 # Dermatology platform: complete AI continuation handoff
 
-**Continuation checkpoint, 23 November 2026 (v1.43.0).** Private messages, intake submissions, clinician care-plan creation, and private image and PDF uploads now support exact retries. Sections 7A–D and the v1.39 continuation prompt below are historical. The next “continue” starts **section 7E, the focused reliability audit**. Start with ordinary invoice creation, verify the described issue in the current checkout, and take one demonstrated issue through a bounded release. Inspect local commits ahead of GitHub. Release checks and environment limitations are in [VERIFICATION](../../docs/VERIFICATION.md).
+**Continuation checkpoint, 23 November 2026 (v1.44.0).** Sections 7A–D are complete. The section 7E audit confirmed and fixed replay of another staff member’s invoice request, recovery of a changed balance as the original, and the invoice form’s uncertain-response handling. On the next “continue,” audit **ordinary payment recording** in section 7E. Reproduce any issue before changing the payment workflow, then complete one bounded release. Inspect local commits ahead of GitHub. Release checks and environment limitations are in [VERIFICATION](../../docs/VERIFICATION.md).
 
 Prepared on **20 November 2026**, Asia/Kolkata, for a new AI chat taking over this repository.
 

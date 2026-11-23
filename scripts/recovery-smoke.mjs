@@ -544,6 +544,45 @@ async function rehearseRecovery() {
     const rejectedPlanCommand = { ...planCommand, doctorId: randomUUID(), requestId: randomUUID() };
     const rejectedPlan = await call(source, planPath, admin, 'POST', rejectedPlanCommand, 409);
     assert.equal(rejectedPlan.code, 'CARE_PLAN_NOT_CREATED');
+    const issuancePath = '/invoices/issue';
+    const issuanceCommand = {
+      requestId: randomUUID(),
+      patientId,
+      reviewedConfirmed: true,
+      items: [
+        { description: 'Synthetic visit', quantity: 1, unitAmountPaise: 3000 },
+        { description: 'Synthetic supplies', quantity: 2, unitAmountPaise: 250 },
+      ],
+    };
+    const issuance = await call(source, issuancePath, admin, 'POST', issuanceCommand, 201);
+    const issued = issuance.receipt.invoice;
+    assert.equal(issued.status, 'unpaid');
+    assert.equal(issued.paidPaise, 0);
+    assert.equal(issued.totalPaise, 3500);
+    const invoicePath = `/invoices/${issued.id}`;
+    const partialPayment = await call(
+      source,
+      invoicePath + '/payments',
+      admin,
+      'POST',
+      { requestId: randomUUID(), amountPaise: 500, method: 'cash', reference: 'Synthetic entry' },
+      201,
+    );
+    assert.equal(partialPayment.invoice.status, 'partial');
+    const rejectedIssuanceCommand = {
+      ...issuanceCommand,
+      requestId: randomUUID(),
+      procedureId: randomUUID(),
+    };
+    const rejectedIssuance = await call(
+      source,
+      issuancePath,
+      admin,
+      'POST',
+      rejectedIssuanceCommand,
+      400,
+    );
+    assert.equal(rejectedIssuance.code, 'INVOICE_NOT_ISSUED');
     const summaryPath = `/patients/${patientId}/care-summary`;
     const summary = await call(source, summaryPath, patient);
     const copyInput = { expectedRevision: summary.revision, requestId: randomUUID() };
@@ -816,6 +855,32 @@ async function rehearseRecovery() {
       await call(target, '/consultation-notes', newAdmin, 'POST', consultationRejectedInput, 400),
       consultationRejected,
     );
+    assert.deepEqual(await call(target, issuancePath, newAdmin, 'POST', issuanceCommand), issuance);
+    assert.deepEqual(
+      await call(target, issuancePath, newAdmin, 'POST', rejectedIssuanceCommand, 400),
+      rejectedIssuance,
+    );
+    const patientInvoice = await call(target, invoicePath, newPatient);
+    assert.deepEqual(patientInvoice.invoice, partialPayment.invoice);
+    assert.deepEqual(patientInvoice.payments, partialPayment.payments);
+    const restoredInvoices = await call(target, '/invoices', newPatient);
+    assert.deepEqual(restoredInvoices, [partialPayment.invoice]);
+    const issueAudit = await call(
+      target,
+      `/search/audit?entityType=invoice&entityId=${issued.id}`,
+      newAdmin,
+    );
+    assert.equal(issueAudit.items.filter((row) => row.action === 'created invoice').length, 1);
+    const invoiceActivity = await call(target, '/activity?limit=100', newPatient);
+    assert.equal(
+      invoiceActivity.items.filter(
+        (row) =>
+          row.kind === 'billing' &&
+          row.href === `/my-care/invoices?invoice=${issued.id}` &&
+          row.title === 'Your clinic created an invoice',
+      ).length,
+      1,
+    );
     const restoredClinicalRecord = await call(target, `/patients/${patientId}`, newAdmin);
     assert.deepEqual(restoredClinicalRecord.encounters, [consultation.encounter]);
     assert.deepEqual(await call(target, planPath, newAdmin, 'POST', planCommand), createdPlan);
@@ -871,6 +936,8 @@ async function rehearseRecovery() {
     for (const projection of [restoredSummary, restoredClinicalRecord]) {
       const json = JSON.stringify(projection);
       for (const value of [
+        issuanceCommand.requestId,
+        rejectedIssuanceCommand.requestId,
         imageCommand.requestId,
         pdfCommand.requestId,
         pausedImageCommand.requestId,

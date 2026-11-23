@@ -316,7 +316,7 @@ export function createApp(options: AppOptions = {}) {
     return pid;
   };
   // Called within the transaction that reads or changes the patient's record.
-  function currentCareUser(req: AuthRequest) {
+  function currentSessionUser(req: AuthRequest) {
     const session = db
       .prepare('SELECT userId,expiresAt,csrfToken,mfaCredentialId FROM sessions WHERE tokenHash=?')
       .get(req.sessionToken ?? '');
@@ -333,9 +333,19 @@ export function createApp(options: AppOptions = {}) {
       !mfaSessionAllowed(db, user.id, session.mfaCredentialId)
     )
       return fail(401, 'Your session changed. Sign in again.');
+    req.user = user;
+    return user;
+  }
+  function currentCareUser(req: AuthRequest) {
+    const user = currentSessionUser(req);
     if (user.mustChangePassword || !['patient', 'doctor', 'admin'].includes(user.role))
       return fail(403, 'Clinical records are restricted to the care team and patient.');
-    req.user = user;
+    return user;
+  }
+  function authorizeInvoiceIssuer(req: AuthRequest) {
+    const user = currentSessionUser(req);
+    if (user.mustChangePassword || !['admin', 'doctor', 'receptionist'].includes(user.role))
+      return fail(403, 'A current staff account is required to issue an invoice.');
     return user;
   }
   function authorizePatientRecord(req: AuthRequest, requestedPatient?: string) {
@@ -1169,7 +1179,16 @@ export function createApp(options: AppOptions = {}) {
     audit,
     fail,
   });
-  registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });
+  registerOperations(app, {
+    db,
+    demoMode,
+    actor,
+    patientAccess,
+    audit,
+    fail,
+    authorizeInvoiceIssuer,
+    transaction: scheduling.transaction,
+  });
   registerPatientProfile(app, { db, actor, patientAccess, clinicianId, audit, fail });
   const clinicalWorkflows = registerClinical(app, {
     db,
