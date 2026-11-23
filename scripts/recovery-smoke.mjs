@@ -560,15 +560,31 @@ async function rehearseRecovery() {
     assert.equal(issued.paidPaise, 0);
     assert.equal(issued.totalPaise, 3500);
     const invoicePath = `/invoices/${issued.id}`;
-    const partialPayment = await call(
-      source,
-      invoicePath + '/payments',
-      admin,
-      'POST',
-      { requestId: randomUUID(), amountPaise: 500, method: 'cash', reference: 'Synthetic entry' },
-      201,
-    );
+    const recordingPath = invoicePath + '/payments/record';
+    const paymentCommand = {
+      requestId: randomUUID(),
+      patientId,
+      receivedExternallyConfirmed: true,
+      expectedRevision: (await call(source, invoicePath, admin)).revision,
+      amountPaise: 500,
+      method: 'upi',
+      reference: 'Synthetic entry',
+    };
+    const recorded = await call(source, recordingPath, admin, 'POST', paymentCommand, 201);
+    assert.equal(recorded.receipt.afterPaidPaise, 500);
+    assert.equal(recorded.receipt.totalPaise, 3500);
+    const stalePaymentCommand = { ...paymentCommand, amountPaise: 100, requestId: randomUUID() };
+    const stalePayment = await call(source, recordingPath, admin, 'POST', stalePaymentCommand, 409);
+    assert.equal(stalePayment.code, 'PAYMENT_NOT_RECORDED');
+    const recordedDetail = await call(source, invoicePath, admin);
+    const partialPayment = await call(source, invoicePath + '/corrections', admin, 'POST', {
+      items: [{ description: 'Corrected synthetic visit', quantity: 1, unitAmountPaise: 4000 }],
+      reason: 'Synthetic corrected charges',
+      requestId: randomUUID(),
+      expectedRevision: recordedDetail.revision,
+    });
     assert.equal(partialPayment.invoice.status, 'partial');
+    assert.equal(partialPayment.invoice.totalPaise, 4000);
     const rejectedIssuanceCommand = {
       ...issuanceCommand,
       requestId: randomUUID(),
@@ -860,6 +876,11 @@ async function rehearseRecovery() {
       await call(target, issuancePath, newAdmin, 'POST', rejectedIssuanceCommand, 400),
       rejectedIssuance,
     );
+    assert.deepEqual(await call(target, recordingPath, newAdmin, 'POST', paymentCommand), recorded);
+    assert.deepEqual(
+      await call(target, recordingPath, newAdmin, 'POST', stalePaymentCommand, 409),
+      stalePayment,
+    );
     const patientInvoice = await call(target, invoicePath, newPatient);
     assert.deepEqual(patientInvoice.invoice, partialPayment.invoice);
     assert.deepEqual(patientInvoice.payments, partialPayment.payments);
@@ -881,6 +902,21 @@ async function rehearseRecovery() {
       ).length,
       1,
     );
+    assert.equal(
+      issueAudit.items.filter((row) => row.action === 'recorded manual payment').length,
+      1,
+    );
+    assert.equal(
+      invoiceActivity.items.filter(
+        (row) =>
+          row.title === 'Your clinic recorded a received payment' &&
+          row.href === `/my-care/invoices?invoice=${issued.id}`,
+      ).length,
+      1,
+    );
+    assert.equal(patientInvoice.payments.length, 1);
+    for (const command of [paymentCommand, stalePaymentCommand])
+      assert.equal(JSON.stringify(patientInvoice).includes(command.requestId), false);
     const restoredClinicalRecord = await call(target, `/patients/${patientId}`, newAdmin);
     assert.deepEqual(restoredClinicalRecord.encounters, [consultation.encounter]);
     assert.deepEqual(await call(target, planPath, newAdmin, 'POST', planCommand), createdPlan);
@@ -936,6 +972,8 @@ async function rehearseRecovery() {
     for (const projection of [restoredSummary, restoredClinicalRecord]) {
       const json = JSON.stringify(projection);
       for (const value of [
+        paymentCommand.requestId,
+        stalePaymentCommand.requestId,
         issuanceCommand.requestId,
         rejectedIssuanceCommand.requestId,
         imageCommand.requestId,

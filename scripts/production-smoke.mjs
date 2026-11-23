@@ -1864,16 +1864,54 @@ try {
   assert.equal(procedureIssueRejected.code, 'INVOICE_NOT_ISSUED');
   assert.equal(procedureIssueRejected.actorId, account.user.id);
   assert.deepEqual(procedureIssueRejected.command, secondProcedureIssue);
-  const payment = await billingWrite(
-    `/invoices/${invoice.id}/payments`,
-    {
+  const invoiceDetailPath = `/invoices/${invoice.id}`;
+  async function readRecordedInvoice() {
+    const response = await fetch(`${base}/api${invoiceDetailPath}`, { headers: apiHeaders });
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+  const recordingPath = invoiceDetailPath + '/payments/record';
+  const paymentCommand = {
+    patientId: patient.id,
+    expectedRevision: (await readRecordedInvoice()).revision,
+    amountPaise: 400,
+    method: 'cash',
+    reference: 'Synthetic entry only',
+    requestId: randomUUID(),
+    receivedExternallyConfirmed: true,
+  };
+  const recorded = await billingWrite(recordingPath, paymentCommand, 201);
+  const originalEntry = recorded.receipt.payment;
+  assert.match(originalEntry.id, /^[a-f0-9-]{36}$/);
+  assert.equal(new Date(originalEntry.createdAt).toISOString(), originalEntry.createdAt);
+  assert.deepEqual(recorded.receipt, {
+    requestId: paymentCommand.requestId,
+    actorId: account.user.id,
+    invoiceId: invoice.id,
+    patientId: patient.id,
+    expectedRevision: paymentCommand.expectedRevision,
+    invoiceNumber: invoice.number,
+    totalPaise: 1000,
+    beforePaidPaise: 0,
+    afterPaidPaise: 400,
+    payment: {
+      id: originalEntry.id,
+      invoiceId: invoice.id,
+      createdAt: originalEntry.createdAt,
       amountPaise: 400,
       method: 'cash',
-      reference: 'Synthetic entry only',
-      requestId: randomUUID(),
+      reference: paymentCommand.reference,
     },
-    201,
-  );
+  });
+  const stalePaymentCommand = { ...paymentCommand, requestId: randomUUID(), amountPaise: 100 };
+  const stalePayment = await billingWrite(recordingPath, stalePaymentCommand, 409);
+  assert.equal(stalePayment.code, 'PAYMENT_NOT_RECORDED');
+  assert.equal(stalePayment.invoiceId, invoice.id);
+  assert.deepEqual(stalePayment.command, stalePaymentCommand);
+  const payment = await readRecordedInvoice();
+  assert.equal(payment.payments.length, 1);
+  assert.equal(payment.payments[0].id, originalEntry.id);
+  assert.notEqual(payment.payments[0].requestId, paymentCommand.requestId);
   const revisedCharges = await billingWrite(`/invoices/${invoice.id}/corrections`, {
     items: [{ description: 'Corrected synthetic charge', quantity: 1, unitAmountPaise: 800 }],
     reason: 'Synthetic charge correction',
@@ -1902,23 +1940,29 @@ try {
   assert.equal(noCharges.issuedCharges.totalPaise, 1000);
   assert.equal(noCharges.corrections.length, 2);
   assert.equal(noCharges.reversals.length, 1);
+  assert.deepEqual(await billingWrite(recordingPath, paymentCommand), recorded);
+  assert.deepEqual(await billingWrite(recordingPath, stalePaymentCommand, 409), stalePayment);
   assert.deepEqual(await billingWrite(issuePath, issuanceCommand), issuance);
   assert.deepEqual(
     await billingWrite(issuePath, secondProcedureIssue, 409),
     procedureIssueRejected,
   );
-  const liveInvoice = await fetch(`${base}/api/invoices/${invoice.id}`, { headers: apiHeaders });
-  assert.equal(liveInvoice.status, 200);
-  assert.deepEqual((await liveInvoice.json()).invoice, noCharges.invoice);
+  const currentPaymentDetail = await readRecordedInvoice();
+  assert.equal(currentPaymentDetail.payments.length, 1);
+  assert.equal(currentPaymentDetail.reversals.length, 1);
+  assert.equal(currentPaymentDetail.invoice.paidPaise, 0);
+  assert.equal(currentPaymentDetail.invoice.status, 'no-charge');
+  for (const command of [paymentCommand, stalePaymentCommand])
+    assert.equal(JSON.stringify(currentPaymentDetail).includes(command.requestId), false);
+  assert.deepEqual(currentPaymentDetail.invoice, noCharges.invoice);
   const issueAudit = await fetch(
     `${base}/api/search/audit?entityType=invoice&entityId=${invoice.id}`,
     { headers: apiHeaders },
   );
   assert.equal(issueAudit.status, 200);
-  assert.equal(
-    (await issueAudit.json()).items.filter((row) => row.action === 'created invoice').length,
-    1,
-  );
+  const auditItems = (await issueAudit.json()).items;
+  for (const action of ['created invoice', 'recorded manual payment'])
+    assert.equal(auditItems.filter((row) => row.action === action).length, 1);
   const bundleImageBytes = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cWb0AAAAASUVORK5CYII=',
     'base64',
@@ -1991,7 +2035,12 @@ try {
   assert.equal(summaryResponse.status, 200);
   const summary = await summaryResponse.json();
   assert.equal(summary.audience, 'patient');
-  for (const command of [issuanceCommand, secondProcedureIssue])
+  for (const command of [
+    issuanceCommand,
+    secondProcedureIssue,
+    paymentCommand,
+    stalePaymentCommand,
+  ])
     assert.equal(JSON.stringify(summary).includes(command.requestId), false);
 
   for (const command of [imageCommand, documentCommand])

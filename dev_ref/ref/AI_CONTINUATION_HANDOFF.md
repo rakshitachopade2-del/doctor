@@ -1,6 +1,6 @@
 # Dermatology platform: complete AI continuation handoff
 
-**Continuation checkpoint, 23 November 2026 (v1.44.0).** Sections 7A–D are complete. The section 7E audit confirmed and fixed replay of another staff member’s invoice request, recovery of a changed balance as the original, and the invoice form’s uncertain-response handling. On the next “continue,” audit **ordinary payment recording** in section 7E. Reproduce any issue before changing the payment workflow, then complete one bounded release. Inspect local commits ahead of GitHub. Release checks and environment limitations are in [VERIFICATION](../../docs/VERIFICATION.md).
+**Continuation checkpoint, 23 November 2026 (v1.45.0).** Sections 7A–D are complete. The section 7E audit confirmed and fixed replay problems in both invoice issuance and ordinary payment recording. On the next “continue,” audit **same-day patient check-in submissions and corrections** in section 7E. Verify what an exact retry does to the timestamp, version, audit and notice, and preserve intentional same-day corrections. Reproduce a material problem before changing the workflow, then finish one bounded release. Inspect local commits ahead of GitHub. Release checks and environment limitations are in [VERIFICATION](../../docs/VERIFICATION.md).
 
 Prepared on **20 November 2026**, Asia/Kolkata, for a new AI chat taking over this repository.
 

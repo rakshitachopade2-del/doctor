@@ -437,6 +437,12 @@ Implementation references: [Node.js SQLite API](https://nodejs.org/docs/latest-v
 
 `server/invoice-issuance.ts` handles both invoice creation routes. An immediate SQLite transaction checks the session and current staff role, looks up the patient and procedure, allocates the invoice number and records the invoice, optional procedure link, audit and patient notice. The immutable `invoiceIssuanceCommands` row binds a UUID to the issuer, patient and a digest of the procedure and ordered charges. Successful rows retain the originally issued invoice. A later payment or correction changes the live detail. A reviewed procedure rejection stores a final outcome for that UUID without consuming a number. Pre-upgrade invoices retain their records and existing UUIDs without acquiring a guessed issuer.
 
+## Recording an externally received payment
+
+`server/payment-recording.ts` handles the reviewed and legacy recording routes. A single SQLite transaction verifies current staff access, reads the invoice, records the payment and new net paid amount, and writes the audit, patient notice and outcome. The reviewed request covers the patient, invoice revision, amount, method, reference and staff acknowledgment. The receipt preserves the invoice total and net paid before and after recording. Later financial activity is reflected in the live invoice.
+
+Successful reviewed requests and definitive balance or revision rejections can be recovered by the original recorder with the same input. The public payment row uses a separate identifier from the private reviewed request. Historical payment rows retain their original IDs and remain usable in the existing billing history.
+
 ## Invoice corrections, erroneous entries and external refunds
 
 `server/billing-corrections.ts` adds immutable `invoiceIssuedCharges`, `invoiceCorrections`, `paymentReversals`, `paymentRefunds`, `paymentRefundVoids` and `billingCorrectionCommands` tables. Existing invoices retain their current data; the known original charge lines are captured before the first correction, without inventing an issue author or date. Source payment rows remain append-only. A composite payment/invoice foreign key and unique payment reversal prevent cross-invoice or duplicate reversals. Current invoice identity, patient-name snapshot, issue date and procedure linkage stay fixed while charges, net paid and derived status change.

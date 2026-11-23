@@ -342,10 +342,10 @@ export function createApp(options: AppOptions = {}) {
       return fail(403, 'Clinical records are restricted to the care team and patient.');
     return user;
   }
-  function authorizeInvoiceIssuer(req: AuthRequest) {
+  function authorizeBillingStaff(req: AuthRequest) {
     const user = currentSessionUser(req);
     if (user.mustChangePassword || !['admin', 'doctor', 'receptionist'].includes(user.role))
-      return fail(403, 'A current staff account is required to issue an invoice.');
+      return fail(403, 'A current staff account is required for this billing entry.');
     return user;
   }
   function authorizePatientRecord(req: AuthRequest, requestedPatient?: string) {
@@ -1186,7 +1186,7 @@ export function createApp(options: AppOptions = {}) {
     patientAccess,
     audit,
     fail,
-    authorizeInvoiceIssuer,
+    authorizeBillingStaff,
     transaction: scheduling.transaction,
   });
   registerPatientProfile(app, { db, actor, patientAccess, clinicianId, audit, fail });

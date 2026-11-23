@@ -16,7 +16,7 @@ import { get, id, nowISO, type DB } from './db.ts';
 
 interface Dependencies {
   db: DB;
-  authorizeInvoiceIssuer: (req: AuthRequest) => User;
+  authorizeBillingStaff: (req: AuthRequest) => User;
   patientAccess: (req: AuthRequest, patientId: string, allowReception: boolean) => Patient;
   transaction: <T>(work: () => T) => T;
   audit: (req: AuthRequest, action: string, entityType: string, entityId: string) => void;
@@ -48,7 +48,7 @@ type Input = z.infer<typeof legacySchema>;
 
 export function registerInvoiceIssuance(
   app: Express,
-  { db, authorizeInvoiceIssuer, patientAccess, transaction, audit, fail }: Dependencies,
+  { db, authorizeBillingStaff, patientAccess, transaction, audit, fail }: Dependencies,
 ) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS invoiceIssuanceCommands (
@@ -66,7 +66,7 @@ export function registerInvoiceIssuance(
   `);
 
   function issue(req: AuthRequest, reviewed: boolean) {
-    const actorId = authorizeInvoiceIssuer(req).id;
+    const actorId = authorizeBillingStaff(req).id;
     if (reviewed) emptyQuery.parse(req.query);
     const input: Input = reviewed ? reviewedSchema.parse(req.body) : legacySchema.parse(req.body);
     const { patientId, requestId, procedureId, items } = input;

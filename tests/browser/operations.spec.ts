@@ -27,7 +27,12 @@ test('invoice amounts keep paise, payments update balance, patients see only the
   await dialog.getByLabel('Amount received (₹)').fill('500.25');
   await dialog.getByLabel('Payment method').selectOption('upi');
   await dialog.getByLabel('Reference / receipt number').fill('test-receipt-001');
+  await dialog.getByRole('button', { name: 'Review payment', exact: true }).click();
+  await dialog
+    .getByRole('checkbox', { name: 'I confirm this money was already received outside Derma.' })
+    .check();
   await dialog.getByRole('button', { name: 'Record received payment', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Open current invoice', exact: true }).click();
   await expect(dialog.locator('.invoice-totals')).toContainText('₹1,100.85');
   await expect(dialog.getByText('partial', { exact: true })).toBeVisible();
   const patientContext = await browser.newContext();
@@ -40,7 +45,7 @@ test('invoice amounts keep paise, payments update balance, patients see only the
   await expect(patient.getByRole('button', { name: 'Create invoice' })).toHaveCount(0);
   await patient.getByRole('button', { name: 'View invoice' }).first().click();
   await expect(patient.getByText('Browser test consultation')).toBeVisible();
-  await expect(patient.getByRole('button', { name: 'Record received payment' })).toHaveCount(0);
+  await expect(patient.getByRole('button', { name: 'Review payment', exact: true })).toHaveCount(0);
   await patientContext.close();
 });
 

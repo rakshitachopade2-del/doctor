@@ -312,9 +312,7 @@ test('administrators correct charges and reverse erroneous entries once while pa
   await form.getByRole('button', { name: 'Save charge correction', exact: true }).click();
   await expect(form).toHaveCount(0);
   await expect(dialog.getByText('No charges', { exact: true })).toBeVisible();
-  await expect(
-    dialog.getByRole('button', { name: 'Record received payment', exact: true }),
-  ).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Review payment', exact: true })).toHaveCount(0);
   const final = await detail();
   expect(final.invoice).toMatchObject({
     id: original.id,

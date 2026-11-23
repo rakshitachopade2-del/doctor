@@ -21,6 +21,7 @@ import type {
   Payment,
   ProcedureBillingItem,
 } from '../../shared/operations';
+import { PaymentRecordingModal, type ReviewedPayment } from '../components/PaymentRecordingModal';
 import { usePendingCareSubmissions } from '../components/pending-care-submissions';
 import {
   checkedBillingPatients,
@@ -44,10 +45,7 @@ import {
   PageHeader,
 } from '../components/ui';
 import { KnowledgeLibraryManager } from '../components/KnowledgeLibraryManager';
-import {
-  useCancellationData as useBillingData,
-  useCancellationGuard as useBillingGuard,
-} from '../components/series-cancellation-helpers';
+import { useCancellationGuard as useBillingGuard } from '../components/series-cancellation-helpers';
 
 const billingError = (problem: unknown) =>
   problem instanceof Error
@@ -426,7 +424,7 @@ export function BillingPage() {
 
 function BillingRegister() {
   const { session } = useSession();
-  const { issuance } = usePendingCareSubmissions();
+  const { issuance, paymentRecording } = usePendingCareSubmissions();
   const location = useLocation();
   const staff = !!session.user && ['admin', 'doctor', 'receptionist'].includes(session.user.role);
   const invoices = useAppointmentBookingData('/api/invoices', (value) => {
@@ -437,10 +435,23 @@ function BillingRegister() {
   });
   const [creation, setCreation] = useState<CreationDraft | null>(null);
   const [creationOrigin, setCreationOrigin] = useState<string | null>(null);
+  const [paymentReview, setPaymentReview] = useState<{
+    attempt: ReviewedPayment;
+    origin: string;
+  } | null>(null);
+  const openPayment = paymentReview?.origin === location.key ? paymentReview.attempt : null;
+  const pendingPayment = paymentRecording.current;
+  const paymentActive = !!openPayment || !!pendingPayment;
+  function reviewPayment(attempt: ReviewedPayment) {
+    setPaymentReview({ attempt, origin: location.key });
+  }
   const creating = creationOrigin === location.key;
   const hasCreation = !!creation || !!issuance.current;
   useLayoutEffect(() => {
-    const close = () => setCreationOrigin(null);
+    const close = () => {
+      setCreationOrigin(null);
+      setPaymentReview(null);
+    };
     window.addEventListener('popstate', close);
     window.addEventListener('hashchange', close);
     return () => {
@@ -478,6 +489,7 @@ function BillingRegister() {
       !procedures.data ||
       sourceOpened.current === procedureId ||
       draft ||
+      paymentActive ||
       hasCreation
     )
       return;
@@ -490,7 +502,16 @@ function BillingRegister() {
       setCreation(createDraft(procedure));
       setCreationOrigin(location.key);
     }
-  }, [staff, invoiceId, procedureId, procedures.data, draft, hasCreation, location.key]);
+  }, [
+    staff,
+    invoiceId,
+    procedureId,
+    procedures.data,
+    draft,
+    hasCreation,
+    paymentActive,
+    location.key,
+  ]);
   function closeSource() {
     if (params.size) setParams({}, { replace: true });
   }
@@ -525,7 +546,7 @@ function BillingRegister() {
           staff ? (
             <button
               className="button button-primary"
-              disabled={!!draft}
+              disabled={!!draft || paymentActive}
               onClick={() => {
                 if (!creation) setCreation(createDraft());
                 setCreationOrigin(location.key);
@@ -537,7 +558,18 @@ function BillingRegister() {
           ) : undefined
         }
       />
-      {draft && !selected && (
+      {staff && pendingPayment && !openPayment && !selected && (
+        <div className="notice billing-pending">
+          <p>
+            Payment confirmation pending for {pendingPayment.invoiceNumber} ·{' '}
+            {pendingPayment.patientName}.
+          </p>
+          <button className="button button-secondary" onClick={() => reviewPayment(pendingPayment)}>
+            Resume payment entry
+          </button>
+        </div>
+      )}
+      {draft && !pendingPayment && !openPayment && !selected && (
         <div className="notice billing-pending">
           <div>
             <strong>An invoice update is unfinished.</strong>
@@ -724,14 +756,53 @@ function BillingRegister() {
           }}
         />
       )}
-      {selected && (
+      {staff && openPayment && (
+        <PaymentRecordingModal
+          key={openPayment.command.requestId + location.key}
+          attempt={openPayment}
+          checkDetail={checkedInvoiceDetail}
+          onEdit={() => {
+            setPaymentReview(null);
+            setSelected(openPayment.invoiceId);
+          }}
+          onClose={() => {
+            setPaymentReview(null);
+            setSelected(null);
+            closeSource();
+          }}
+          onRefresh={(latest) => {
+            const command = openPayment.command;
+            setDraft({
+              ...billingDraft('payment', latest),
+              amount: (command.amountPaise / 100).toFixed(2),
+              method: command.method,
+              reference: command.reference,
+            });
+            setPaymentReview(null);
+            setSelected(openPayment.invoiceId);
+          }}
+          onConfirmed={() => {
+            setDraft(null);
+            void invoices.reload();
+          }}
+          onOpenCurrent={() => {
+            setPaymentReview(null);
+            if (params.size && invoiceId !== openPayment.invoiceId)
+              setParams({ invoice: openPayment.invoiceId }, { replace: true });
+            else setSelected(openPayment.invoiceId);
+          }}
+        />
+      )}
+      {selected && !openPayment && (
         <InvoiceView
           key={`${selected}:${location.key}`}
           id={selected}
           staff={staff}
           draft={draft}
           onDraftChange={setDraft}
-          otherEntryPending={hasCreation}
+          otherEntryPending={hasCreation || !!pendingPayment}
+          pendingPayment={pendingPayment?.invoiceId === selected ? pendingPayment : null}
+          onReviewPayment={reviewPayment}
           onClose={() => {
             setSelected(null);
             closeSource();
@@ -1283,6 +1354,8 @@ function InvoiceView({
   draft,
   onDraftChange,
   otherEntryPending,
+  pendingPayment,
+  onReviewPayment,
   onClose,
   onUpdated,
 }: {
@@ -1291,10 +1364,14 @@ function InvoiceView({
   draft: BillingDraft | null;
   onDraftChange: (draft: BillingDraft | null) => void;
   otherEntryPending: boolean;
+  pendingPayment: ReviewedPayment | null;
+  onReviewPayment: (attempt: ReviewedPayment) => void;
   onClose: () => void;
   onUpdated: () => void;
 }) {
-  const detail = useBillingData(`/api/invoices/${id}`, (value) => checkedInvoiceDetail(value, id));
+  const detail = useAppointmentBookingData(`/api/invoices/${encodeURIComponent(id)}`, (value) =>
+    checkedInvoiceDetail(value, id),
+  );
   const begin = useBillingGuard();
   const { session } = useSession();
   const admin = session.user?.role === 'admin';
@@ -1364,6 +1441,17 @@ function InvoiceView({
         if (!busy) onClose();
       }}
     >
+      {staff && pendingPayment && (
+        <div className="notice billing-pending">
+          <p>Payment confirmation pending for {pendingPayment.invoiceNumber}.</p>
+          <button
+            className="button button-secondary"
+            onClick={() => onReviewPayment(pendingPayment)}
+          >
+            Resume payment entry
+          </button>
+        </div>
+      )}
       {detail.loading ? (
         <Loading />
       ) : error ? (
@@ -1436,7 +1524,7 @@ function InvoiceView({
                 Correct charges
               </button>
             )}
-            {blocked && (
+            {blocked && !pendingPayment && (
               <p className="notice billing-no-print">
                 Finish or cancel the other pending billing entry before recording another change.
               </p>
@@ -1614,14 +1702,10 @@ function InvoiceView({
               (!currentDraft || currentDraft.kind === 'payment') &&
               (data.invoice.totalPaise > data.invoice.paidPaise ||
                 currentDraft?.kind === 'payment') && (
-                <BillingUpdateForm
+                <PaymentEntryForm
                   draft={currentDraft ?? billingDraft('payment', data)}
                   onChange={onDraftChange}
-                  onCancel={() => onDraftChange(null)}
-                  busy={busy}
-                  setBusy={setBusy}
-                  onSaved={updated}
-                  onReviewed={setReviewedDetail}
+                  onReview={onReviewPayment}
                 />
               )}
             <section className="billing-issued-charges">
@@ -1701,6 +1785,97 @@ function InvoiceView({
   );
 }
 
+function PaymentEntryForm({
+  draft,
+  onChange,
+  onReview,
+}: {
+  draft: BillingDraft;
+  onChange: (value: BillingDraft | null) => void;
+  onReview: (attempt: ReviewedPayment) => void;
+}) {
+  const { invoice, revision, payments } = draft.source;
+  const due = invoice.totalPaise - invoice.paidPaise;
+  function update(change: Partial<BillingDraft>) {
+    onChange({ ...draft, ...change, error: '' });
+  }
+  function review(event: FormEvent) {
+    event.preventDefault();
+    try {
+      const amountPaise = paise(draft.amount);
+      if (amountPaise > due) throw new Error('The amount exceeds the outstanding balance.');
+      onReview({
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.number,
+        patientName: invoice.patientName,
+        totalPaise: invoice.totalPaise,
+        beforePaidPaise: invoice.paidPaise,
+        previousPaymentIds: payments.map((entry) => entry.id),
+        command: {
+          requestId: crypto.randomUUID(),
+          patientId: invoice.patientId,
+          expectedRevision: revision,
+          amountPaise,
+          method: draft.method,
+          reference: draft.reference.trim(),
+          receivedExternallyConfirmed: true,
+        },
+      });
+    } catch (problem) {
+      onChange({ ...draft, error: billingError(problem) });
+    }
+  }
+  return (
+    <form className="stack billing-edit-panel payment-form" onSubmit={review}>
+      <h3>Record a received payment</h3>
+      <p>Balance available to record: {money(due / 100)}.</p>
+      {draft.error && (
+        <p className="form-error" role="alert">
+          {draft.error}
+        </p>
+      )}
+      <div className="form-grid">
+        <Field label="Amount received (₹)">
+          <input
+            type="number"
+            required
+            min="0.01"
+            step="0.01"
+            max={(draft.source.invoice.totalPaise - draft.source.invoice.paidPaise) / 100}
+            value={draft.amount}
+            onChange={(event) => update({ amount: event.target.value })}
+          />
+        </Field>
+        <Field label="Payment method">
+          <select
+            value={draft.method}
+            onChange={(event) => update({ method: event.target.value as Payment['method'] })}
+          >
+            <option value="cash">Cash</option>
+            <option value="upi">UPI</option>
+            <option value="card">Card</option>
+            <option value="bank">Bank transfer</option>
+          </select>
+        </Field>
+      </div>
+      <Field label="Reference / receipt number">
+        <input
+          maxLength={200}
+          value={draft.reference}
+          onChange={(event) => update({ reference: event.target.value })}
+        />
+      </Field>
+      <div className="billing-form-actions">
+        <button type="button" className="button button-ghost" onClick={() => onChange(null)}>
+          Clear payment draft
+        </button>
+        <button className="button button-primary" disabled={due <= 0}>
+          Review payment
+        </button>
+      </div>
+    </form>
+  );
+}
 function BillingUpdateForm({
   draft,
   onChange,
@@ -1753,22 +1928,6 @@ function BillingUpdateForm({
   }
   function attempt() {
     const base = `/api/invoices/${draft.invoiceId}`;
-    if (draft.kind === 'payment') {
-      const amountPaise = paise(draft.amount);
-      if (amountPaise > draft.source.invoice.totalPaise - draft.source.invoice.paidPaise)
-        throw new Error(
-          'The amount exceeds the currently recorded balance. Review the invoice before recording it.',
-        );
-      return {
-        path: `${base}/payments`,
-        body: {
-          amountPaise,
-          method: draft.method,
-          reference: draft.reference.trim(),
-          requestId: draft.requestId,
-        },
-      };
-    }
     if (!draft.reason.trim())
       throw new Error('Enter the reason that will be shared with the patient.');
     const common = {
@@ -1937,19 +2096,6 @@ function BillingUpdateForm({
         );
     }
     if (
-      draft.kind === 'payment' &&
-      !result.payments.some(
-        (entry) =>
-          entry.requestId === submitted.body.requestId &&
-          entry.amountPaise === submitted.body.amountPaise &&
-          entry.method === submitted.body.method &&
-          entry.reference === submitted.body.reference,
-      )
-    )
-      throw new Error(
-        'The response did not confirm the submitted payment entry. Retry the same request.',
-      );
-    if (
       draft.kind === 'charges' &&
       (result.revision === draft.source.revision ||
         !result.corrections.some(
@@ -2016,9 +2162,7 @@ function BillingUpdateForm({
             ? 'Mistaken payment entry reversed. No money was returned.'
             : draft.kind === 'refund'
               ? 'External refund recorded and shared with the patient. No money was transferred by Derma.'
-              : draft.kind === 'refund-void'
-                ? 'Erroneous refund entry voided. Original history retained; no money was moved.'
-                : 'Received payment recorded.',
+              : 'Erroneous refund entry voided. Original history retained; no money was moved.',
       );
       await onSaved();
     } catch (problem) {
@@ -2066,12 +2210,10 @@ function BillingUpdateForm({
         ? 'Reverse an erroneous payment entry'
         : draft.kind === 'refund'
           ? 'Record external refund'
-          : draft.kind === 'refund-void'
-            ? 'Void an erroneous refund entry'
-            : 'Record a received payment';
+          : 'Void an erroneous refund entry';
   return (
     <form
-      className={`stack billing-edit-panel ${draft.kind === 'charges' ? 'billing-correction-form' : draft.kind === 'reversal' ? 'billing-reversal-form' : draft.kind === 'refund' ? 'billing-refund-form' : draft.kind === 'refund-void' ? 'billing-refund-void-form' : 'payment-form'}`}
+      className={`stack billing-edit-panel ${draft.kind === 'charges' ? 'billing-correction-form' : draft.kind === 'reversal' ? 'billing-reversal-form' : draft.kind === 'refund' ? 'billing-refund-form' : 'billing-refund-void-form'}`}
       onSubmit={save}
     >
       <h3>{title}</h3>
@@ -2337,65 +2479,26 @@ function BillingUpdateForm({
             </p>
           )}
         </>
-      ) : (
-        <>
-          <div className="form-grid">
-            <Field label="Amount received (₹)">
-              <input
-                type="number"
-                required
-                min="0.01"
-                step="0.01"
-                max={(draft.source.invoice.totalPaise - draft.source.invoice.paidPaise) / 100}
-                value={draft.amount}
-                disabled={locked}
-                onChange={(event) => update({ amount: event.target.value })}
-              />
-            </Field>
-            <Field label="Payment method">
-              <select
-                value={draft.method}
-                disabled={locked}
-                onChange={(event) => update({ method: event.target.value as Payment['method'] })}
-              >
-                <option value="cash">Cash</option>
-                <option value="upi">UPI</option>
-                <option value="card">Card</option>
-                <option value="bank">Bank transfer</option>
-              </select>
-            </Field>
-          </div>
-          <Field label="Reference / receipt number">
-            <input
-              maxLength={200}
-              value={draft.reference}
-              disabled={locked}
-              onChange={(event) => update({ reference: event.target.value })}
-            />
-          </Field>
-        </>
-      )}
-      {draft.kind !== 'payment' && (
-        <Field
-          label={
-            draft.kind === 'refund'
-              ? 'Reason for refund'
-              : draft.kind === 'refund-void'
-                ? 'Reason for voiding refund'
-                : 'Reason shared with patient'
-          }
-          hint="This reason becomes part of the invoice history shared with the patient."
-        >
-          <textarea
-            required
-            rows={3}
-            maxLength={1000}
-            value={draft.reason}
-            disabled={locked}
-            onChange={(event) => update({ reason: event.target.value })}
-          />
-        </Field>
-      )}
+      ) : null}
+      <Field
+        label={
+          draft.kind === 'refund'
+            ? 'Reason for refund'
+            : draft.kind === 'refund-void'
+              ? 'Reason for voiding refund'
+              : 'Reason shared with patient'
+        }
+        hint="This reason becomes part of the invoice history shared with the patient."
+      >
+        <textarea
+          required
+          rows={3}
+          maxLength={1000}
+          value={draft.reason}
+          disabled={locked}
+          onChange={(event) => update({ reason: event.target.value })}
+        />
+      </Field>
       {draft.kind === 'charges' && !changed && draft.phase === 'editing' && (
         <p className="billing-help">
           Change the line items before saving. A reason alone does not create a correction.
@@ -2529,9 +2632,7 @@ function BillingUpdateForm({
                 ? 'Cancel reversal'
                 : draft.kind === 'refund'
                   ? 'Cancel refund draft'
-                  : draft.kind === 'refund-void'
-                    ? 'Cancel refund void draft'
-                    : 'Clear payment draft'}
+                  : 'Cancel refund void draft'}
           </button>
         )}
         <button
@@ -2562,9 +2663,7 @@ function BillingUpdateForm({
                   ? 'Confirm entry reversal'
                   : draft.kind === 'refund'
                     ? 'Record refund'
-                    : draft.kind === 'refund-void'
-                      ? 'Confirm refund entry void'
-                      : 'Record received payment'}
+                    : 'Confirm refund entry void'}
         </button>
       </div>
     </form>

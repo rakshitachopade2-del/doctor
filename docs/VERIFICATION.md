@@ -1,5 +1,15 @@
 # Release verification
 
+## 1.45.0 · Recording a received payment
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **726 API, backup and recovery tests** and **169 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A Docker engine was unavailable for container runtime testing.
+
+On v1.44 a doctor could replay reception’s payment request. A later payment also changed the balance that the original request returned. Eight new API test groups cover recording on both routes, exact amounts in paise, recorder and invoice identity, and recovery of the original entry after corrections, refunds and reversals. Independent server processes, changes to staff authority inside the write transaction, and injected failures checked that only one payment, balance change, audit and patient notice survive a successful request.
+
+Five browser journeys cover payment review and acknowledgment, a lost confirmation on a fully paid invoice, a later reversal and payment, and a genuinely stale balance that requires fresh review. Malformed replies retained the exact entry. Late reads and writes after navigation left the active page and session intact. Reloading or signing out cleared the pending entry. Review, retry and confirmation passed mobile accessibility, currency visibility and action-button checks at 320 pixels.
+
+A database created by v1.44 retained its historical payment, revision and patient-visible detail after upgrade. Both payment routes rejected its old UUID, including an alternate letter case, for both tested staff accounts. An intentional new payment started from the historical paid balance. The production smoke test recovered the exact manual payment after reversal and removal of the invoice charges. The backup rehearsal preserved the original confirmation and a rejected command while the patient saw the corrected current total, one payment and one payment notice.
+
 ## 1.44.0 · Staff invoice issuance
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **718 API, backup and recovery tests** and **164 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A Docker engine was unavailable for container runtime testing.

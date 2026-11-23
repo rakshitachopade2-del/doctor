@@ -499,3 +499,21 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+
+.billing-payment-review {
+  overflow-wrap: anywhere;
+}
+.billing-payment-review dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: 1rem;
+  margin: 0;
+}
+.billing-payment-review dt {
+  color: var(--text-muted, #526152);
+  font-size: 0.88rem;
+}
+.billing-payment-review dd {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+}

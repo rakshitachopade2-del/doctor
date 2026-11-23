@@ -3,21 +3,17 @@ import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
 import { createUser, get, id, insert, list, nowISO, type DB } from './db.ts';
 import type { Patient, User } from '../shared/types.ts';
-import type { Invoice, KnowledgeArticle, Payment } from '../shared/operations.ts';
+import type { Invoice, KnowledgeArticle } from '../shared/operations.ts';
 import type { ProcedureRecord } from '../shared/clinical.ts';
-import { notifyPatient } from './activity.ts';
+import { registerPaymentRecording } from './payment-recording.ts';
 import { registerInvoiceIssuance } from './invoice-issuance.ts';
 import { registerKnowledgeAuthoring } from './knowledge-authoring.ts';
-import {
-  invoiceDetail,
-  invoicePaymentStatus,
-  registerBillingCorrections,
-} from './billing-corrections.ts';
+import { invoiceDetail, registerBillingCorrections } from './billing-corrections.ts';
 
 interface OperationsContext {
   db: DB;
   demoMode: boolean;
-  authorizeInvoiceIssuer: (req: AuthRequest) => User;
+  authorizeBillingStaff: (req: AuthRequest) => User;
   transaction: <T>(work: () => T) => T;
   actor: (req: AuthRequest, roles?: User['role'][]) => User;
   patientAccess: (req: AuthRequest, patientId: string, allowReception?: boolean) => Patient;
@@ -158,63 +154,7 @@ export function registerOperations(app: Express, context: OperationsContext) {
     audit(req, 'viewed invoice', 'invoice', invoice.id);
     res.json(detail(invoice));
   });
-  app.post('/api/invoices/:id/payments', (req: AuthRequest, res) => {
-    staff(req);
-    const invoiceId = String(req.params.id);
-    invoiceAccess(req, invoiceId);
-    const input = z
-      .object({
-        amountPaise: z.number().int().min(1).max(1_000_000_000),
-        method: z.enum(['cash', 'card', 'upi', 'bank']),
-        reference: z.string().trim().max(200).default(''),
-        requestId: z.string().uuid(),
-      })
-      .parse(req.body);
-    let invoice: Invoice;
-    let duplicate = false;
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      invoice = get<Invoice>(db, 'invoices', invoiceId)!;
-      const previous = db
-        .prepare('SELECT data FROM payments WHERE invoiceId=? AND requestId=?')
-        .get(invoiceId, input.requestId) as { data: string } | undefined;
-      if (previous) {
-        const payment = JSON.parse(previous.data) as Payment;
-        if (
-          payment.amountPaise !== input.amountPaise ||
-          payment.method !== input.method ||
-          payment.reference !== input.reference
-        )
-          fail(409, 'This payment request was already used with different details.');
-        duplicate = true;
-      } else {
-        if (input.amountPaise > invoice.totalPaise - invoice.paidPaise)
-          fail(409, 'This payment would exceed the outstanding invoice balance.');
-        const payment: Payment = { ...input, id: id(), invoiceId, createdAt: nowISO() };
-        db.prepare('INSERT INTO payments(id,invoiceId,requestId,data) VALUES (?,?,?,?)').run(
-          payment.id,
-          invoiceId,
-          input.requestId,
-          JSON.stringify(payment),
-        );
-        invoice.paidPaise += input.amountPaise;
-        invoice.status = invoicePaymentStatus(invoice.totalPaise, invoice.paidPaise);
-        db.prepare('UPDATE invoices SET data=? WHERE id=?').run(JSON.stringify(invoice), invoiceId);
-        audit(req, 'recorded manual payment', 'invoice', invoiceId);
-        notifyPatient(db, invoice.patientId, `payment-recorded:${payment.id}`, {
-          kind: 'billing',
-          title: 'Your clinic recorded a received payment',
-          detail: invoice.number,
-          href: `/my-care/invoices?invoice=${invoice.id}`,
-        });
-      }
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
-    res.status(duplicate ? 200 : 201).json(detail(invoice));
-  });
+  registerPaymentRecording(app, { ...context, invoiceAccess });
   app.get('/api/knowledge', (req, res) => {
     const articles = db
       .prepare(
