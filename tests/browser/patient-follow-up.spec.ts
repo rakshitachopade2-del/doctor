@@ -84,10 +84,13 @@ test('patient reads shared follow-up instructions and completion while the origi
       .getByRole('dialog')
       .getByLabel('Anything you want your clinic to know?', { exact: true })
       .fill(`Patient check-in for review ${suffix}`);
-    await page
-      .getByRole('dialog')
-      .getByRole('button', { name: 'Save check-in', exact: true })
-      .click();
+    const checkIn = page.getByRole('dialog');
+    await checkIn.getByRole('button', { name: 'Review check-in', exact: true }).click();
+    await checkIn
+      .getByLabel('I reviewed this report and want to share it with my clinic.', { exact: true })
+      .check();
+    await checkIn.getByRole('button', { name: 'Save check-in', exact: true }).click();
+    await checkIn.getByRole('button', { name: 'Close confirmation', exact: true }).click();
     await expect(page.getByRole('dialog')).toBeHidden();
     await expect(card.getByText('Today’s check-in is saved', { exact: true })).toBeVisible();
 

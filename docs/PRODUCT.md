@@ -4,6 +4,8 @@ The supplied concept is source material, not an instruction to make unsupported 
 
 ## Release scope
 
+Patients can review and share a daily report for a care plan and deliberately correct it on the same day. Recovering a lost confirmation returns the original answers without sending another clinician notice or reopening a reviewed report. If another submission changed the report, patients can compare their draft with the current answers before sharing a correction.
+
 Staff can record a payment already received outside the app. They review the patient, invoice, amount, method, reference and resulting balance before confirming. An interrupted save can be recovered in the same signed-in tab. The receipt preserves the original entry even if the invoice is later corrected or the entry is reversed.
 
 Clinic staff review itemized charges before issuing a standalone or procedure-linked invoice. If the reply is lost, the issuer can recover the original confirmation. Patients see one invoice and, for an eligible patient account, one creation notice. Billing detail continues to show later charge corrections and payments.

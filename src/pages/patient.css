@@ -1578,3 +1578,28 @@
   color: #425f52;
   font-weight: 700;
 }
+
+.check-in-dialog p {
+  margin: 0;
+}
+.check-in-values {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.5rem 1.25rem;
+  margin: 0.75rem 0;
+}
+.check-in-values dt {
+  color: var(--muted);
+}
+.check-in-values dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.check-in-actions,
+.check-in-resume {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}

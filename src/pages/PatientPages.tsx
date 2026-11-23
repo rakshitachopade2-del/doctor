@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
@@ -45,6 +45,8 @@ import {
   PageHeader,
 } from '../components/ui';
 import './patient.css';
+import { CheckInModal } from '../components/CheckInModal';
+import { readCheckInSource, type CheckInSource } from '../components/check-in-submission-helpers';
 import { PrivateUploadModal } from '../components/PrivateUploadModal';
 import { uploadKey } from '../components/private-upload-helpers';
 import { DocumentsPanel } from '../components/DocumentsPanel';
@@ -1460,7 +1462,7 @@ export function MyCarePage() {
     return <Navigate to="/clinic" replace />;
   return (
     <PatientCare
-      key={`${session.user.id}:${location.key}`}
+      key={`${session.user.id}:${session.csrfToken}:${location.key}`}
       patientId={session.user.patientId}
       name={session.user.name}
     />
@@ -1490,8 +1492,63 @@ function usePatientRecord(patientId: string) {
 
 function PatientCare({ patientId, name }: { patientId: string; name: string }) {
   const record = usePatientRecord(patientId);
-  const settings = useResource<ClinicSettings>('/api/settings');
-  const [checkIn, setCheckIn] = useState<CarePlan | null>(null);
+  const settings = useAppointmentBookingData('/api/settings', checkedMessageSettings);
+  const { checkInSubmission } = usePendingCareSubmissions();
+  const [checkIn, setCheckIn] = useState<CheckInSource | null>(null);
+  const [checkInError, setCheckInError] = useState('');
+  function openCheckIn(plan: CarePlan) {
+    if (checkInSubmission.current) return;
+    try {
+      const day = today();
+      const { source } = readCheckInSource(record.data, patientId, plan.id, day, plan.title);
+      if (day < plan.startDate || day > plan.endDate) {
+        setCheckInError('This plan is outside its check-in dates.');
+        return;
+      }
+      setCheckInError('');
+      setCheckIn(source);
+    } catch (problem) {
+      setCheckInError(errorMessage(problem));
+    }
+  }
+  function closeCheckIn(refresh: boolean) {
+    setCheckIn(null);
+    if (refresh) {
+      void record.reload();
+      void settings.reload();
+    }
+  }
+  const pendingCheckIn = checkInSubmission.current;
+  const checkInControls = (
+    <Fragment key="daily-check-in">
+      {pendingCheckIn && !checkIn && (
+        <div className="notice check-in-resume" role="status">
+          <p>Your check-in is awaiting confirmation. Resume it to check the outcome.</p>
+          <button
+            className="button button-secondary"
+            onClick={() => setCheckIn(pendingCheckIn.source)}
+          >
+            Resume check-in
+          </button>
+        </div>
+      )}
+      {checkInError && (
+        <div className="notice notice-error" role="alert">
+          {checkInError}
+          <button
+            className="button button-secondary"
+            onClick={() => {
+              setCheckInError('');
+              void record.reload();
+            }}
+          >
+            Refresh record
+          </button>
+        </div>
+      )}
+      {checkIn && <CheckInModal initial={checkIn} patientName={name} onClose={closeCheckIn} />}
+    </Fragment>
+  );
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [pendingCancellation, setPendingCancellation] = useState<{
     appointmentId: string;
@@ -1524,8 +1581,20 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
       void record.reload();
     }
   }
-  if (record.loading) return <Loading />;
-  if (record.error) return <ErrorState message={record.error} retry={record.reload} />;
+  if (record.loading)
+    return (
+      <div className="patient-care-page">
+        {checkInControls}
+        <Loading />
+      </div>
+    );
+  if (record.error)
+    return (
+      <div className="patient-care-page">
+        {checkInControls}
+        <ErrorState message={record.error} retry={record.reload} />
+      </div>
+    );
   return (
     <div className="patient-care-page">
       <PageHeader
@@ -1538,6 +1607,7 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           </Link>
         }
       />
+      {checkInControls}
       {pendingCancellation && !cancelId && (
         <div className="notice" role="status">
           <p>
@@ -1578,10 +1648,11 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
                   record.data?.checkIns.filter((value) => value.carePlanId === plan.id) ?? []
                 }
                 onCheckIn={
+                  !pendingCheckIn &&
                   settings.data?.modules.followUp &&
                   plan.startDate <= today() &&
                   plan.endDate >= today()
-                    ? () => setCheckIn(plan)
+                    ? () => openCheckIn(plan)
                     : undefined
                 }
               />
@@ -1681,19 +1752,6 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
           </Link>
         </aside>
       </div>
-      {checkIn && (
-        <CheckInModal
-          plan={checkIn}
-          existing={record.data?.checkIns.find(
-            (value) => value.carePlanId === checkIn.id && value.date === today(),
-          )}
-          onClose={() => setCheckIn(null)}
-          onSave={() => {
-            setCheckIn(null);
-            record.reload();
-          }}
-        />
-      )}
       {cancelId && (
         <Modal title="Cancel appointment" onClose={closeCancellation}>
           <AppointmentCancellationForm
@@ -1871,101 +1929,6 @@ function CarePlanCard({
         )}
       </Card>
     </div>
-  );
-}
-
-function CheckInModal({
-  plan,
-  existing,
-  onClose,
-  onSave,
-}: {
-  plan: CarePlan;
-  existing?: CheckIn;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const [adherence, setAdherence] = useState<CheckIn['adherence']>(existing?.adherence ?? 'taken');
-  const [feeling, setFeeling] = useState<CheckIn['feeling']>(existing?.feeling ?? 'same');
-  const [note, setNote] = useState(existing?.note ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const toast = useToast();
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    try {
-      await api('/api/check-ins', {
-        method: 'POST',
-        body: { carePlanId: plan.id, date: today(), adherence, feeling, note },
-      });
-      toast('Your check-in has been saved.');
-      onSave();
-    } catch (problem) {
-      setError(errorMessage(problem));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal title="Your daily check-in" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        <p className="muted">
-          {plan.title} · {formatDate(today())}
-        </p>
-        <Field label="How did your routine go today?">
-          <select
-            className="select"
-            value={adherence}
-            onChange={(event) => setAdherence(event.target.value as typeof adherence)}
-          >
-            <option value="taken">I followed my plan</option>
-            <option value="partial">I followed part of my plan</option>
-            <option value="missed">I missed my plan today</option>
-          </select>
-        </Field>
-        <Field label="How are you feeling compared with before?">
-          <select
-            className="select"
-            value={feeling}
-            onChange={(event) => setFeeling(event.target.value as typeof feeling)}
-          >
-            <option value="better">Better</option>
-            <option value="same">About the same</option>
-            <option value="worse">Worse</option>
-          </select>
-        </Field>
-        <Field
-          label="Anything you want your clinic to know?"
-          hint="Optional. This is your own report, not a clinical assessment."
-        >
-          <textarea
-            className="textarea"
-            rows={3}
-            maxLength={2000}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            placeholder="How your day went, questions, or changes you noticed"
-          />
-        </Field>
-        {(feeling === 'worse' || adherence !== 'taken') && (
-          <div className="notice">
-            For questions about symptoms or changing your treatment, contact your clinician.
-            Check-ins do not change your prescribed plan.
-          </div>
-        )}
-        {error && (
-          <div className="notice notice-error" role="alert">
-            {error}
-          </div>
-        )}
-        <button className="button button-primary" disabled={busy}>
-          {busy ? 'Saving…' : 'Save check-in'}
-          <Check size={17} />
-        </button>
-      </form>
-    </Modal>
   );
 }
 

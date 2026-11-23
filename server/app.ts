@@ -16,6 +16,7 @@ import {
 } from './patient-profile.ts';
 import { date, required, short, text } from './validation.ts';
 import { registerCarePlanCreation } from './care-plan-creation.ts';
+import { registerCheckInSubmission } from './check-in-submission.ts';
 import { registerIntakeSubmission } from './intake-submission.ts';
 import { registerCareMessages } from './care-message.ts';
 import { registerCareSummary } from './care-summary.ts';
@@ -26,12 +27,7 @@ import {
 } from './image-annotations.ts';
 import { registerDocuments } from './documents.ts';
 import { registerPrivateUploads } from './private-upload.ts';
-import {
-  initializeActivity,
-  notifyPatient,
-  notifyClinicians,
-  registerActivity,
-} from './activity.ts';
+import { initializeActivity, notifyPatient, registerActivity } from './activity.ts';
 import {
   initializeIdentity,
   managedAccount,
@@ -1007,57 +1003,17 @@ export function createApp(options: AppOptions = {}) {
       followUp.recordLegacyStatus(req, String(req.params.id), input.status, input.expectedRevision),
     );
   });
-  app.post('/api/check-ins', (req: AuthRequest, res) => {
-    moduleEnabled('followUp');
-    const user = actor(req, ['patient']);
-    const input = z
-      .object({
-        carePlanId: required,
-        date,
-        adherence: z.enum(['taken', 'partial', 'missed']),
-        feeling: z.enum(['better', 'same', 'worse']),
-        note: text.default(''),
-      })
-      .parse(req.body);
-    const plan = get<CarePlan>(db, 'carePlans', input.carePlanId);
-    if (!plan) return fail(404, 'Care plan not found.');
-    patientAccess(req, plan.patientId);
-    if (plan.status !== 'active') fail(409, 'This care plan is completed.');
-    if (input.date < plan.startDate || input.date > plan.endDate || input.date > clinicToday())
-      fail(400, 'Check-ins must be within the plan dates and cannot be in the future.');
-    const existing = db
-      .prepare('SELECT id FROM checkIns WHERE carePlanId=? AND date=?')
-      .get(plan.id, input.date) as { id: string } | undefined;
-    const check: CheckIn = {
-      ...input,
-      id: existing?.id ?? id(),
-      patientId: user.patientId!,
-      createdAt: nowISO(),
-    };
-    scheduling.transaction(() => {
-      db.prepare(
-        'INSERT INTO checkIns(id,patientId,carePlanId,date,data) VALUES (?,?,?,?,?) ON CONFLICT(carePlanId,date) DO UPDATE SET data=excluded.data',
-      ).run(check.id, check.patientId, check.carePlanId, check.date, JSON.stringify(check));
-      audit(
-        req,
-        existing ? 'updated daily check-in' : 'recorded daily check-in',
-        'checkIn',
-        check.id,
-      );
-      notifyClinicians(
-        db,
-        check.patientId,
-        `check-in:${check.id}:${digest(JSON.stringify(check))}`,
-        {
-          kind: 'check-in',
-          title: existing ? 'A patient updated their check-in' : 'A patient shared a check-in',
-          detail: `${get<Patient>(db, 'patients', check.patientId)!.name} · ${plan.title}`,
-          href: `/clinic/patients/${check.patientId}?tab=care&plan=${plan.id}`,
-        },
-        { doctorId: followUp.owner(plan).doctorId, excludeActorId: user.id },
-      );
-    });
-    res.status(existing ? 200 : 201).json(check);
+  registerCheckInSubmission(app, {
+    db,
+    transaction: scheduling.transaction,
+    authorize: (req) => {
+      currentCareUser(req);
+      return actor(req, ['patient']);
+    },
+    patientAccess,
+    currentOwner: (plan) => followUp.owner(plan).doctorId,
+    audit,
+    fail,
   });
   app.get('/api/images/:id/file', (req: AuthRequest, res) => {
     const key = String(req.params.id),

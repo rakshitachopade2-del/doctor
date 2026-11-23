@@ -532,7 +532,7 @@ async function rehearseRecovery() {
       warnings: '',
       expectations: '',
       cost: '',
-      startDate: visitDate,
+      startDate: clinicToday(),
       endDate: visitDate,
       followUpDate: visitDate,
       medications: [],
@@ -540,6 +540,37 @@ async function rehearseRecovery() {
     const createdPlan = await call(source, planPath, admin, 'POST', planCommand, 201);
     const originalPlan = createdPlan.receipt.plan;
     assert.equal(originalPlan.status, 'active');
+    const checkInPath = '/check-ins/submit';
+    const reportCommand = {
+      requestId: randomUUID(),
+      patientId,
+      carePlanId: originalPlan.id,
+      date: planCommand.startDate,
+      adherence: 'partial',
+      feeling: 'same',
+      note: 'Original synthetic report.',
+      expectedUpdatedAt: null,
+      reviewedConfirmed: true,
+    };
+    const reported = await call(source, checkInPath, patient, 'POST', reportCommand, 201);
+    const originalReport = reported.receipt.checkIn;
+    const correctionCommand = {
+      ...reportCommand,
+      requestId: randomUUID(),
+      expectedUpdatedAt: originalReport.createdAt,
+      adherence: 'taken',
+      note: 'Corrected synthetic report.',
+    };
+    const corrected = await call(source, checkInPath, patient, 'POST', correctionCommand, 201);
+    assert.equal(corrected.receipt.checkIn.id, originalReport.id);
+    assert.ok(corrected.receipt.checkIn.createdAt > originalReport.createdAt);
+    const staleCheckInCommand = {
+      ...correctionCommand,
+      requestId: randomUUID(),
+      note: 'Stale synthetic draft.',
+    };
+    const staleCheckIn = await call(source, checkInPath, patient, 'POST', staleCheckInCommand, 409);
+    assert.equal(staleCheckIn.code, 'CHECK_IN_NOT_SAVED');
     await call(source, `/care-plans/${originalPlan.id}`, admin, 'PATCH', { status: 'completed' });
     const rejectedPlanCommand = { ...planCommand, doctorId: randomUUID(), requestId: randomUUID() };
     const rejectedPlan = await call(source, planPath, admin, 'POST', rejectedPlanCommand, 409);
@@ -924,6 +955,28 @@ async function rehearseRecovery() {
       await call(target, planPath, newAdmin, 'POST', rejectedPlanCommand, 409),
       rejectedPlan,
     );
+    assert.deepEqual(await call(target, checkInPath, newPatient, 'POST', reportCommand), reported);
+    assert.deepEqual(
+      await call(target, checkInPath, newPatient, 'POST', correctionCommand),
+      corrected,
+    );
+    assert.deepEqual(
+      await call(target, checkInPath, newPatient, 'POST', staleCheckInCommand, 409),
+      staleCheckIn,
+    );
+    assert.deepEqual(
+      restoredClinicalRecord.checkIns.filter((row) => row.carePlanId === originalPlan.id),
+      [corrected.receipt.checkIn],
+    );
+    const reviewedReports = await call(target, `/care-plans/${originalPlan.id}/reviews`, newAdmin);
+    assert.deepEqual(reviewedReports[0].checkInSnapshots[0].snapshot, corrected.receipt.checkIn);
+    const reportAudit = await call(
+      target,
+      `/search/audit?entityType=checkIn&entityId=${originalReport.id}`,
+      newAdmin,
+    );
+    for (const action of ['recorded daily check-in', 'updated daily check-in'])
+      assert.equal(reportAudit.items.filter((row) => row.action === action).length, 1);
     const patientPlans = await call(target, '/care-plans', newPatient);
     assert.equal(patientPlans.length, 1);
     assert.equal(patientPlans[0].id, originalPlan.id);
@@ -972,6 +1025,9 @@ async function rehearseRecovery() {
     for (const projection of [restoredSummary, restoredClinicalRecord]) {
       const json = JSON.stringify(projection);
       for (const value of [
+        reportCommand.requestId,
+        correctionCommand.requestId,
+        staleCheckInCommand.requestId,
         paymentCommand.requestId,
         stalePaymentCommand.requestId,
         issuanceCommand.requestId,
@@ -1072,7 +1128,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, original and corrected daily check-ins with a preserved stale rejection, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

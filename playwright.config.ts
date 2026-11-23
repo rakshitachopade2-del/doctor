@@ -212,6 +212,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)payment-recording\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5221' },
     },
+    {
+      name: 'check-in-submission',
+      testMatch: /(?:^|\/)check-in-submission\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5222' },
+    },
   ],
   webServer: [
     {
@@ -447,6 +452,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3049 E2E_VITE_PORT=5221 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5221',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3050 E2E_VITE_PORT=5222 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5222',
       reuseExistingServer: false,
       timeout: 60000,
     },

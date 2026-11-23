@@ -139,7 +139,12 @@ test('patient history, check-ins, private images and care messages persist acros
   await dialog
     .getByLabel('Anything you want your clinic to know?', { exact: true })
     .fill(`Routine update ${suffix}`);
+  await dialog.getByRole('button', { name: 'Review check-in', exact: true }).click();
+  await dialog
+    .getByLabel('I reviewed this report and want to share it with my clinic.', { exact: true })
+    .check();
   await dialog.getByRole('button', { name: 'Save check-in', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Close confirmation', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText('Today’s check-in is saved', { exact: true }).first()).toBeVisible();
   await page.reload();

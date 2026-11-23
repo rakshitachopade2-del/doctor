@@ -1,5 +1,17 @@
 # Release verification
 
+## 1.46.0 · Daily patient check-ins
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **734 API, backup and recovery tests** and **174 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. Container runtime verification requires a Docker engine, which was unavailable on this machine.
+
+On v1.45, repeating a successful check-in after the clinician had reviewed it kept one row but changed its timestamp. The report reappeared as unreviewed, with a second audit entry and a second clinician notice.
+
+The API checks exercise simultaneous saves from independent writers, changes to patient access and care-team ownership, and failed writes to the report, audit, notification and confirmation tables. They verify that a retry returns the original answers while a deliberate same-day correction advances the version and reaches the current follow-up owner. A clinical review retains the report version the clinician saw.
+
+Five browser journeys cover patient review and correction, lost confirmation followed by a later correction and plan completion, stale drafts that require a fresh comparison and acknowledgment, late responses after navigation, and clearing private pending data on reload or sign-out. The browser clock advances past midnight during both receipt recovery and correction of a final-day report. Both flows retain the original clinic date. The review, retry and confirmation controls were checked at 320 pixels with Chrome and axe.
+
+A database created by v1.45 retained its report and clinical review after upgrade. A correction using the old report timestamp succeeded and preserved the report ID. The local production smoke test recovered both original submissions after completion, with one audit entry and clinician notice per deliberate save. The backup rehearsal verified the two receipts, the rejected stale correction and the corrected report in the restored database.
+
 ## 1.45.0 · Recording a received payment
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **726 API, backup and recovery tests** and **169 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A Docker engine was unavailable for container runtime testing.
