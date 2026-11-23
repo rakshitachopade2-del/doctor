@@ -1,5 +1,19 @@
 # Release verification
 
+## 1.48.0 · Investigation result submission
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **748 API, backup and recovery tests** and **185 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for container runtime verification.
+
+On v1.47, repeating a result submission after its private clinical review returned 201 twice. The second result had a different ID, referenced the same PDF and put the investigation back on the worklist. Repeating a patient submission also sent the ordering clinician a second notice. The same duplicate result was reproducible from a clinician account.
+
+Seven API regression groups cover the two submission routes, ordered attachments, account and role binding, current patient access, and routing during handover. Separate SQLite writers and injected failures exercise duplicate requests, intentional concurrent supplements and atomic rollback of result, audit, notice and receipt. Missing and cross-patient documents produce the same generic refusal.
+
+Six browser journeys cover both portals, ordered PDF selection, an interrupted reply, private and published interpretations, supplements, and cancellation while a form is open. They also exercise late responses after navigation, loss of pending data on reload or sign-out, and fresh acknowledgment after replacing an unavailable report. The existing patient, clinician and embedded PDF upload journeys were adapted to the review step.
+
+The local production smoke test recovers a patient's original submission after clinical review and verifies that the worklist stays unchanged. After publication, the patient deliberately submits a supplement with the same note and PDF. The two submissions retain distinct result IDs, audits and recipient notices. The original review still refers to the first result. After cancellation, recovering either submission leaves the history intact and the refused new command remains refused.
+
+The backup rehearsal restores a patient submission, a staff supplement, their exact PDF links and bytes, and a rejected submission to a cancelled investigation. The unpublished interpretation stays in the clinical record. A database created by v1.47 retained its existing results and private review after upgrade, including two older entries that referenced the same report. A deliberate new submission appended to that history and an exact retry recovered it once.
+
 ## 1.47.0 · Clinician follow-up review recording
 
 Verified locally on **23 November 2026** using Node.js **24.22.3** and Google Chrome. All **741 API, backup and recovery tests** and **179 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for a container runtime test.

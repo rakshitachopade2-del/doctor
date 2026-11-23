@@ -472,6 +472,12 @@ All clinical authorship below requires an account linked to a doctor profile, in
 
 Investigation status is derived: `ordered` before a result, `result-received` when the latest submission has no review, `reviewed` after a clinician reviews that latest submission, or `cancelled`. A supplemental submission returns the order to `result-received` and retains earlier results and interpretations. A reviewed result may still have no patient-visible interpretation until explicit publication. The application does not classify a result as normal/abnormal or generate a diagnosis.
 
+The patient and clinician result forms use `POST /investigations/:id/results/submit` with `{requestId,patientId,investigationId,submittedByRole,note,documentIds,reviewedConfirmed:true}`. The role must match the current account (`patient`, `doctor` or `admin`), the path and body must identify the same investigation, and a clinician needs a linked professional profile. Send a trimmed note of up to 8,000 characters, up to ten distinct same-patient PDF document IDs in the reviewed order, or both. An empty note is valid when at least one PDF is selected. Use a new UUID for each intentional submission, including supplemental results with the same contents.
+
+A new save returns 201 with `{receipt:{requestId,actorId,patientId,investigationId,result}}`. An exact retry by the same currently authorized account and role returns 200 with the original result, author, time and ordered links. Subsequent review, publication, cancellation, reassignment and supplemental results leave that confirmation recoverable. Use the role-filtered clinical workflow read to see the current investigation. The compatible `POST /investigations/:id/results` continues to append on each call and return the updated investigation with 201.
+
+For an otherwise authorized new command, a cancelled investigation returns 409. A missing document or a document outside this patient’s record returns 400 with the same generic explanation. Both refusals are recorded with `{code:'INVESTIGATION_RESULT_NOT_SUBMITTED',actorId,command,message}` and repeat on exact retry. Match the returned normalized command to the submitted one before starting a new attempt. A malformed command, lack of access or conflicting use of a UUID supplies no such confirmation.
+
 ### Investigation worklist and responsibility
 
 All endpoints here require an active doctor or administrator account. Patients and reception are denied. Queue reads remain available while optional modules are paused.

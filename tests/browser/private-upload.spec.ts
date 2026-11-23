@@ -326,7 +326,7 @@ test('recovering an investigation PDF preserves its bytes and selects it only in
     };
     const selectReport = (name: string) =>
       dialog(page)
-        .locator('.patient-result-document')
+        .locator('label')
         .filter({ has: page.getByText(name, { exact: true }) })
         .getByRole('checkbox');
     await page.route('**' + pdfPath, async (route) => {
@@ -383,7 +383,25 @@ test('recovering an investigation PDF preserves its bytes and selects it only in
     await expect(dialog(page).getByLabel('Result note', { exact: true })).toHaveValue(
       'Patient note retained after recovering the file.',
     );
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Review result', exact: true })
+      .click();
+    await page
+      .getByRole('dialog')
+      .getByRole('checkbox', {
+        name: 'I reviewed this result and the reports to share.',
+        exact: true,
+      })
+      .check();
     await action(page, 'Share result with clinic').click();
+    await expect(
+      page.getByRole('dialog').getByRole('heading', { name: 'Result submitted', exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Close confirmation', exact: true })
+      .click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     const records = await read<{
       investigations: { id: string; results: { documentIds: string[] }[] }[];

@@ -2,6 +2,7 @@ import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } f
 import type { CareMessageCommand } from '../../shared/care-message';
 import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
 import type { CarePlanAttempt } from './care-plan-creation-helpers';
+import type { ResultAttempt } from './investigation-result-helpers';
 import type { ReviewAttempt } from './follow-up-review-helpers';
 import type { ReviewedCheckIn } from './check-in-submission-helpers';
 import type { ReviewedPayment } from './PaymentRecordingModal';
@@ -10,6 +11,7 @@ import type { UploadAttempt } from './private-upload-helpers';
 import { useSession } from '../lib';
 
 interface PendingCareSubmissions {
+  investigationResults: Map<string, ResultAttempt>;
   followUpReviews: Map<string, ReviewAttempt>;
   checkInSubmission: { current: ReviewedCheckIn | null };
   paymentRecording: { current: ReviewedPayment | null };
@@ -26,6 +28,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
   const pending = useMemo(
     () => ({
+      investigationResults: new Map<string, ResultAttempt>(),
       followUpReviews: new Map<string, ReviewAttempt>(),
       checkInSubmission: { current: null as ReviewedCheckIn | null },
       paymentRecording: { current: null as ReviewedPayment | null },
@@ -39,6 +42,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   );
   useLayoutEffect(() => {
     const clear = () => {
+      pending.investigationResults.clear();
       pending.followUpReviews.clear();
       pending.checkInSubmission.current = null;
       pending.paymentRecording.current = null;

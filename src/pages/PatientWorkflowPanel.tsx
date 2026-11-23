@@ -18,7 +18,7 @@ import { api, formatDate, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
 import { checkedConsultationWorkflows } from '../components/consultation-recording-helpers';
 import { useAppointmentBookingData } from '../components/appointment-booking-helpers';
-import { DocumentUploadModal } from '../components/PrivateUploadModal';
+import { useInvestigationResultSubmission } from '../components/InvestigationResultModal';
 import { usePatientDocuments } from '../components/private-upload-helpers';
 import { ProcedureTemplateSource } from '../components/ProcedureTemplateSource';
 import './patient-workflows.css';
@@ -38,65 +38,49 @@ const investigationStatuses: Record<Investigation['status'], string> = {
   cancelled: 'Cancelled',
 };
 
-export function PatientWorkflowPanel({ patientId }: { patientId: string }) {
+export function PatientWorkflowPanel({
+  patientId,
+  patientName,
+}: {
+  patientId: string;
+  patientName: string;
+}) {
   const workflows = useAppointmentBookingData(
     `/api/patients/${encodeURIComponent(patientId)}/clinical-workflows`,
     (value) => checkedConsultationWorkflows(value, patientId),
   );
   const documents = usePatientDocuments(patientId);
-  const [resultFor, setResultFor] = useState<Investigation | null>(null);
-  const [resultNote, setResultNote] = useState('');
-  const [documentIds, setDocumentIds] = useState<string[]>([]);
-  const [uploadReport, setUploadReport] = useState(false);
+  const resultSubmission = useInvestigationResultSubmission(patientId, patientName, () => {
+    void workflows.reload();
+    void documents.reload();
+  });
   const [agreementFor, setAgreementFor] = useState<ProcedureRecord | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const toast = useToast();
-  function openResult(investigation: Investigation) {
-    setResultFor(investigation);
-    setResultNote('');
-    setDocumentIds([]);
-    setError('');
-  }
-  async function submitResult(event: FormEvent) {
-    event.preventDefault();
-    if (!resultFor || busy) return;
-    if (!resultNote.trim() && !documentIds.length) {
-      setError('Add a note or attach a report before sharing your result.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    try {
-      await api(`/api/investigations/${resultFor.id}/results`, {
-        method: 'POST',
-        body: { note: resultNote.trim(), documentIds },
-      });
-      setResultFor(null);
-      await workflows.reload();
-      toast('Result shared with your care team for review.');
-    } catch (problem) {
-      setError(errorMessage(problem));
-    } finally {
-      setBusy(false);
-    }
-  }
   const waiting =
     workflows.data?.investigations.filter((item) => item.status === 'ordered').length ?? 0;
   const withClinic =
     workflows.data?.investigations.filter((item) => item.status === 'result-received').length ?? 0;
   const planned =
     workflows.data?.procedures.filter((item) => item.status === 'planned').length ?? 0;
-  if (workflows.loading && !workflows.data) return <Loading />;
+  if (workflows.loading && !workflows.data)
+    return (
+      <div>
+        {resultSubmission.controls}
+        <Loading />
+      </div>
+    );
   if (workflows.error || !workflows.data)
     return (
-      <ErrorState
-        message={workflows.error || 'Your next steps could not be loaded.'}
-        retry={workflows.reload}
-      />
+      <div>
+        {resultSubmission.controls}
+        <ErrorState
+          message={workflows.error || 'Your next steps could not be loaded.'}
+          retry={workflows.reload}
+        />
+      </div>
     );
   return (
     <div className="patient-workflows">
+      {resultSubmission.controls}
       <div className="section-heading">
         <div>
           <h2>Clear next steps, together.</h2>
@@ -147,7 +131,11 @@ export function PatientWorkflowPanel({ patientId }: { patientId: string }) {
                 key={investigation.id}
                 investigation={investigation}
                 documents={documents.data ?? []}
-                onShare={() => openResult(investigation)}
+                onShare={
+                  resultSubmission.hasPending(investigation.id)
+                    ? undefined
+                    : () => resultSubmission.open(investigation.id)
+                }
               />
             ))}
           </div>
@@ -184,132 +172,6 @@ export function PatientWorkflowPanel({ patientId }: { patientId: string }) {
           </Card>
         )}
       </section>
-      {resultFor && !uploadReport && (
-        <Modal
-          title="Share an investigation result"
-          onClose={() => {
-            if (!busy) setResultFor(null);
-          }}
-        >
-          <form onSubmit={submitResult} className="stack">
-            <div>
-              <h3>{resultFor.title}</h3>
-              <p className="muted">
-                Your result is submitted for clinician review. Sharing a report does not interpret
-                or confirm its findings.
-              </p>
-            </div>
-            <Field
-              label="Result note"
-              hint="Optional if you attach a report. Use your own words; your clinician will review the information."
-            >
-              <textarea
-                value={resultNote}
-                onChange={(event) => setResultNote(event.target.value)}
-                maxLength={8000}
-                rows={4}
-                disabled={busy}
-                placeholder="Share when the test was done or anything you want the clinic to know."
-              />
-            </Field>
-            <div className="patient-result-attachments">
-              <div className="row between">
-                <h3>Attach PDF reports</h3>
-                <button
-                  type="button"
-                  className="button button-secondary button-small"
-                  disabled={busy}
-                  onClick={() => setUploadReport(true)}
-                >
-                  <Upload size={14} /> Upload a PDF report
-                </button>
-              </div>
-              <p className="muted small">Choose up to 10 reports from your private record.</p>
-              {documents.loading ? (
-                <Loading />
-              ) : documents.error ? (
-                <ErrorState message={documents.error} retry={documents.reload} />
-              ) : documents.data?.length ? (
-                <div className="patient-result-document-list">
-                  {documents.data.map((document) => (
-                    <label className="patient-result-document" key={document.id}>
-                      <input
-                        type="checkbox"
-                        checked={documentIds.includes(document.id)}
-                        disabled={
-                          busy || (documentIds.length >= 10 && !documentIds.includes(document.id))
-                        }
-                        onChange={(event) =>
-                          setDocumentIds((current) =>
-                            event.target.checked
-                              ? [...current, document.id]
-                              : current.filter((id) => id !== document.id),
-                          )
-                        }
-                      />
-                      <span>
-                        <strong>{document.title}</strong>
-                        <small>
-                          {document.originalName} · {formatDate(document.createdAt)}
-                        </small>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <p className="muted small">
-                  No PDF reports uploaded yet. You can upload one here or share a note on its own.
-                </p>
-              )}
-            </div>
-            <div className="notice">
-              <ShieldCheck size={18} />
-              <span>
-                Only you and your clinical team can access these reports. A clinician’s review
-                appears separately when they share it with you.
-              </span>
-            </div>
-            {error && (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="form-actions">
-              <button
-                className="button button-secondary"
-                type="button"
-                disabled={busy}
-                onClick={() => setResultFor(null)}
-              >
-                Cancel
-              </button>
-              <button
-                className="button button-primary"
-                disabled={busy || (!resultNote.trim() && !documentIds.length)}
-              >
-                {busy ? 'Sharing…' : 'Share result with clinic'}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
-      {uploadReport && resultFor && (
-        <DocumentUploadModal
-          patientId={patientId}
-          onClose={() => setUploadReport(false)}
-          investigationId={resultFor.id}
-          onUploaded={(document, sameInvestigation) => {
-            if (sameInvestigation)
-              setDocumentIds((current) =>
-                current.length < 10 && !current.includes(document.id)
-                  ? [...current, document.id]
-                  : current,
-              );
-            setUploadReport(false);
-            void documents.reload();
-          }}
-        />
-      )}
       {agreementFor && (
         <ProcedureDecisionModal
           procedure={agreementFor}
@@ -331,7 +193,7 @@ function InvestigationCard({
 }: {
   investigation: Investigation;
   documents: PatientDocument[];
-  onShare: () => void;
+  onShare?: () => void;
 }) {
   const tone =
     investigation.status === 'reviewed'
@@ -445,7 +307,7 @@ function InvestigationCard({
           })}
         </div>
       )}
-      {investigation.status !== 'cancelled' && (
+      {investigation.status !== 'cancelled' && onShare && (
         <div className="patient-workflow-card-footer">
           <span className="muted small">A new submission awaits your clinician’s review.</span>
           <button className="button button-primary" onClick={onShare}>

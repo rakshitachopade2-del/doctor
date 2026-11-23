@@ -2453,6 +2453,7 @@ export function PatientDetailPage() {
         <ClinicalWorkflowPanel
           key={patient.id}
           patientId={patient.id}
+          patientName={patient.name}
           appointments={data.appointments}
           resource={clinical}
           selectedInvestigationId={recordParams.get('investigation')}

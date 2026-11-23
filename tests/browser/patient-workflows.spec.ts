@@ -88,12 +88,20 @@ test('patient shares a private report, reads a published review, and records a p
       `Patient report context ${suffix}`,
     );
     await expect(
-      dialog
-        .locator('.patient-result-document')
-        .filter({ hasText: reportTitle })
-        .getByRole('checkbox'),
+      dialog.locator('label').filter({ hasText: reportTitle }).getByRole('checkbox'),
     ).toBeChecked();
+    await dialog.getByRole('button', { name: 'Review result', exact: true }).click();
+    await dialog
+      .getByRole('checkbox', {
+        name: 'I reviewed this result and the reports to share.',
+        exact: true,
+      })
+      .check();
     await dialog.getByRole('button', { name: 'Share result with clinic', exact: true }).click();
+    await expect(
+      dialog.getByRole('heading', { name: 'Result submitted', exact: true }),
+    ).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close confirmation', exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(investigationCard.getByText('With your care team', { exact: true })).toBeVisible();
     await expect(

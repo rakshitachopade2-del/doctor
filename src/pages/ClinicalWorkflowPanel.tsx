@@ -25,7 +25,7 @@ import type {
 } from '../../shared/clinical';
 import { api, formatDate, today, useSession, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
-import { DocumentUploadModal } from '../components/PrivateUploadModal';
+import { useInvestigationResultSubmission } from '../components/InvestigationResultModal';
 import { usePatientDocuments } from '../components/private-upload-helpers';
 import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
 import { ProcedureAppointmentModal } from '../components/ProcedureAppointmentModal';
@@ -41,7 +41,7 @@ type ClinicalResource = {
 };
 type WorkflowAction =
   | { kind: 'order' | 'procedure' }
-  | { kind: 'result' | 'cancel-investigation'; investigation: Investigation }
+  | { kind: 'cancel-investigation'; investigation: Investigation }
   | { kind: 'review'; investigation: Investigation; result: InvestigationResult }
   | {
       kind: 'agreement' | 'complete' | 'cancel-procedure' | 'scheduling';
@@ -94,12 +94,14 @@ function FormFooter({
 
 export function ClinicalWorkflowPanel({
   patientId,
+  patientName,
   appointments,
   resource,
   selectedInvestigationId,
   selectedResultId,
 }: {
   patientId: string;
+  patientName: string;
   appointments: Appointment[];
   resource: ClinicalResource;
   selectedInvestigationId?: string | null;
@@ -108,6 +110,10 @@ export function ClinicalWorkflowPanel({
   const { session } = useSession();
   const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
   const documents = usePatientDocuments(patientId);
+  const resultSubmission = useInvestigationResultSubmission(patientId, patientName, () => {
+    void resource.reload();
+    void documents.reload();
+  });
   const [action, setAction] = useState<WorkflowAction | null>(null);
   const [busy, setBusy] = useState('');
   const [filter, setFilter] = useState('active');
@@ -206,15 +212,28 @@ export function ClinicalWorkflowPanel({
     setAction(null);
     await Promise.all([resource.reload(), documents.reload()]);
   };
-  if (resource.loading && !data) return <Loading />;
-  if (resource.error) return <ErrorState message={resource.error} retry={resource.reload} />;
-  if (!data) return null;
+  if (resource.loading && !data)
+    return (
+      <div>
+        {resultSubmission.controls}
+        <Loading />
+      </div>
+    );
+  if (resource.error)
+    return (
+      <div>
+        {resultSubmission.controls}
+        <ErrorState message={resource.error} retry={resource.reload} />
+      </div>
+    );
+  if (!data) return resultSubmission.controls;
   const investigations = data.investigations.filter(
     (i) => filter === 'all' || i.status !== 'cancelled' || i.id === selectedInvestigationId,
   );
   const procedures = data.procedures.filter((p) => filter === 'all' || p.status !== 'cancelled');
   return (
     <div className="cw-workspace">
+      {resultSubmission.controls}
       <div className="cw-intro">
         <span className="cw-intro-icon">
           <Stethoscope size={24} />
@@ -448,12 +467,14 @@ export function ClinicalWorkflowPanel({
                   )}
                   {canDocument && investigation.status !== 'cancelled' && (
                     <div className="cw-record-actions">
-                      <button
-                        className="button button-secondary button-small"
-                        onClick={() => setAction({ kind: 'result', investigation })}
-                      >
-                        <FilePlus2 size={15} /> Add result
-                      </button>
+                      {!resultSubmission.hasPending(investigation.id) && (
+                        <button
+                          className="button button-secondary button-small"
+                          onClick={() => resultSubmission.open(investigation.id)}
+                        >
+                          <FilePlus2 size={15} /> Add result
+                        </button>
+                      )}
                       {investigation.status !== 'reviewed' && (
                         <button
                           className="button button-ghost button-small"
@@ -702,14 +723,6 @@ export function ClinicalWorkflowPanel({
       {action?.kind === 'order' && (
         <OrderModal patientId={patientId} onClose={() => setAction(null)} onSaved={afterSave} />
       )}
-      {action?.kind === 'result' && (
-        <ResultModal
-          patientId={patientId}
-          investigation={action.investigation}
-          onClose={() => setAction(null)}
-          onSaved={afterSave}
-        />
-      )}
       {action?.kind === 'review' && (
         <InvestigationReviewModal
           investigationId={action.investigation.id}
@@ -869,105 +882,6 @@ function OrderModal({ patientId, ...callbacks }: ModalCallbacks & { patientId: s
       <div className="notice">
         This records your order and instructions. It does not send a request to a laboratory or
         interpret a result.
-      </div>
-    </ClinicalForm>
-  );
-}
-
-function ResultModal({
-  patientId,
-  investigation,
-  ...callbacks
-}: ModalCallbacks & { patientId: string; investigation: Investigation }) {
-  const documents = usePatientDocuments(patientId);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [note, setNote] = useState('');
-  if (uploading)
-    return (
-      <DocumentUploadModal
-        patientId={patientId}
-        onClose={() => setUploading(false)}
-        investigationId={investigation.id}
-        onUploaded={(document, sameInvestigation) => {
-          setUploading(false);
-          if (sameInvestigation)
-            setSelected((ids) =>
-              ids.length < 10 && !ids.includes(document.id) ? [...ids, document.id] : ids,
-            );
-          void documents.reload();
-        }}
-      />
-    );
-  return (
-    <ClinicalForm
-      title="Add an investigation result"
-      endpoint={`/api/investigations/${investigation.id}/results`}
-      payload={(form) => ({ note: form.get('note'), documentIds: selected })}
-      label="Save result entry"
-      {...callbacks}
-    >
-      <p className="muted">{investigation.title}</p>
-      <Field label="Result entry / source note">
-        <textarea
-          name="note"
-          required={selected.length === 0}
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          rows={4}
-          maxLength={8000}
-          placeholder="Record what was received and where it came from. Add clinical interpretation in a separate review."
-        />
-      </Field>
-      <div className="cw-report-picker">
-        <div className="row between">
-          <h3>Attach patient reports · up to 10</h3>
-          <button
-            type="button"
-            className="button button-secondary button-small"
-            onClick={() => setUploading(true)}
-          >
-            <Plus size={14} /> Upload report
-          </button>
-        </div>
-        {documents.loading ? (
-          <p className="muted small">Loading reports…</p>
-        ) : documents.error ? (
-          <ErrorState message={documents.error} retry={documents.reload} />
-        ) : documents.data?.length ? (
-          <div className="cw-document-options">
-            {documents.data.map((document) => (
-              <label key={document.id}>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(document.id)}
-                  disabled={selected.length >= 10 && !selected.includes(document.id)}
-                  onChange={(e) =>
-                    setSelected((ids) =>
-                      e.target.checked
-                        ? [...ids, document.id]
-                        : ids.filter((id) => id !== document.id),
-                    )
-                  }
-                />
-                <span>
-                  <strong>{document.title}</strong>
-                  <small>
-                    {document.originalName} · {formatDate(document.createdAt)}
-                  </small>
-                </span>
-              </label>
-            ))}
-          </div>
-        ) : (
-          <p className="muted small">
-            No PDF reports yet. You can save a text result or upload a private report.
-          </p>
-        )}
-      </div>
-      <div className="notice">
-        Result entries are preserved in the record. Sharing clinician findings requires a separate
-        review and publication step.
       </div>
     </ClinicalForm>
   );

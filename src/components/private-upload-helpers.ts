@@ -22,25 +22,26 @@ export const uploadKey = (kind: PrivateUploadKind, patientId: string) => kind + 
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
+export function checkedPatientDocuments(value: unknown, patientId: string): PatientDocument[] {
+  if (
+    !Array.isArray(value) ||
+    !value.every(
+      (item) =>
+        object(item) &&
+        item.patientId === patientId &&
+        typeof item.title === 'string' &&
+        typeof item.originalName === 'string' &&
+        typeof item.id === 'string' &&
+        item.url === '/api/documents/' + item.id + '/file',
+    )
+  )
+    throw new Error('The private report list could not be verified. Refresh to try again.');
+  return value;
+}
 export function usePatientDocuments(patientId: string) {
   return useAppointmentBookingData(
     '/api/documents?patientId=' + encodeURIComponent(patientId),
-    (value): PatientDocument[] => {
-      if (
-        !Array.isArray(value) ||
-        !value.every(
-          (item) =>
-            object(item) &&
-            item.patientId === patientId &&
-            typeof item.title === 'string' &&
-            typeof item.originalName === 'string' &&
-            typeof item.id === 'string' &&
-            item.url === '/api/documents/' + item.id + '/file',
-        )
-      )
-        throw new Error('The private report list could not be verified. Refresh to try again.');
-      return value;
-    },
+    (value) => checkedPatientDocuments(value, patientId),
   );
 }
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Express } from 'express';
 import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
@@ -12,6 +13,11 @@ import type {
   ProcedureCompletion,
   ProcedureRecord,
 } from '../shared/clinical.ts';
+import type {
+  InvestigationResultCommand,
+  InvestigationResultResponse,
+  InvestigationResultNotSubmitted,
+} from '../shared/investigation-result-submission.ts';
 import { clinicToday, get, id, insert, list, nowISO, type DB } from './db.ts';
 import { notifyPatient, notifyClinicians } from './activity.ts';
 import {
@@ -34,6 +40,7 @@ interface ClinicalContext {
   actor: (req: AuthRequest, roles?: User['role'][]) => User;
   patientAccess: (req: AuthRequest, patientId: string, allowReception?: boolean) => Patient;
   clinicianId: (req: AuthRequest) => string;
+  currentCareUser: (req: AuthRequest) => User;
   audit: (req: AuthRequest, action: string, entityType: string, entityId: string) => void;
   fail: (status: number, message: string) => never;
 }
@@ -44,6 +51,35 @@ type ProcedurePlan = Omit<
 >;
 const required = z.string().trim().min(1).max(300);
 const text = z.string().trim().max(8000);
+const cancelledInvestigation =
+  'This investigation is cancelled. Create a new order if further testing is needed.';
+const resultFields = z.object({ note: text, documentIds: z.array(required).max(10) });
+const validateResult = (input: z.infer<typeof resultFields>, ctx: z.RefinementCtx) => {
+  if (!input.note && !input.documentIds.length)
+    ctx.addIssue({ code: 'custom', message: 'Add a result note or at least one report.' });
+  if (new Set(input.documentIds).size !== input.documentIds.length)
+    ctx.addIssue({ code: 'custom', message: 'Do not link the same report more than once.' });
+};
+const legacyResult = resultFields
+  .extend({
+    note: text.default(''),
+    documentIds: resultFields.shape.documentIds.default([]),
+  })
+  .superRefine(validateResult);
+const resultCommand = resultFields
+  .extend({
+    requestId: z
+      .string()
+      .uuid()
+      .transform((value) => value.toLowerCase()),
+    patientId: required,
+    investigationId: required,
+    submittedByRole: z.enum(['patient', 'doctor', 'admin']),
+    reviewedConfirmed: z.literal(true),
+  })
+  .strict()
+  .superRefine(validateResult);
+const noQuery = z.object({}).strict();
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -59,6 +95,13 @@ export function registerClinical(app: Express, context: ClinicalContext) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS investigations (id TEXT PRIMARY KEY, patientId TEXT NOT NULL REFERENCES patients(id), data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS investigationResults (id TEXT PRIMARY KEY, investigationId TEXT NOT NULL REFERENCES investigations(id), data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS investigationResultCommands (
+      requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id),
+      investigationId TEXT NOT NULL REFERENCES investigations(id), commandHash TEXT NOT NULL,
+      resultId TEXT UNIQUE REFERENCES investigationResults(id), rejectionStatus INTEGER, rejection TEXT,
+      CHECK ((resultId IS NOT NULL AND rejectionStatus IS NULL AND rejection IS NULL)
+          OR (resultId IS NULL AND rejectionStatus IS NOT NULL AND rejectionStatus IN (400,409) AND rejection IS NOT NULL))
+    );
     CREATE TABLE IF NOT EXISTS investigationReviews (id TEXT PRIMARY KEY, investigationId TEXT NOT NULL REFERENCES investigations(id), resultId TEXT NOT NULL REFERENCES investigationResults(id), data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS investigationPublications (id TEXT PRIMARY KEY REFERENCES investigationReviews(id), publishedAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS investigationCancellations (id TEXT PRIMARY KEY REFERENCES investigations(id), data TEXT NOT NULL);
@@ -74,6 +117,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
   for (const table of [
     'investigations',
     'investigationResults',
+    'investigationResultCommands',
     'investigationReviews',
     'investigationPublications',
     'investigationCancellations',
@@ -182,11 +226,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     };
   }
   function requireOpenInvestigation(order: InvestigationOrder) {
-    if (get(db, 'investigationCancellations', order.id))
-      fail(
-        409,
-        'This investigation is cancelled. Create a new order if further testing is needed.',
-      );
+    if (get(db, 'investigationCancellations', order.id)) fail(409, cancelledInvestigation);
   }
   function requirePlannedProcedure(plan: ProcedurePlan) {
     if (procedureView(plan).status !== 'planned')
@@ -194,13 +234,6 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         409,
         'This procedure is already completed or cancelled. Its documentation cannot be changed.',
       );
-  }
-  function validateDocumentLinks(patientId: string, documentIds: string[]) {
-    for (const documentId of documentIds) {
-      const document = get<{ patientId: string }>(db, 'documents', documentId);
-      if (!document || document.patientId !== patientId)
-        fail(400, 'Every linked report must belong to this patient.');
-    }
   }
   function workflows(patientId: string, forPatient: boolean): PatientClinicalWorkflows {
     return {
@@ -255,53 +288,126 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     });
     res.status(201).json(investigationView(order));
   });
-  app.post('/api/investigations/:id/results', (req: AuthRequest, res) => {
-    const user = actor(req);
-    if (user.role !== 'patient') doctorIdentity(req);
+  function resultContext(req: AuthRequest) {
+    const user = context.currentCareUser(req);
+    if (user.role !== 'patient') clinicianId(req);
     const order = investigationAccess(req, String(req.params.id));
-    const input = z
-      .object({ note: text.default(''), documentIds: z.array(required).max(10).default([]) })
-      .refine(
-        (value) => value.note.length > 0 || value.documentIds.length > 0,
-        'Add a result note or at least one report.',
-      )
-      .refine(
-        (value) => new Set(value.documentIds).size === value.documentIds.length,
-        'Do not link the same report more than once.',
-      )
-      .parse(req.body);
-    transaction(() => {
-      requireOpenInvestigation(order);
-      validateDocumentLinks(order.patientId, input.documentIds);
-      const result: InvestigationResult = {
-        ...input,
-        id: id(),
-        investigationId: order.id,
-        submittedById: user.id,
-        submittedByName: user.name,
-        submittedByRole: user.role,
-        createdAt: nowISO(),
-      };
-      db.prepare('INSERT INTO investigationResults(id,investigationId,data) VALUES (?,?,?)').run(
-        result.id,
-        order.id,
-        JSON.stringify(result),
-      );
-      audit(req, 'submitted unreviewed investigation result', 'investigation', order.id);
-      notifyClinicians(
-        db,
-        order.patientId,
-        `investigation-result:${result.id}`,
-        {
-          kind: 'investigation',
-          title: 'An investigation result is ready for review',
-          detail: `${get<Patient>(db, 'patients', order.patientId)!.name} · ${order.title}`,
-          href: `/clinic/patients/${order.patientId}?tab=workup&investigation=${order.id}&result=${result.id}`,
-        },
-        { doctorId: investigationWorklist.ownerDoctorId(order.id), excludeActorId: user.id },
-      );
+    return { user, order };
+  }
+  function resultDenied(order: InvestigationOrder, documentIds: string[]) {
+    if (get(db, 'investigationCancellations', order.id))
+      return { status: 409, message: cancelledInvestigation };
+    const owned = db.prepare('SELECT 1 FROM documents WHERE patientId=? AND id=?');
+    if (documentIds.some((doc) => !owned.get(order.patientId, doc)))
+      return { status: 400, message: 'Every linked report must belong to this patient.' };
+    return null;
+  }
+  function appendResult(
+    req: AuthRequest,
+    user: User,
+    order: InvestigationOrder,
+    input: z.infer<typeof resultFields>,
+  ) {
+    const result: InvestigationResult = {
+      id: id(),
+      investigationId: order.id,
+      note: input.note,
+      documentIds: input.documentIds,
+      submittedById: user.id,
+      submittedByName: user.name,
+      submittedByRole: user.role,
+      createdAt: nowISO(),
+    };
+    db.prepare('INSERT INTO investigationResults(id,investigationId,data) VALUES (?,?,?)').run(
+      result.id,
+      order.id,
+      JSON.stringify(result),
+    );
+    audit(req, 'submitted unreviewed investigation result', 'investigation', order.id);
+    notifyClinicians(
+      db,
+      order.patientId,
+      `investigation-result:${result.id}`,
+      {
+        kind: 'investigation',
+        title: 'An investigation result is ready for review',
+        detail: `${get<Patient>(db, 'patients', order.patientId)!.name} · ${order.title}`,
+        href: `/clinic/patients/${order.patientId}?tab=workup&investigation=${order.id}&result=${result.id}`,
+      },
+      { doctorId: investigationWorklist.ownerDoctorId(order.id), excludeActorId: user.id },
+    );
+    return result;
+  }
+  app.post('/api/investigations/:id/results', (req: AuthRequest, res) => {
+    const view = transaction(() => {
+      const { user, order } = resultContext(req);
+      const input = legacyResult.parse(req.body);
+      const denied = resultDenied(order, input.documentIds);
+      if (denied) return fail(denied.status, denied.message);
+      appendResult(req, user, order, input);
+      return investigationView(order, user.role === 'patient');
     });
-    res.status(201).json(investigationView(order, user.role === 'patient'));
+    res.status(201).json(view);
+  });
+  app.post('/api/investigations/:id/results/submit', (req: AuthRequest, res) => {
+    const outcome = transaction(() => {
+      const { user, order } = resultContext(req);
+      noQuery.parse(req.query);
+      const command: InvestigationResultCommand = resultCommand.parse(req.body);
+      const { requestId, submittedByRole, investigationId, patientId } = command,
+        actorId = user.id;
+      if (submittedByRole !== user.role)
+        return fail(403, 'The reviewed submitting role does not match this account.');
+      if (investigationId !== order.id || patientId !== order.patientId)
+        return fail(409, 'The reviewed investigation and patient must match this record.');
+      // The parsed command has a stable key order, while report order remains part of the submission.
+      const commandHash = createHash('sha256').update(JSON.stringify(command)).digest('hex');
+      const success = (result: InvestigationResult): InvestigationResultResponse => ({
+        receipt: { requestId, actorId, patientId, investigationId, result },
+      });
+      const rejected = (message: string): InvestigationResultNotSubmitted => ({
+        code: 'INVESTIGATION_RESULT_NOT_SUBMITTED',
+        actorId,
+        command,
+        message,
+      });
+      const prior = db
+        .prepare(
+          'SELECT c.*, r.data AS originalResult FROM investigationResultCommands c LEFT JOIN investigationResults r ON r.id=c.resultId WHERE c.requestId=?',
+        )
+        .get(requestId);
+      if (prior) {
+        if (
+          prior.actorId !== actorId ||
+          prior.investigationId !== investigationId ||
+          prior.commandHash !== commandHash
+        )
+          return fail(409, 'This request ID was already used for another result submission.');
+        if (typeof prior.rejection === 'string')
+          return { status: Number(prior.rejectionStatus), body: rejected(prior.rejection) };
+        return { status: 200, body: success(JSON.parse(String(prior.originalResult))) };
+      }
+      const store = db.prepare(
+        'INSERT INTO investigationResultCommands(requestId, actorId, investigationId, commandHash, resultId, rejectionStatus, rejection) VALUES (?,?,?,?,?,?,?)',
+      );
+      const denied = resultDenied(order, command.documentIds);
+      if (denied) {
+        store.run(
+          requestId,
+          actorId,
+          investigationId,
+          commandHash,
+          null,
+          denied.status,
+          denied.message,
+        );
+        return { status: denied.status, body: rejected(denied.message) };
+      }
+      const result = appendResult(req, user, order, command);
+      store.run(requestId, actorId, investigationId, commandHash, result.id, null, null);
+      return { status: 201, body: success(result) };
+    });
+    res.status(outcome.status).json(outcome.body);
   });
   app.post('/api/investigations/:id/reviews', (req: AuthRequest, res) => {
     const identity = doctorIdentity(req),

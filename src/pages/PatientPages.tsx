@@ -2108,7 +2108,9 @@ function PatientRecordView({ patientId }: { patientId: string }) {
         ))}
       </div>
       <div role="tabpanel" aria-label={sections.find(([id]) => id === tab)?.[1]}>
-        {tab === 'workflows' && <PatientWorkflowPanel patientId={patientId} />}
+        {tab === 'workflows' && (
+          <PatientWorkflowPanel patientId={patientId} patientName={data.patient.name} />
+        )}
         {tab === 'timeline' && (
           <Card>
             {timeline.length ? (

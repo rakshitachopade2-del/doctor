@@ -117,7 +117,19 @@ test('clinician preserves amendments, reviews attached results, and documents a 
     sourceNote,
   );
   await expect(dialog.getByRole('checkbox', { name: /Synthetic source report/ })).toBeChecked();
+  await dialog.getByRole('button', { name: 'Review result', exact: true }).click();
+  dialog = page.getByRole('dialog');
+  await dialog
+    .getByRole('checkbox', {
+      name: 'I reviewed this result and the reports to share.',
+      exact: true,
+    })
+    .check();
   await dialog.getByRole('button', { name: 'Save result entry', exact: true }).click();
+  await expect(
+    dialog.getByRole('heading', { name: 'Result submitted', exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close confirmation', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(
     investigation.getByRole('link', { name: 'Synthetic source report', exact: true }),

@@ -505,6 +505,67 @@ async function rehearseRecovery() {
     const pdfUpload = await call(source, '/documents/upload', patient, 'POST', pdfCommand, 201);
     const image = imageUpload.receipt.file;
     const document = pdfUpload.receipt.file;
+    const order = await call(
+      source,
+      '/investigations',
+      admin,
+      'POST',
+      {
+        patientId,
+        title: 'Synthetic recovery investigation',
+        kind: 'laboratory',
+        reason: 'Synthetic order',
+        instructions: 'Synthetic instructions',
+      },
+      201,
+    );
+    const investigationPath = `/investigations/${order.id}`;
+    const resultPath = investigationPath + '/results/submit';
+    const resultCommand = {
+      requestId: randomUUID(),
+      patientId,
+      investigationId: order.id,
+      submittedByRole: 'patient',
+      note: 'Synthetic patient result.',
+      documentIds: [document.id],
+      reviewedConfirmed: true,
+    };
+    const originalSubmission = await call(source, resultPath, patient, 'POST', resultCommand, 201);
+    const originalInvestigationResult = originalSubmission.receipt.result;
+    const privateInterpretation = 'Unpublished synthetic investigation interpretation.';
+    const reviewedOrder = await call(
+      source,
+      investigationPath + '/reviews',
+      admin,
+      'POST',
+      {
+        resultId: originalInvestigationResult.id,
+        summary: privateInterpretation,
+        followUp: 'Synthetic follow-up.',
+        publishToPatient: false,
+      },
+      201,
+    );
+    const staffSupplement = {
+      ...resultCommand,
+      requestId: randomUUID(),
+      submittedByRole: 'admin',
+      note: 'Staff-recorded supplemental result.',
+    };
+    const supplementalSubmission = await call(
+      source,
+      resultPath,
+      admin,
+      'POST',
+      staffSupplement,
+      201,
+    );
+    await call(source, investigationPath + '/cancel', admin, 'POST', {
+      reason: 'Synthetic cancellation after supplement.',
+    });
+    const closedCommand = { ...resultCommand, requestId: randomUUID() };
+    const closedResult = await call(source, resultPath, patient, 'POST', closedCommand, 409);
+    assert.equal(closedResult.code, 'INVESTIGATION_RESULT_NOT_SUBMITTED');
     const intakePath = '/intakes/submit';
     const intakeCommand = {
       patientId,
@@ -1121,6 +1182,51 @@ async function rehearseRecovery() {
       newAdmin,
     );
     assert.deepEqual(restoredWorkflows.amendments, [consultationAmendment.amendment]);
+    assert.deepEqual(
+      await call(target, resultPath, newPatient, 'POST', resultCommand),
+      originalSubmission,
+    );
+    assert.deepEqual(
+      await call(target, resultPath, newAdmin, 'POST', staffSupplement),
+      supplementalSubmission,
+    );
+    assert.deepEqual(
+      await call(target, resultPath, newPatient, 'POST', closedCommand, 409),
+      closedResult,
+    );
+    const restoredOrder = restoredWorkflows.investigations.find((row) => row.id === order.id);
+    assert.deepEqual(restoredOrder.results, [
+      originalInvestigationResult,
+      supplementalSubmission.receipt.result,
+    ]);
+    assert.deepEqual(restoredOrder.reviews, reviewedOrder.reviews);
+    assert.equal(restoredOrder.status, 'cancelled');
+    const restoredPatientOrder = (
+      await call(target, `/patients/${patientId}/clinical-workflows`, newPatient)
+    ).investigations.find((row) => row.id === order.id);
+    assert.deepEqual(restoredPatientOrder.reviews, []);
+    assert.deepEqual(restoredPatientOrder.results, restoredOrder.results);
+    for (const data of [restoredSummary, restoredPatientOrder]) {
+      const json = JSON.stringify(data);
+      for (const hidden of [
+        privateInterpretation,
+        resultCommand.requestId,
+        staffSupplement.requestId,
+        closedCommand.requestId,
+      ])
+        assert.equal(json.includes(hidden), false);
+    }
+    const resultAudit = await call(
+      target,
+      `/search/audit?entityType=investigation&entityId=${order.id}`,
+      newAdmin,
+    );
+    assert.equal(
+      resultAudit.items.filter(
+        (entry) => entry.action === 'submitted unreviewed investigation result',
+      ).length,
+      2,
+    );
     assert.equal(
       restoredDb.prepare('SELECT COUNT(*) count FROM consultationRecordingCommands').get().count,
       3,
@@ -1198,7 +1304,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

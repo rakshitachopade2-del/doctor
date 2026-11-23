@@ -222,6 +222,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)follow-up-review-recording\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5223' },
     },
+    {
+      name: 'investigation-result-submission',
+      testMatch: /(?:^|\/)investigation-result-submission\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5224' },
+    },
   ],
   webServer: [
     {
@@ -469,6 +474,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3051 E2E_VITE_PORT=5223 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5223',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3052 E2E_VITE_PORT=5224 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5224',
       reuseExistingServer: false,
       timeout: 60000,
     },

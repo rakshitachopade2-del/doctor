@@ -4,6 +4,8 @@ The supplied concept is source material, not an instruction to make unsupported 
 
 ## Release scope
 
+Patients and linked clinicians can confirm which investigation, note and PDF reports they are submitting. Recovering an interrupted confirmation returns the original result with its author and attachments. A separate supplemental submission creates a new item for clinical review. The clinician controls when an interpretation is shared with the patient.
+
 Clinicians can verify a follow-up review before sharing patient instructions and recover its original confirmation after an interrupted save. Subsequent reports stay available for a separate clinical review. When the clinic confirms the draft was based on an outdated revision, the clinician can compare it with the latest evidence before deciding what to share.
 
 Patients can review and share a daily report for a care plan and deliberately correct it on the same day. Recovering a lost confirmation returns the original answers without sending another clinician notice or reopening a reviewed report. If another submission changed the report, patients can compare their draft with the current answers before sharing a correction.

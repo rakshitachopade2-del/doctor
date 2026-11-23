@@ -4356,6 +4356,126 @@ try {
     assert.equal(json.includes(reviewCommand.assessment), false);
   }
 
+  const resultPatient = registeredSession.user.patientId;
+  const reportFile = (
+    await ordinaryWrite(
+      '/documents/upload',
+      {
+        ...documentCommand,
+        patientId: resultPatient,
+        requestId: randomUUID(),
+      },
+      patientHeaders,
+    )
+  ).receipt.file;
+  const order = await ordinaryWrite('/investigations', {
+    patientId: resultPatient,
+    title: 'Synthetic report receipt check',
+    kind: 'laboratory',
+    reason: 'Synthetic order',
+    instructions: 'Synthetic instructions',
+    dueDate: null,
+  });
+  const investigationPath = `/investigations/${order.id}`;
+  const resultPath = investigationPath + '/results/submit';
+  const resultCommand = {
+    requestId: randomUUID(),
+    patientId: resultPatient,
+    investigationId: order.id,
+    submittedByRole: 'patient',
+    note: 'Synthetic attached result.',
+    documentIds: [reportFile.id],
+    reviewedConfirmed: true,
+  };
+  const submitted = await ordinaryWrite(resultPath, resultCommand, patientHeaders);
+  const originalResult = submitted.receipt.result;
+  assert.match(originalResult.id, /^[a-f0-9-]{36}$/);
+  assert.equal(new Date(originalResult.createdAt).toISOString(), originalResult.createdAt);
+  assert.deepEqual(submitted.receipt, {
+    requestId: resultCommand.requestId,
+    actorId: registeredSession.user.id,
+    patientId: resultPatient,
+    investigationId: order.id,
+    result: {
+      id: originalResult.id,
+      investigationId: order.id,
+      note: resultCommand.note,
+      documentIds: [reportFile.id],
+      submittedById: registeredSession.user.id,
+      submittedByName: registeredSession.user.name,
+      submittedByRole: 'patient',
+      createdAt: originalResult.createdAt,
+    },
+  });
+  const interpreted = await ordinaryWrite(investigationPath + '/reviews', {
+    resultId: originalResult.id,
+    summary: 'Private synthetic interpretation.',
+    followUp: 'Synthetic follow-up.',
+    publishToPatient: false,
+  });
+  const inWorklist = async () =>
+    (await reminderRead('/investigation-worklist?scope=all')).find(
+      (row) => row.investigationId === order.id,
+    );
+  const afterReview = await inWorklist();
+  assert.equal(afterReview.needsReview, false);
+  assert.deepEqual(await ordinaryWrite(resultPath, resultCommand, patientHeaders, 200), submitted);
+  assert.deepEqual(await inWorklist(), afterReview);
+  const ownInvestigation = async () =>
+    (
+      await reminderRead(`/patients/${resultPatient}/clinical-workflows`, patientHeaders)
+    ).investigations.find((row) => row.id === order.id);
+  assert.deepEqual((await ownInvestigation()).reviews, []);
+  const reviewId = interpreted.reviews[0].id;
+  await ordinaryWrite(`${investigationPath}/reviews/${reviewId}/publish`, {}, verifiedHeaders, 200);
+  const supplementCommand = { ...resultCommand, requestId: randomUUID() };
+  const supplement = await ordinaryWrite(resultPath, supplementCommand, patientHeaders);
+  assert.notEqual(supplement.receipt.result.id, originalResult.id);
+  assert.equal((await inWorklist()).latestResultId, supplement.receipt.result.id);
+  assert.equal((await inWorklist()).needsReview, true);
+  await ordinaryWrite(
+    investigationPath + '/cancel',
+    { reason: 'Synthetic cancellation after the supplement.' },
+    verifiedHeaders,
+    200,
+  );
+  const closedCommand = { ...resultCommand, requestId: randomUUID() };
+  const deniedResult = await ordinaryWrite(resultPath, closedCommand, patientHeaders, 409);
+  assert.deepEqual(deniedResult.command, closedCommand);
+  assert.equal(deniedResult.code, 'INVESTIGATION_RESULT_NOT_SUBMITTED');
+  assert.deepEqual(
+    await ordinaryWrite(resultPath, closedCommand, patientHeaders, 409),
+    deniedResult,
+  );
+  assert.deepEqual(await ordinaryWrite(resultPath, resultCommand, patientHeaders, 200), submitted);
+  assert.deepEqual(
+    await ordinaryWrite(resultPath, supplementCommand, patientHeaders, 200),
+    supplement,
+  );
+  const visibleInvestigation = await ownInvestigation();
+  assert.deepEqual(visibleInvestigation.results, [originalResult, supplement.receipt.result]);
+  assert.equal(visibleInvestigation.reviews.length, 1);
+  assert.equal(visibleInvestigation.reviews[0].resultId, originalResult.id);
+  assert.ok(visibleInvestigation.reviews[0].publishedAt);
+  const resultAudit = await reminderRead(
+    `/search/audit?entityType=investigation&entityId=${order.id}`,
+  );
+  assert.equal(
+    resultAudit.items.filter((row) => row.action === 'submitted unreviewed investigation result')
+      .length,
+    2,
+  );
+  const resultNotices = (await reminderRead('/activity?limit=100')).items.filter(
+    (row) =>
+      row.title === 'An investigation result is ready for review' &&
+      row.href.includes(`investigation=${order.id}&result=`),
+  );
+  assert.equal(resultNotices.length, 2);
+  for (const id of [originalResult.id, supplement.receipt.result.id])
+    assert.equal(resultNotices.filter((n) => n.href.endsWith('result=' + id)).length, 1);
+  for (const cmd of [resultCommand, supplementCommand, closedCommand])
+    assert.equal(JSON.stringify(visibleInvestigation).includes(cmd.requestId), false);
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -4477,7 +4597,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {
