@@ -515,3 +515,27 @@
 .fu-worklist .table-wrap {
   position: relative;
 }
+
+.fu-resume {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.fu-review-form {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fu-review-form:focus {
+  outline: none;
+}
+.fu-review-form .fu-form-actions .button {
+  white-space: normal;
+  max-width: 100%;
+}
+@media (max-width: 400px) {
+  .fu-review-form .fu-form-actions > .button {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}

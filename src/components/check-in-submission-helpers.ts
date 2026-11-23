@@ -44,7 +44,7 @@ const timestamp = (value: unknown): value is string =>
 const uuid = (value: string) =>
   /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/.test(value);
 
-function isReport(value: unknown, patientId: string): value is CheckIn {
+export function isReport(value: unknown, patientId: string): value is CheckIn {
   return (
     object(value) &&
     nonempty(value.id) &&

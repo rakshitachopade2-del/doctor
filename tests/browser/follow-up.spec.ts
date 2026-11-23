@@ -106,7 +106,7 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
     const row = page.getByRole('row').filter({ hasText: title });
     await expect(row.getByText('1 unreviewed report', { exact: true })).toBeVisible();
     await row.getByRole('button', { name: 'Review progress', exact: true }).click();
-    let dialog = page.getByRole('dialog', { name: 'Review care plan progress', exact: true });
+    let dialog = page.getByRole('dialog');
     await expect(
       dialog.getByText('Initial synthetic patient report.', { exact: true }),
     ).toBeVisible();
@@ -126,19 +126,22 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
     expect(corrected.id).toBe(firstCheck.id);
     const rejected = page.waitForResponse(
       (response) =>
-        response.url().endsWith(`/api/care-plans/${plan.id}/reviews`) &&
+        response.url().endsWith(`/api/care-plans/${plan.id}/reviews/record`) &&
         response.request().method() === 'POST',
     );
+    await dialog.getByRole('button', { name: 'Review before sharing', exact: true }).click();
+    await dialog
+      .getByLabel('I reviewed this assessment and the instructions to share with the patient.', {
+        exact: true,
+      })
+      .check();
     await dialog
       .getByRole('button', { name: 'Save review & share instructions', exact: true })
       .click();
     expect((await rejected).status()).toBe(409);
     await expect(
-      dialog.getByRole('button', { name: 'Save review & share instructions', exact: true }),
-    ).toBeDisabled();
-    await expect(dialog.getByLabel('Clinician assessment', { exact: true })).toHaveValue(
-      assessment,
-    );
+      dialog.getByRole('heading', { name: 'Follow-up review not recorded' }),
+    ).toBeVisible();
     await dialog.getByRole('button', { name: 'Refresh review context', exact: true }).click();
     await expect(
       dialog.getByText('Corrected report received while the review was open.', { exact: true }),
@@ -146,9 +149,16 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
     await expect(dialog.getByLabel('Instructions for the patient', { exact: true })).toHaveValue(
       patientInstructions,
     );
+    await dialog.getByRole('button', { name: 'Review before sharing', exact: true }).click();
+    await dialog
+      .getByLabel('I reviewed this assessment and the instructions to share with the patient.', {
+        exact: true,
+      })
+      .check();
     await dialog
       .getByRole('button', { name: 'Save review & share instructions', exact: true })
       .click();
+    await dialog.getByRole('button', { name: 'Close confirmation', exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(row).toHaveCount(0);
     await page.getByRole('button', { name: 'Upcoming', exact: true }).click();
@@ -287,9 +297,16 @@ test('follow-up reviews preserve report versions, reject stale context, share ne
       );
     await dialog.getByLabel('Review outcome', { exact: true }).selectOption('complete');
     await expect(dialog.getByLabel('Next review date', { exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Review before sharing', exact: true }).click();
+    await dialog
+      .getByLabel('I reviewed this assessment and the instructions to share with the patient.', {
+        exact: true,
+      })
+      .check();
     await dialog
       .getByRole('button', { name: 'Save review & share instructions', exact: true })
       .click();
+    await dialog.getByRole('button', { name: 'Close confirmation', exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(card.getByText('Completed', { exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Review progress', exact: true })).toHaveCount(0);

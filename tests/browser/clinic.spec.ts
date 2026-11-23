@@ -157,9 +157,16 @@ test('clinician documents a full longitudinal care journey with private images a
     .getByLabel('Instructions for the patient', { exact: true })
     .fill('Your synthetic care plan is complete. Contact the clinic for further review if needed.');
   await dialog.getByLabel('Review outcome', { exact: true }).selectOption('complete');
+  await dialog.getByRole('button', { name: 'Review before sharing', exact: true }).click();
+  await dialog
+    .getByLabel('I reviewed this assessment and the instructions to share with the patient.', {
+      exact: true,
+    })
+    .check();
   await dialog
     .getByRole('button', { name: 'Save review & share instructions', exact: true })
     .click();
+  await dialog.getByRole('button', { name: 'Close confirmation', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText('Completed', { exact: true })).toBeVisible();
 });

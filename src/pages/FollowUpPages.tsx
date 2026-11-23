@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
   CalendarDays,
@@ -9,7 +17,7 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react';
-import type { CarePlan, CheckIn, ClinicSettings } from '../../shared/types';
+import type { CarePlan, CheckIn } from '../../shared/types';
 import type {
   FollowUpAssignment,
   FollowUpOwner,
@@ -37,6 +45,23 @@ import {
   EscalationStateBadge,
 } from '../components/FollowUpEscalations';
 import { checkedEscalationPolicyContext } from '../components/follow-up-escalation-helpers';
+import type { FollowUpReviewContext } from '../../shared/follow-up-review-recording';
+import {
+  useAppointmentBookingData,
+  useAppointmentBookingGuard,
+} from '../components/appointment-booking-helpers';
+import { checkedMessageSettings } from '../components/care-message-helpers';
+import { usePendingCareSubmissions } from '../components/pending-care-submissions';
+import {
+  checkedReviewContext,
+  checkReportContinuity,
+  sameReview,
+  checkedReviewHistory,
+  confirmedReview,
+  reviewRejection,
+  type ReviewTarget,
+  type ReviewAttempt,
+} from '../components/follow-up-review-helpers';
 import { useVisitData } from '../components/visit-duration-helpers';
 
 const message = (error: unknown) =>
@@ -63,15 +88,21 @@ export function FollowUpsPage() {
   const [params, setParams] = useSearchParams();
   const [escalationAction, setEscalationAction] = useState<'policy' | 'preview' | null>(null);
   const [scope, setScope] = useState(session.user?.role === 'doctor' ? 'mine' : 'all');
-  const resource = useResource<FollowUpWorkItem[]>(`/api/follow-up-worklist?scope=${scope}`);
-  const settings = useResource<ClinicSettings>('/api/settings');
+  const resource = useAppointmentBookingData(`/api/follow-up-worklist?scope=${scope}`, (value) => {
+    if (!Array.isArray(value)) throw new Error('The follow-up worklist could not be loaded.');
+    return value as FollowUpWorkItem[];
+  });
+  const settings = useAppointmentBookingData('/api/settings', checkedMessageSettings);
   const escalationPolicy = useVisitData(
     '/api/follow-up-escalation-policy',
     checkedEscalationPolicyContext,
   );
   const [filter, setFilter] = useState('due');
   const [search, setSearch] = useState('');
-  const [reviewId, setReviewId] = useState<string | null>(null);
+  const location = useLocation();
+  const { followUpReviews } = usePendingCareSubmissions();
+  const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null);
+  useLayoutEffect(() => setReviewTarget(null), [location.key, session.user?.id, session.csrfToken]);
   const [assignmentId, setAssignmentId] = useState<string | null>(null);
   const enabled = settings.data?.modules.followUp === true;
   const canReview = !!session.user?.doctorId;
@@ -139,6 +170,25 @@ export function FollowUpsPage() {
           </>
         }
       />
+      {!reviewTarget &&
+        [...followUpReviews.values()].map((attempt) => (
+          <div className="notice fu-resume" key={attempt.command.carePlanId}>
+            <span>
+              {attempt.patientName} · {attempt.planTitle} · Confirmation pending
+            </span>
+            <button
+              className="button button-secondary"
+              onClick={() =>
+                setReviewTarget({
+                  carePlanId: attempt.command.carePlanId,
+                  patientId: attempt.command.patientId,
+                })
+              }
+            >
+              Resume follow-up review
+            </button>
+          </div>
+        ))}
       <div className="fu-metrics">
         {[
           [
@@ -331,8 +381,10 @@ export function FollowUpsPage() {
                           {active && canReview && (
                             <button
                               className="button button-primary button-small"
-                              disabled={!enabled}
-                              onClick={() => setReviewId(plan.id)}
+                              disabled={!enabled || followUpReviews.has(plan.id)}
+                              onClick={() =>
+                                setReviewTarget({ carePlanId: plan.id, patientId: plan.patientId })
+                              }
                             >
                               Review progress
                             </button>
@@ -396,12 +448,13 @@ export function FollowUpsPage() {
           }}
         />
       )}
-      {reviewId && (
+      {reviewTarget && (
         <FollowUpReviewModal
-          carePlanId={reviewId}
-          onClose={() => setReviewId(null)}
+          key={JSON.stringify([reviewTarget, location.key, session.user?.id, session.csrfToken])}
+          target={reviewTarget}
+          onClose={() => setReviewTarget(null)}
           onSaved={() => {
-            setReviewId(null);
+            setReviewTarget(null);
             void resource.reload();
           }}
         />
@@ -426,7 +479,22 @@ function ReportSnapshot({ report }: { report: CheckIn }) {
         {adherence[report.adherence]} · Feeling {report.feeling}
       </p>
       {report.note && <p className="fu-prose">{report.note}</p>}
-      <small>Submitted or updated {dateTime(report.createdAt)} IST</small>
+      <small>
+        Submitted or updated{' '}
+        <time dateTime={report.createdAt}>
+          {new Date(report.createdAt).toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            fractionalSecondDigits: 3,
+          })}{' '}
+          IST
+        </time>
+      </small>
     </article>
   );
 }
@@ -495,8 +563,19 @@ export function FollowUpPlanSection({
   onChanged: () => void;
 }) {
   const { session } = useSession();
-  const history = useResource<FollowUpReview[]>(`/api/care-plans/${plan.id}/reviews`);
+  const location = useLocation();
+  const { followUpReviews } = usePendingCareSubmissions();
+  const target = { carePlanId: plan.id, patientId: plan.patientId };
+  const pending = followUpReviews.get(plan.id)?.command.patientId === plan.patientId;
+  const history = useAppointmentBookingData(
+    `/api/care-plans/${encodeURIComponent(plan.id)}/reviews`,
+    (value) => checkedReviewHistory(value, target),
+  );
   const [reviewing, setReviewing] = useState(false);
+  useLayoutEffect(
+    () => setReviewing(false),
+    [plan.id, location.key, session.user?.id, session.csrfToken],
+  );
   const active = statusOf(plan) === 'active';
   return (
     <section className="fu-plan-section">
@@ -505,7 +584,15 @@ export function FollowUpPlanSection({
         <h3>
           <History size={16} /> Follow-up reviews
         </h3>
-        {active && session.user?.doctorId && (
+        {pending && !reviewing && (
+          <button
+            className="button button-secondary button-small"
+            onClick={() => setReviewing(true)}
+          >
+            Resume follow-up review
+          </button>
+        )}
+        {active && !pending && session.user?.doctorId && (
           <button
             className="button button-secondary button-small"
             disabled={!enabled}
@@ -534,7 +621,8 @@ export function FollowUpPlanSection({
       )}
       {reviewing && (
         <FollowUpReviewModal
-          carePlanId={plan.id}
+          key={JSON.stringify([plan.id, location.key, session.user?.id, session.csrfToken])}
+          target={target}
           onClose={() => setReviewing(false)}
           onSaved={() => {
             setReviewing(false);
@@ -547,253 +635,520 @@ export function FollowUpPlanSection({
   );
 }
 
-export function FollowUpReviewModal({
-  carePlanId,
+function ReviewEvidence({ attempt }: { attempt: ReviewAttempt }) {
+  const c = attempt.command;
+  return (
+    <>
+      <p>
+        {attempt.patientName} · {attempt.planTitle}
+      </p>
+      <p>Reviewing clinician · {attempt.doctorName}</p>
+      <div className="fu-record-field">
+        <span>Clinician assessment · clinic only</span>
+        <p>{c.assessment}</p>
+      </div>
+      <div className="fu-record-field">
+        <span>Instructions to share with the patient</span>
+        <p>{c.patientInstructions}</p>
+      </div>
+      <p>
+        {dispositionText[c.disposition]}
+        {c.nextReviewDate && <> · Next review {formatDate(c.nextReviewDate)}</>}
+      </p>
+      <details className="fu-snapshots">
+        <summary>Patient reports included in this review ({attempt.snapshots.length})</summary>
+        {attempt.snapshots.map((v) => (
+          <ReportSnapshot key={v.id} report={v.snapshot} />
+        ))}
+      </details>
+    </>
+  );
+}
+function ReviewContext({ context }: { context: FollowUpReviewContext }) {
+  const { item } = context;
+  return (
+    <>
+      {!context.followUpEnabled && <p className="notice">Follow-up reviews are paused.</p>}
+      <p>Reviewing clinician · {context.doctorName}</p>
+      <div className="fu-review-context">
+        <span className="eyebrow">{item.patient.name}</span>
+        <h3>{item.carePlan.title}</h3>
+        <p>
+          Follow-up owner: {item.ownerDoctorName} · Original plan{' '}
+          {formatDate(item.carePlan.startDate)} – {formatDate(item.carePlan.endDate)}
+        </p>
+        <details>
+          <summary>Read original treatment instructions</summary>
+          <p className="fu-prose">{item.carePlan.instructions}</p>
+          {item.carePlan.medications.map((medication, index) => (
+            <div className="fu-original-item" key={index}>
+              <strong>{medication.name}</strong>
+              <p>{medication.instructions}</p>
+              <small>
+                {medication.schedule} · {medication.duration}
+              </small>
+              {medication.warnings && <p>{medication.warnings}</p>}
+            </div>
+          ))}
+          {item.carePlan.warnings && (
+            <p className="fu-prose">Precautions: {item.carePlan.warnings}</p>
+          )}
+        </details>
+      </div>
+      {statusOf(item.carePlan) === 'completed' && (
+        <div className="notice">
+          This plan is now completed. Its reviews remain available in the patient record.
+        </div>
+      )}
+      <section className="fu-review-reports">
+        <h3>
+          Patient updates awaiting review <span>{item.unreviewedCount}</span>
+        </h3>
+        {item.unreviewedCheckIns.length ? (
+          <div className="fu-reports">
+            {[...item.unreviewedCheckIns]
+              .sort((a, b) => b.date.localeCompare(a.date))
+              .map((report) => (
+                <ReportSnapshot key={report.id} report={report} />
+              ))}
+          </div>
+        ) : (
+          <p className="muted small">
+            There are no unreviewed patient reports. Record the source of any additional information
+            in your assessment.
+          </p>
+        )}
+      </section>
+      {item.latestReview && (
+        <details className="fu-previous-review">
+          <summary>Previous review · {formatDate(item.latestReview.createdAt)}</summary>
+          <FollowUpReviewHistory reviews={[item.latestReview]} />
+        </details>
+      )}
+    </>
+  );
+}
+
+function FollowUpReviewModal({
+  target,
   onClose,
   onSaved,
 }: {
-  carePlanId: string;
+  target: ReviewTarget;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [item, setItem] = useState<FollowUpWorkItem | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [error, setError] = useState('');
-  const [stale, setStale] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [assessment, setAssessment] = useState('');
-  const [instructions, setInstructions] = useState('');
-  const [disposition, setDisposition] = useState<FollowUpReview['disposition']>('continue');
-  const [nextDate, setNextDate] = useState('');
-  const toast = useToast();
-  const loadContext = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const items = await api<FollowUpWorkItem[]>('/api/follow-up-worklist?scope=all');
-      const current = items.find((value) => value.carePlan.id === carePlanId);
-      if (!current)
-        throw new Error(
-          'This care plan is no longer available. Close this dialog and refresh the record.',
-        );
-      setItem(current);
-      setStale(false);
+  const { session } = useSession(),
+    actorId = session.user!.id;
+  const { followUpReviews: pending } = usePendingCareSubmissions();
+  const { carePlanId, patientId } = target;
+  const capture = useAppointmentBookingGuard();
+  const stored = pending.get(carePlanId);
+  const initial = stored?.command.patientId === patientId ? stored : null;
+  const [phase, setPhase] = useState<
+    'edit' | 'review' | 'pending' | 'saved' | 'rejected' | 'current'
+  >(initial ? 'pending' : 'edit');
+  const [context, setContext] = useState<FollowUpReviewContext | null>(null);
+  const [attempt, setAttempt] = useState<ReviewAttempt | null>(initial);
+  const [saved, setSaved] = useState<FollowUpReview | null>(null);
+  const [ack, setAck] = useState(false),
+    [busy, setBusy] = useState(false),
+    [loading, setLoading] = useState(!initial);
+  const [error, setError] = useState(''),
+    [rejection, setRejection] = useState('');
+  const [assessment, setAssessment] = useState(initial?.command.assessment ?? '');
+  const [instructions, setInstructions] = useState(initial?.command.patientInstructions ?? '');
+  const [disposition, setDisposition] = useState<FollowUpReview['disposition']>(
+    initial?.command.disposition ?? 'continue',
+  );
+  const [nextDate, setNextDate] = useState(initial?.command.nextReviewDate ?? '');
+  const binding = useRef(session);
+  binding.current = session;
+  const observed = useRef(initial?.snapshots);
+  const started = useRef(!!initial),
+    openedPending = useRef(!!initial),
+    dismissed = useRef(false);
+  const reading = useRef(0),
+    writing = useRef(false),
+    heading = useRef<HTMLDivElement>(null);
+  const close = () => {
+    dismissed.current = true;
+    if (started.current) onSaved();
+    else onClose();
+  };
+  const load = useCallback(
+    async (mode: 'edit' | 'current', confirmation?: FollowUpReview, source?: ReviewAttempt) => {
+      const origin = capture(),
+        seq = ++reading.current;
+      const current = () => origin() && !dismissed.current && reading.current === seq;
+      setLoading(true);
       setError('');
-    } catch (problem) {
-      setLoadError(message(problem));
-    } finally {
-      setLoading(false);
-    }
-  }, [carePlanId]);
+      try {
+        const value = await api<unknown>(
+          `/api/care-plans/${encodeURIComponent(carePlanId)}/review-context`,
+          { isCurrent: current },
+        );
+        const fresh = await checkedReviewContext(value, { patientId, carePlanId });
+        if (!current()) return;
+        if (fresh.doctorId !== binding.current.user?.doctorId) {
+          // A linked professional can change since sign-in. Independently confirm the current binding.
+          const active = await api<typeof session>('/api/session', { isCurrent: current });
+          if (
+            active.user?.id !== actorId ||
+            active.csrfToken !== binding.current.csrfToken ||
+            active.user.doctorId !== fresh.doctorId
+          )
+            throw new Error(
+              'The reviewing clinician could not be confirmed. Please refresh and try again.',
+            );
+        }
+        if (!current()) return;
+        if (mode === 'current' && source && confirmation) {
+          const latest = fresh.item.latestReview;
+          if (
+            !latest ||
+            fresh.item.revision === source.command.expectedRevision ||
+            latest.id === source.previousReviewId
+          )
+            throw new Error(
+              'The current follow-up context could not be confirmed. Please try again.',
+            );
+          if (latest.id === confirmation.id && !sameReview(latest, confirmation))
+            throw new Error(
+              'The current follow-up context could not be confirmed. Please try again.',
+            );
+        }
+        if (observed.current) checkReportContinuity(fresh.checkInSnapshots, observed.current);
+        observed.current = fresh.checkInSnapshots;
+        setContext(fresh);
+        setPhase(mode);
+        if (mode === 'edit') {
+          setAttempt(null);
+          setAck(false);
+        }
+      } catch (problem) {
+        if (current()) setError(message(problem));
+      } finally {
+        if (current()) setLoading(false);
+      }
+    },
+    [actorId, carePlanId, patientId, capture],
+  );
   useEffect(() => {
-    void loadContext();
-  }, [loadContext]);
-  async function submit(event: FormEvent) {
+    if (!openedPending.current) void load('edit');
+    return () => {
+      reading.current++;
+    };
+  }, [load]);
+  useLayoutEffect(() => {
+    if (phase !== 'edit' || started.current) heading.current?.focus();
+  }, [phase]);
+  function review(event: FormEvent) {
     event.preventDefault();
-    if (!item || stale || busy) return;
+    if (
+      phase !== 'edit' ||
+      !context ||
+      !context.followUpEnabled ||
+      context.item.carePlan.effectiveStatus !== 'active' ||
+      loading ||
+      pending.has(carePlanId) ||
+      !assessment.trim() ||
+      !instructions.trim() ||
+      (disposition !== 'complete' && (!nextDate || nextDate < today()))
+    )
+      return;
+    setAttempt({
+      patientName: context.item.patient.name,
+      planTitle: context.item.carePlan.title,
+      doctorName: context.doctorName,
+      previousReviewId: context.item.latestReview?.id ?? null,
+      snapshots: context.checkInSnapshots,
+      command: {
+        requestId: crypto.randomUUID(),
+        patientId,
+        carePlanId,
+        doctorId: context.doctorId,
+        expectedRevision: context.item.revision,
+        assessment: assessment.trim(),
+        patientInstructions: instructions.trim(),
+        disposition,
+        nextReviewDate: disposition === 'complete' ? null : nextDate,
+        reviewedConfirmed: true,
+      },
+    });
+    setError('');
+    setAck(false);
+    setPhase('review');
+  }
+  async function send() {
+    if (!attempt || writing.current || dismissed.current) return;
+    if (
+      phase === 'pending'
+        ? pending.get(carePlanId) !== attempt
+        : phase !== 'review' || !ack || pending.has(carePlanId)
+    )
+      return;
+    const origin = capture();
+    const current = () => origin() && !dismissed.current && pending.get(carePlanId) === attempt;
+    pending.set(carePlanId, attempt);
+    started.current = true;
+    writing.current = true;
     setBusy(true);
     setError('');
+    setPhase('pending');
     try {
-      await api(`/api/care-plans/${carePlanId}/reviews`, {
-        method: 'POST',
-        body: {
-          expectedRevision: item.revision,
-          assessment,
-          patientInstructions: instructions,
-          disposition,
-          nextReviewDate: disposition === 'complete' ? null : nextDate,
-        },
-      });
-      toast('Review recorded. Instructions are available in the patient’s portal.');
-      onSaved();
+      const value = await api<unknown>(
+        `/api/care-plans/${encodeURIComponent(carePlanId)}/reviews/record`,
+        { method: 'POST', body: attempt.command, isCurrent: current },
+      );
+      if (!current()) return;
+      const record = confirmedReview(value, attempt, actorId);
+      if (!record) return;
+      pending.delete(carePlanId);
+      setSaved(record);
+      setPhase('saved');
     } catch (problem) {
-      setError(message(problem));
-      if (problem instanceof ApiError && problem.status === 409) setStale(true);
+      if (!current()) return;
+      const why = reviewRejection(problem, attempt.command, actorId);
+      if (!why) return;
+      pending.delete(carePlanId);
+      setRejection(why);
+      setAck(false);
+      setPhase('rejected');
     } finally {
-      setBusy(false);
+      if (origin() && !dismissed.current) {
+        writing.current = false;
+        setBusy(false);
+      }
     }
   }
+  const title = {
+    edit: 'Review care plan progress',
+    review: 'Confirm follow-up review',
+    pending: 'Review awaiting confirmation',
+    saved: 'Follow-up review recorded',
+    rejected: 'Follow-up review not recorded',
+    current: 'Current follow-up context',
+  }[phase];
   return (
-    <Modal
-      title="Review care plan progress"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <form className="stack fu-review-form" onSubmit={submit}>
-        {loading ? (
-          <Loading />
-        ) : loadError ? (
-          <ErrorState message={loadError} retry={loadContext} />
-        ) : (
-          item && (
-            <>
-              <div className="fu-review-context">
-                <span className="eyebrow">{item.patient.name}</span>
-                <h3>{item.carePlan.title}</h3>
-                <p>
-                  Follow-up owner: {item.ownerDoctorName} · Original plan{' '}
-                  {formatDate(item.carePlan.startDate)} – {formatDate(item.carePlan.endDate)}
-                </p>
-                <details>
-                  <summary>Read original treatment instructions</summary>
-                  <p className="fu-prose">{item.carePlan.instructions}</p>
-                  {item.carePlan.medications.map((medication, index) => (
-                    <div className="fu-original-item" key={index}>
-                      <strong>{medication.name}</strong>
-                      <p>{medication.instructions}</p>
-                      <small>
-                        {medication.schedule} · {medication.duration}
-                      </small>
-                      {medication.warnings && <p>{medication.warnings}</p>}
-                    </div>
-                  ))}
-                  {item.carePlan.warnings && (
-                    <p className="fu-prose">Precautions: {item.carePlan.warnings}</p>
-                  )}
-                </details>
-              </div>
-              {statusOf(item.carePlan) === 'completed' && (
-                <div className="notice">
-                  This plan is now completed. Its reviews remain available in the patient record.
-                </div>
+    <Modal title={title} onClose={close}>
+      <div className="stack fu-review-form" ref={heading} tabIndex={-1}>
+        {phase === 'edit' &&
+          (loading ? (
+            <Loading />
+          ) : !context ? (
+            <ErrorState
+              message={error || 'Unable to load this care plan.'}
+              retry={() => void load('edit')}
+            />
+          ) : (
+            <form className="stack" onSubmit={review}>
+              <ReviewContext context={context} />
+              {(!context.followUpEnabled ||
+                context.item.carePlan.effectiveStatus === 'completed') && (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void load('edit')}
+                >
+                  Refresh review context
+                </button>
               )}
-              <section className="fu-review-reports">
-                <h3>
-                  Patient updates awaiting review <span>{item.unreviewedCount}</span>
-                </h3>
-                {item.unreviewedCheckIns.length ? (
-                  <div className="fu-reports">
-                    {[...item.unreviewedCheckIns]
-                      .sort((a, b) => b.date.localeCompare(a.date))
-                      .map((report) => (
-                        <ReportSnapshot key={report.id} report={report} />
-                      ))}
-                  </div>
-                ) : (
-                  <p className="muted small">
-                    There are no unreviewed patient reports. Record the source of any additional
-                    information in your assessment.
-                  </p>
+              <Field
+                label="Clinician assessment"
+                hint="Clinic only. Record the source of information and your assessment."
+              >
+                <textarea
+                  required
+                  rows={4}
+                  maxLength={8000}
+                  value={assessment}
+                  onChange={(event) => setAssessment(event.target.value)}
+                  disabled={busy}
+                />
+              </Field>
+              <Field
+                label="Instructions for the patient"
+                hint="Shared in the patient portal immediately when you save."
+              >
+                <textarea
+                  required
+                  rows={4}
+                  maxLength={8000}
+                  value={instructions}
+                  onChange={(event) => setInstructions(event.target.value)}
+                  disabled={busy}
+                />
+              </Field>
+              <div className="form-grid">
+                <Field label="Review outcome">
+                  <select
+                    value={disposition}
+                    onChange={(event) =>
+                      setDisposition(event.target.value as FollowUpReview['disposition'])
+                    }
+                    disabled={busy}
+                  >
+                    <option value="continue">Continue follow-up</option>
+                    <option value="visit-requested">Request a visit</option>
+                    <option value="complete">Complete care plan</option>
+                  </select>
+                </Field>
+                {disposition !== 'complete' && (
+                  <Field label="Next review date">
+                    <input
+                      type="date"
+                      required
+                      min={today()}
+                      value={nextDate}
+                      onChange={(event) => setNextDate(event.target.value)}
+                      disabled={busy}
+                    />
+                  </Field>
                 )}
-              </section>
-              {item.latestReview && (
-                <details className="fu-previous-review">
-                  <summary>Previous review · {formatDate(item.latestReview.createdAt)}</summary>
-                  <FollowUpReviewHistory reviews={[item.latestReview]} />
-                </details>
-              )}
-            </>
-          )
-        )}
-        <Field
-          label="Clinician assessment"
-          hint="Clinic only. Record the source of information and your assessment."
-        >
-          <textarea
-            required
-            rows={4}
-            maxLength={8000}
-            value={assessment}
-            onChange={(event) => setAssessment(event.target.value)}
-            disabled={busy}
-          />
-        </Field>
-        <Field
-          label="Instructions for the patient"
-          hint="Shared in the patient portal immediately when you save."
-        >
-          <textarea
-            required
-            rows={4}
-            maxLength={8000}
-            value={instructions}
-            onChange={(event) => setInstructions(event.target.value)}
-            disabled={busy}
-          />
-        </Field>
-        <div className="form-grid">
-          <Field label="Review outcome">
-            <select
-              value={disposition}
-              onChange={(event) =>
-                setDisposition(event.target.value as FollowUpReview['disposition'])
-              }
-              disabled={busy}
-            >
-              <option value="continue">Continue follow-up</option>
-              <option value="visit-requested">Request a visit</option>
-              <option value="complete">Complete care plan</option>
-            </select>
-          </Field>
-          {disposition !== 'complete' && (
-            <Field label="Next review date">
-              <input
-                type="date"
-                required
-                min={today()}
-                value={nextDate}
-                onChange={(event) => setNextDate(event.target.value)}
-                disabled={busy}
-              />
-            </Field>
-          )}
-        </div>
-        <div className="notice">
-          {disposition === 'complete'
-            ? 'Completion ends new check-ins for this plan. The original plan and review history stay available.'
-            : disposition === 'visit-requested'
-              ? 'The patient will see your request and a booking link. This does not reserve an appointment.'
-              : 'The next review date tracks follow-up. It does not extend treatment duration or change the original prescription.'}
-        </div>
-        {error && (
-          <div className="notice notice-error" role="alert">
-            <div>
-              <strong>{error}</strong>
-              {stale && (
-                <p>
-                  Your draft is preserved. Refresh the reports and previous review, then check your
-                  assessment before saving again.
+              </div>
+              <div className="notice">
+                {disposition === 'complete'
+                  ? 'Completion ends new check-ins for this plan. The original plan and review history stay available.'
+                  : disposition === 'visit-requested'
+                    ? 'The patient will see your request and a booking link. This does not reserve an appointment.'
+                    : 'The next review date tracks follow-up. It does not extend treatment duration or change the original prescription.'}
+              </div>
+
+              <div className="fu-form-actions">
+                <button type="button" className="button button-secondary" onClick={close}>
+                  Cancel
+                </button>
+                <button
+                  className="button button-primary"
+                  disabled={
+                    !context.followUpEnabled ||
+                    context.item.carePlan.effectiveStatus !== 'active' ||
+                    !assessment.trim() ||
+                    !instructions.trim()
+                  }
+                >
+                  Review before sharing
+                </button>
+              </div>
+            </form>
+          ))}
+        {(phase === 'review' || phase === 'pending') && attempt && (
+          <>
+            <ReviewEvidence attempt={attempt} />
+            {phase === 'review' ? (
+              <>
+                <label className="checkbox-label">
+                  <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+                  I reviewed this assessment and the instructions to share with the patient.
+                </label>
+                <div className="fu-form-actions">
+                  <button
+                    className="button button-secondary"
+                    onClick={() => {
+                      setAck(false);
+                      setPhase('edit');
+                    }}
+                  >
+                    Edit review
+                  </button>
+                  <button
+                    className="button button-primary"
+                    disabled={!ack}
+                    onClick={() => void send()}
+                  >
+                    Save review &amp; share instructions
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="notice" role="status">
+                  {busy
+                    ? 'Confirming the review…'
+                    : 'The outcome is uncertain. Retry this review to recover the original confirmation.'}
                 </p>
-              )}
+                <div className="fu-form-actions">
+                  <button className="button button-secondary" onClick={close}>
+                    Close for now
+                  </button>
+                  <button
+                    className="button button-primary"
+                    disabled={busy}
+                    onClick={() => void send()}
+                  >
+                    Retry exact review
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+        {phase === 'rejected' && (
+          <>
+            <p className="notice" role="status">
+              {rejection}
+            </p>
+            <p>
+              Your draft is preserved. Check the current reports and review your instructions again
+              before sharing.
+            </p>
+            <div className="fu-form-actions">
+              <button className="button button-secondary" onClick={close}>
+                Close
+              </button>
+              <button
+                className="button button-primary"
+                disabled={loading}
+                onClick={() => void load('edit', undefined, attempt ?? undefined)}
+              >
+                Refresh review context
+              </button>
             </div>
-          </div>
+          </>
         )}
-        {stale && (
-          <button
-            className="button button-secondary"
-            type="button"
-            onClick={loadContext}
-            disabled={loading}
-          >
-            <RefreshCw size={15} /> Refresh review context
-          </button>
+        {phase === 'saved' && saved && attempt && (
+          <>
+            <p>
+              {attempt.patientName} · {attempt.planTitle}
+            </p>
+            <p>
+              This is the original recorded review. The patient can read the shared instructions.
+            </p>
+            <FollowUpReviewHistory reviews={[saved]} />
+            <div className="fu-form-actions">
+              <button className="button button-secondary" onClick={close}>
+                Close confirmation
+              </button>
+              <button
+                className="button button-primary"
+                disabled={loading}
+                onClick={() => void load('current', saved, attempt)}
+              >
+                View current review context
+              </button>
+            </div>
+          </>
         )}
-        <div className="fu-form-actions">
-          <button
-            className="button button-secondary"
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-          >
-            Cancel
-          </button>
-          <button
-            className="button button-primary"
-            disabled={
-              busy ||
-              loading ||
-              !!loadError ||
-              stale ||
-              !item ||
-              statusOf(item.carePlan) === 'completed'
-            }
-          >
-            {busy ? 'Saving…' : 'Save review & share instructions'}
-          </button>
-        </div>
-      </form>
+        {phase === 'current' && context && (
+          <>
+            <ReviewContext context={context} />
+            <div className="fu-form-actions">
+              <button className="button button-secondary" onClick={() => setPhase('saved')}>
+                Back to confirmation
+              </button>
+              <button className="button button-primary" onClick={close}>
+                Close
+              </button>
+            </div>
+          </>
+        )}
+        {error && (phase !== 'edit' || !!context) && (
+          <p role="alert" className="notice notice-error">
+            {error}
+          </p>
+        )}
+      </div>
     </Modal>
   );
 }

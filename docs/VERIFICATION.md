@@ -1,5 +1,17 @@
 # Release verification
 
+## 1.47.0 · Clinician follow-up review recording
+
+Verified locally on **23 November 2026** using Node.js **24.22.3** and Google Chrome. All **741 API, backup and recovery tests** and **179 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for a container runtime test.
+
+On v1.46, a successful clinical review cleared the reviewed report from the worklist. Repeating its request returned 409. Refreshing the context and resubmitting the same assessment created a second review and a second patient notice. On v1.47 the original account can recover the first confirmation, including the report versions and instructions recorded, after newer changes to the plan.
+
+The API checks cover competing revisions on independent connections, private rejection responses, a clinician profile change, a changed session and a next review date that passed between attempts. Injected write failures exercise rollback of the review, plan update, audit, notice and confirmation. Patients see the shared instructions and retain access to their history. The assessment and review snapshots stay in clinician views.
+
+Browser journeys exercise both the worklist and patient-record entry points, previously reviewed reports, interrupted submissions, later corrections, plan completion, module pauses, and stale drafts that require the clinician to acknowledge new evidence. They also check that malformed confirmations preserve the pending review and that late responses after navigation leave the active screen and session intact. The mobile review, retry and confirmation controls were exercised at 320 pixels with Chrome and axe.
+
+A database created by v1.46 preserved its original reviews, report snapshots and plan revision after upgrade. A separate v1.45 database had a same-day correction with the same timestamp as its original report. The v1.47 composer recognized the changed answers and recorded the corrected version while preserving the earlier clinical review. The local production smoke test checked the original review, outstanding corrected report and single patient notice after completion. The backup rehearsal recovered the accepted review and a rejected stale attempt while the plan was completed and follow-up was paused.
+
 ## 1.46.0 · Daily patient check-ins
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **734 API, backup and recovery tests** and **174 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. Container runtime verification requires a Docker engine, which was unavailable on this machine.

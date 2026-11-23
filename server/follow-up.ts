@@ -12,7 +12,15 @@ import type {
   FollowUpAssignment,
   FollowUpOwner,
 } from '../shared/follow-up.ts';
-import { clinicToday, get, id, list, nowISO, type DB } from './db.ts';
+import type {
+  FollowUpReviewCommand,
+  FollowUpReviewContext,
+  FollowUpReviewNotRecorded,
+  FollowUpReviewResult,
+} from '../shared/follow-up-review-recording.ts';
+import { followUpRevisionData } from '../shared/follow-up-review-recording.ts';
+import { required } from './validation.ts';
+import { clinicToday, get, id, list, nowISO, settings, type DB } from './db.ts';
 import { notifyPatient, notifyClinicians } from './activity.ts';
 import type { FollowUpEscalationState } from '../shared/follow-up-escalation.ts';
 
@@ -21,6 +29,7 @@ interface FollowUpContext {
   actor: (req: AuthRequest, roles?: User['role'][]) => User;
   patientAccess: (req: AuthRequest, patientId: string, allowReception?: boolean) => Patient;
   clinicianId: (req: AuthRequest) => string;
+  authorizeClinician: (req: AuthRequest) => { user: User; doctor: Doctor };
   moduleEnabled: (name: 'followUp') => void;
   audit: (req: AuthRequest, action: string, entityType: string, entityId: string) => void;
   fail: (status: number, message: string) => never;
@@ -39,6 +48,42 @@ const revisionSchema = z
   .string()
   .regex(/^[a-f0-9]{64}$/, 'Refresh the care plan to obtain its current revision.');
 
+const reviewFields = z
+  .object({
+    expectedRevision: revisionSchema,
+    assessment: z.string().trim().min(1).max(8000),
+    patientInstructions: z.string().trim().min(1).max(8000),
+    disposition: z.enum(['continue', 'visit-requested', 'complete']),
+    nextReviewDate: date.nullable(),
+  })
+  .strict();
+
+const legacyReview = reviewFields
+  .extend({ nextReviewDate: date.nullable().optional() })
+  .refine((value) => value.disposition === 'complete' || !!value.nextReviewDate, {
+    message: 'Choose the next review date while follow-up remains active.',
+    path: ['nextReviewDate'],
+  });
+const reviewCommand = reviewFields
+  .extend({
+    requestId: z
+      .string()
+      .uuid()
+      .transform((key) => key.toLowerCase()),
+    carePlanId: required,
+    patientId: required,
+    doctorId: required,
+    reviewedConfirmed: z.literal(true),
+  })
+  .refine((value) => (value.disposition === 'complete') === (value.nextReviewDate === null), {
+    message: 'Choose a next review date only while follow-up remains active.',
+    path: ['nextReviewDate'],
+  });
+const noQuery = z.object({}).strict();
+const staleRevision =
+  'This care plan has changed, including new or edited check-ins. Refresh and review the latest information before saving.';
+const pastDate = 'Choose today or a future review date.';
+
 export function createFollowUp(context: FollowUpContext) {
   const { db, actor, patientAccess, clinicianId, moduleEnabled, audit, fail } = context;
   db.exec(`CREATE TABLE IF NOT EXISTS followUpReviews (
@@ -56,9 +101,23 @@ export function createFollowUp(context: FollowUpContext) {
   CREATE TRIGGER IF NOT EXISTS prevent_follow_up_assignment_update BEFORE UPDATE ON followUpAssignments
     BEGIN SELECT RAISE(ABORT,'Follow-up assignment history is append-only'); END;
   CREATE TRIGGER IF NOT EXISTS prevent_follow_up_assignment_delete BEFORE DELETE ON followUpAssignments
-    BEGIN SELECT RAISE(ABORT,'Follow-up assignment history is append-only'); END;`);
-  function transaction<T>(operation: () => T): T {
-    db.exec('BEGIN IMMEDIATE');
+    BEGIN SELECT RAISE(ABORT,'Follow-up assignment history is append-only'); END;
+  CREATE TABLE IF NOT EXISTS followUpReviewCommands (
+    requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id),
+    carePlanId TEXT NOT NULL REFERENCES carePlans(id), payloadHash TEXT NOT NULL,
+    reviewId TEXT UNIQUE REFERENCES followUpReviews(id), rejectionStatus INTEGER, rejection TEXT,
+    CHECK ((reviewId IS NOT NULL AND rejection IS NULL AND rejectionStatus IS NULL)
+      OR (reviewId IS NULL AND rejection IS NOT NULL AND rejectionStatus IS NOT NULL AND rejectionStatus IN (400,403,409)))
+  );
+  CREATE TRIGGER IF NOT EXISTS prevent_follow_up_command_update BEFORE UPDATE ON followUpReviewCommands
+    BEGIN SELECT RAISE(ABORT,'Follow-up review command evidence is immutable'); END;
+  CREATE TRIGGER IF NOT EXISTS prevent_follow_up_command_delete BEFORE DELETE ON followUpReviewCommands
+    BEGIN SELECT RAISE(ABORT,'Follow-up review command evidence is immutable'); END;`);
+  function transaction<T>(
+    operation: () => T,
+    start: 'BEGIN IMMEDIATE' | 'BEGIN' = 'BEGIN IMMEDIATE',
+  ): T {
+    db.exec(start);
     try {
       const result = operation();
       db.exec('COMMIT');
@@ -156,23 +215,18 @@ export function createFollowUp(context: FollowUpContext) {
       : plan.status;
     const effectiveFollowUpDate =
       effectiveStatus === 'completed' ? null : (latestReview?.nextReviewDate ?? plan.followUpDate);
-    const revision = hash({
-      id: plan.id,
-      patientId: plan.patientId,
-      doctorId: plan.doctorId,
-      status: plan.status,
-      startDate: plan.startDate,
-      endDate: plan.endDate,
-      followUpDate: plan.followUpDate,
-      latestReviewId: latestReview?.id ?? null,
-      latestAssignmentId: owner(plan).assignment?.id ?? null,
-      checkIns: currentSnapshots.map((version) => ({
-        id: version.id,
-        contentHash: version.contentHash,
-      })),
-    });
+    const assignedOwner = owner(plan);
+    const revision = hash(
+      followUpRevisionData(
+        plan,
+        latestReview?.id ?? null,
+        assignedOwner.assignment?.id ?? null,
+        currentSnapshots,
+      ),
+    );
     return {
       history,
+      assignedOwner,
       latestReview,
       currentSnapshots,
       unreviewedCheckIns,
@@ -214,11 +268,7 @@ export function createFollowUp(context: FollowUpContext) {
     return { doctorId, doctorName: get<Doctor>(db, 'doctors', doctorId)!.name };
   }
   function assertCurrent(expected: string, current: string) {
-    if (expected !== current)
-      fail(
-        409,
-        'This care plan has changed, including new or edited check-ins. Refresh and review the latest information before saving.',
-      );
+    if (expected !== current) fail(409, staleRevision);
   }
   function save(plan: CarePlan, review: FollowUpReview, req: AuthRequest) {
     db.prepare('INSERT INTO followUpReviews(id,carePlanId,data) VALUES (?,?,?)').run(
@@ -289,6 +339,49 @@ export function createFollowUp(context: FollowUpContext) {
       };
       return hydratePlan(save(plan, review, req));
     });
+  }
+  function workItem(
+    plan: CarePlan,
+    current: ReturnType<typeof state>,
+    today: string,
+  ): FollowUpWorkItem {
+    const { assignedOwner } = current;
+    return {
+      carePlan: hydratePlan(plan, false, current),
+      patient: get<Patient>(db, 'patients', plan.patientId)!,
+      ownerDoctorId: assignedOwner.doctorId,
+      ownerDoctorName: assignedOwner.doctorName,
+      revision: current.revision,
+      latestReview: current.latestReview,
+      unreviewedCheckIns: current.unreviewedCheckIns,
+      unreviewedCount: current.unreviewedCheckIns.length,
+      due:
+        current.effectiveStatus === 'active' &&
+        current.effectiveFollowUpDate !== null &&
+        current.effectiveFollowUpDate <= today,
+    };
+  }
+  function recordClinicalReview(
+    req: AuthRequest,
+    plan: CarePlan,
+    current: ReturnType<typeof state>,
+    doctor: Doctor,
+    input: z.infer<typeof legacyReview>,
+  ) {
+    const review: FollowUpReview = {
+      id: id(),
+      carePlanId: plan.id,
+      doctorId: doctor.id,
+      doctorName: doctor.name,
+      source: 'clinical-review',
+      assessment: input.assessment,
+      patientInstructions: input.patientInstructions,
+      disposition: input.disposition,
+      nextReviewDate: input.disposition === 'complete' ? null : input.nextReviewDate!,
+      checkInSnapshots: current.currentSnapshots,
+      createdAt: nowISO(),
+    };
+    return { review, plan: save(plan, review, req) };
   }
   function register(app: Express, escalationStates?: () => Map<string, FollowUpEscalationState>) {
     app.get('/api/follow-up-owners', (req: AuthRequest, res) => {
@@ -367,26 +460,10 @@ export function createFollowUp(context: FollowUpContext) {
         const reminders = escalationStates?.();
         return list<CarePlan>(db, 'carePlans')
           .filter((plan) => scope === 'all' || owner(plan).doctorId === user.doctorId)
-          .map((plan) => {
-            const current = state(plan),
-              patient = get<Patient>(db, 'patients', plan.patientId)!,
-              assignedOwner = owner(plan);
-            return {
-              escalation: reminders?.get(plan.id),
-              carePlan: hydratePlan(plan, false, current),
-              patient,
-              ownerDoctorId: assignedOwner.doctorId,
-              ownerDoctorName: assignedOwner.doctorName,
-              revision: current.revision,
-              latestReview: current.latestReview,
-              unreviewedCheckIns: current.unreviewedCheckIns,
-              unreviewedCount: current.unreviewedCheckIns.length,
-              due:
-                current.effectiveStatus === 'active' &&
-                current.effectiveFollowUpDate !== null &&
-                current.effectiveFollowUpDate <= today,
-            };
-          });
+          .map((plan) => ({
+            ...workItem(plan, state(plan), today),
+            escalation: reminders?.get(plan.id),
+          }));
       });
       worklist.sort(
         (a, b) =>
@@ -406,57 +483,105 @@ export function createFollowUp(context: FollowUpContext) {
       const history = reviews(plan.id);
       res.json(user.role === 'patient' ? history.map(patientReview) : history);
     });
+    app.get('/api/care-plans/:id/review-context', (req: AuthRequest, res) => {
+      const value = transaction((): FollowUpReviewContext => {
+        const { doctor } = context.authorizeClinician(req);
+        noQuery.parse(req.query);
+        const plan = planAccess(req, String(req.params.id)),
+          current = state(plan);
+        return {
+          item: workItem(plan, current, clinicToday()),
+          checkInSnapshots: current.currentSnapshots,
+          doctorId: doctor.id,
+          doctorName: doctor.name,
+          followUpEnabled: settings(db).modules.followUp,
+          latestAssignmentId: current.assignedOwner.assignment?.id ?? null,
+        };
+      }, 'BEGIN');
+      res.json(value);
+    });
     app.post('/api/care-plans/:id/reviews', (req: AuthRequest, res) => {
-      const author = identity(req);
-      moduleEnabled('followUp');
-      const input = z
-        .object({
-          expectedRevision: revisionSchema,
-          assessment: z.string().trim().min(1).max(8000),
-          patientInstructions: z.string().trim().min(1).max(8000),
-          disposition: z.enum(['continue', 'visit-requested', 'complete']),
-          nextReviewDate: date.nullable().optional(),
-        })
-        .strict()
-        .superRefine((value, ctx) => {
-          if (value.disposition !== 'complete' && !value.nextReviewDate)
-            ctx.addIssue({
-              code: 'custom',
-              message: 'Choose the next review date while follow-up remains active.',
-              path: ['nextReviewDate'],
-            });
-          if (
-            value.disposition !== 'complete' &&
-            value.nextReviewDate &&
-            value.nextReviewDate < clinicToday()
-          )
-            ctx.addIssue({
-              code: 'custom',
-              message: 'Choose today or a future review date.',
-              path: ['nextReviewDate'],
-            });
-        })
-        .parse(req.body);
-      const planId = String(req.params.id);
       const updated = transaction(() => {
-        const plan = planAccess(req, planId),
+        const { doctor } = context.authorizeClinician(req);
+        moduleEnabled('followUp');
+        const input = legacyReview.parse(req.body);
+        if (input.disposition !== 'complete' && input.nextReviewDate! < clinicToday())
+          return fail(400, pastDate);
+        const plan = planAccess(req, String(req.params.id)),
           current = state(plan);
         assertCurrent(input.expectedRevision, current.revision);
-        const review: FollowUpReview = {
-          id: id(),
-          carePlanId: plan.id,
-          ...author,
-          source: 'clinical-review',
-          assessment: input.assessment,
-          patientInstructions: input.patientInstructions,
-          disposition: input.disposition,
-          nextReviewDate: input.disposition === 'complete' ? null : input.nextReviewDate!,
-          checkInSnapshots: current.currentSnapshots,
-          createdAt: nowISO(),
-        };
-        return hydratePlan(save(plan, review, req));
+        return hydratePlan(recordClinicalReview(req, plan, current, doctor, input).plan);
       });
       res.status(201).json(updated);
+    });
+    app.post('/api/care-plans/:id/reviews/record', (req: AuthRequest, res) => {
+      const outcome = transaction(() => {
+        const { user, doctor } = context.authorizeClinician(req);
+        noQuery.parse(req.query);
+        const command: FollowUpReviewCommand = reviewCommand.parse(req.body);
+        const plan = planAccess(req, String(req.params.id));
+        const { requestId, carePlanId, patientId, doctorId, expectedRevision } = command;
+        if (plan.id !== carePlanId || plan.patientId !== patientId)
+          return fail(409, 'The reviewed care plan and patient must match this record.');
+        // Zod fixes field order and trims clinical text before computing command identity.
+        const payloadHash = hash(command),
+          actorId = user.id;
+        const result = (review: FollowUpReview): FollowUpReviewResult => ({
+          receipt: {
+            requestId,
+            actorId,
+            carePlanId,
+            patientId,
+            doctorId,
+            expectedRevision,
+            review,
+          },
+        });
+        const rejection = (message: string): FollowUpReviewNotRecorded => ({
+          code: 'FOLLOW_UP_REVIEW_NOT_RECORDED',
+          actorId,
+          command,
+          message,
+        });
+        const prior = db
+          .prepare(
+            'SELECT c.*, r.data AS originalReview FROM followUpReviewCommands c LEFT JOIN followUpReviews r ON r.id=c.reviewId WHERE c.requestId=?',
+          )
+          .get(requestId);
+        if (prior) {
+          if (
+            prior.actorId !== actorId ||
+            prior.carePlanId !== carePlanId ||
+            prior.payloadHash !== payloadHash
+          )
+            return fail(409, 'This request ID was already used for a different follow-up review.');
+          if (typeof prior.rejection === 'string')
+            return { status: Number(prior.rejectionStatus), body: rejection(prior.rejection) };
+          return { status: 200, body: result(JSON.parse(String(prior.originalReview))) };
+        }
+        const store = db.prepare(
+          'INSERT INTO followUpReviewCommands(requestId,actorId,carePlanId,payloadHash,reviewId,rejectionStatus,rejection) VALUES (?,?,?,?,?,?,?)',
+        );
+        function reject(status: number, message: string) {
+          store.run(requestId, actorId, carePlanId, payloadHash, null, status, message);
+          return { status, body: rejection(message) };
+        }
+        if (doctor.id !== doctorId)
+          return reject(
+            409,
+            'The linked clinician changed. Review the draft under the current clinician profile.',
+          );
+        if (!settings(db).modules.followUp)
+          return reject(403, 'This module is currently disabled by the clinic.');
+        if (command.nextReviewDate !== null && command.nextReviewDate < clinicToday())
+          return reject(400, pastDate);
+        const current = state(plan);
+        if (current.revision !== expectedRevision) return reject(409, staleRevision);
+        const { review } = recordClinicalReview(req, plan, current, doctor, command);
+        store.run(requestId, actorId, carePlanId, payloadHash, review.id, null, null);
+        return { status: 201, body: result(review) };
+      });
+      res.status(outcome.status).json(outcome.body);
     });
   }
   return {

@@ -427,6 +427,10 @@ export function createApp(options: AppOptions = {}) {
     patientAccess(req, a.patientId, true);
     return a;
   };
+  function currentClinicalAuthor(req: AuthRequest) {
+    const user = currentCareUser(req);
+    return { user, doctor: clinicianProfile(req) };
+  }
   const scheduling = createScheduling({ db, actor, audit, fail });
   const clinicResources = createClinicResources({ db, actor, audit, fail });
   const waitlist = createWaitlist({ db, actor, ownPatient, patientAccess, audit, fail });
@@ -435,6 +439,7 @@ export function createApp(options: AppOptions = {}) {
     actor,
     patientAccess,
     clinicianId,
+    authorizeClinician: currentClinicalAuthor,
     moduleEnabled,
     audit,
     fail,
@@ -980,10 +985,7 @@ export function createApp(options: AppOptions = {}) {
   registerCarePlanCreation(app, {
     db,
     transaction: scheduling.transaction,
-    authorize: (req) => {
-      const user = currentCareUser(req);
-      return { user, doctor: clinicianProfile(req) };
-    },
+    authorize: currentClinicalAuthor,
     patientAccess,
     audit,
     fail,
