@@ -32,6 +32,7 @@ import type { AppointmentStateChangeStatus } from '../../shared/appointment-stat
 import { useSearchPage } from '../record-search';
 import { Pagination } from '../components/Pagination';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
+import { PatientRegistrationModal } from '../components/PatientRegistrationModal';
 import { PrivateUploadModal } from '../components/PrivateUploadModal';
 import { uploadKey } from '../components/private-upload-helpers';
 import { DocumentsPanel } from '../components/DocumentsPanel';
@@ -1686,13 +1687,15 @@ export function PatientsPage() {
   const page = queryPage(params.get('page'));
   const [search, setSearch] = useState(query);
   const [adding, setAdding] = useState(false);
+  const { patientRegistration } = usePendingCareSubmissions();
+  useLayoutEffect(() => setAdding(false), [location.key, patientRegistration]);
   const heading = useRef<HTMLHeadingElement>(null);
   const focusResults = useRef(false);
   useEffect(() => {
     setSearch(query);
   }, [query, location.key]);
   useEffect(() => {
-    if (search === query) return;
+    if (adding || search === query) return;
     const timer = window.setTimeout(() => {
       focusResults.current = false;
       setParams((previous) => {
@@ -1704,7 +1707,7 @@ export function PatientsPage() {
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [search, query, setParams, location.key]);
+  }, [adding, search, query, setParams, location.key]);
   const request = new URLSearchParams({ page: String(page), pageSize: '25' });
   if (query) request.set('q', query);
   const result = useSearchPage<PatientDirectoryItem>(`/api/search/patients?${request.toString()}`);
@@ -1753,7 +1756,7 @@ export function PatientsPage() {
         actions={
           <button className="button button-primary" onClick={() => setAdding(true)}>
             <UserPlus size={17} />
-            Add patient
+            {patientRegistration.current ? 'Resume patient registration' : 'Add patient'}
           </button>
         }
       />
@@ -1880,105 +1883,34 @@ export function PatientsPage() {
           />
         )}
       </Card>
-      {adding && (
-        <PatientModal
-          onClose={() => setAdding(false)}
-          onSaved={() => {
+      {adding && session.user && session.user.role !== 'patient' && (
+        <PatientRegistrationModal
+          key={JSON.stringify([
+            location.key,
+            session.user.id,
+            session.user.role,
+            session.csrfToken,
+          ])}
+          actorId={session.user.id}
+          role={session.user.role}
+          onClose={(saved) => {
             setAdding(false);
-            setSearch('');
-            focusResults.current = false;
-            setParams((previous) => {
-              const next = new URLSearchParams(previous);
-              next.delete('search');
-              next.delete('page');
-              return next;
-            });
-            void reload();
+            if (saved) {
+              setSearch('');
+              focusResults.current = false;
+              if (params.has('search') || params.has('page'))
+                setParams((previous) => {
+                  const next = new URLSearchParams(previous);
+                  next.delete('search');
+                  next.delete('page');
+                  return next;
+                });
+            }
+            if (saved || patientRegistration.current) reload();
           }}
         />
       )}
     </>
-  );
-}
-
-function PatientModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const { session } = useSession();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const toast = useToast();
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setError('');
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    try {
-      await api('/api/patients', {
-        method: 'POST',
-        body: { ...values, allergies: values.allergies || '' },
-      });
-      toast('Patient registered.');
-      onSaved();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <Modal title="Register a patient" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        {error && (
-          <div className="notice notice-error" role="alert">
-            {error}
-          </div>
-        )}
-        <Field label="Full name">
-          <input name="name" required maxLength={120} autoComplete="name" />
-        </Field>
-        <div className="form-grid">
-          <Field label="Phone number">
-            <input name="phone" type="tel" required maxLength={20} placeholder="+91 98765 43210" />
-          </Field>
-          <Field label="Email address">
-            <input name="email" type="email" maxLength={254} placeholder="Optional" />
-          </Field>
-        </div>
-        <div className="form-grid">
-          <Field label="Date of birth">
-            <input name="dob" type="date" max={today()} />
-          </Field>
-          <Field label="Gender">
-            <select name="gender" defaultValue="Not specified">
-              <option>Not specified</option>
-              <option>Female</option>
-              <option>Male</option>
-              <option>Other</option>
-            </select>
-          </Field>
-        </div>
-        {session.user?.role !== 'receptionist' && (
-          <Field label="Known allergies">
-            <textarea
-              name="allergies"
-              rows={2}
-              maxLength={2000}
-              placeholder="Record patient-reported allergies, or leave blank if unknown"
-            />
-          </Field>
-        )}
-        <p className="muted small">
-          Registering here creates a clinic record. It does not create a patient sign-in account.
-        </p>
-        <div className="modal-actions">
-          <button className="button button-secondary" type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="button button-primary" disabled={saving}>
-            {saving ? 'Registering…' : 'Register patient'}
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 

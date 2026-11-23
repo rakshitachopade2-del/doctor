@@ -4746,6 +4746,108 @@ try {
   );
   assert.equal(patientCompletionResponse.receipt, undefined);
   assert.equal(patientCompletionResponse.command, undefined);
+  const registrationPath = '/patients/register';
+  const chartCommand = {
+    requestId: randomUUID(),
+    registeredByRole: 'admin',
+    reviewedConfirmed: true,
+    name: 'Synthetic walk-in registration rehearsal',
+    phone: '+91 9000000151',
+    email: 'Walkin-Rehearsal@Example.Test',
+    dob: '',
+    gender: 'Not specified',
+    allergies: 'Synthetic allergy recorded at registration',
+  };
+  const beforeRegistrationAccounts = await reminderRead('/accounts');
+  const createdChart = await ordinaryWrite(registrationPath, chartCommand);
+  const originalPatient = createdChart.receipt.patient;
+  assert.match(originalPatient.id, /^[a-f0-9-]{36}$/);
+  assert.equal(new Date(originalPatient.createdAt).toISOString(), originalPatient.createdAt);
+  assert.deepEqual(createdChart.receipt, {
+    requestId: chartCommand.requestId,
+    actorId: verified.user.id,
+    registeredByRole: 'admin',
+    patient: {
+      id: originalPatient.id,
+      name: chartCommand.name,
+      phone: chartCommand.phone,
+      email: chartCommand.email.toLowerCase(),
+      dob: '',
+      gender: chartCommand.gender,
+      allergies: chartCommand.allergies,
+      allergyStatus: 'recorded',
+      createdAt: originalPatient.createdAt,
+    },
+  });
+  const walkInPath = '/patients/' + originalPatient.id;
+  const walkInProfile = await reminderRead(walkInPath + '/profile');
+  const newPhone = '+91 9000000161';
+  await ordinaryWrite(
+    walkInPath + '/profile',
+    {
+      ...walkInProfile.demographics,
+      phone: newPhone,
+      reason: 'Synthetic correction after registration',
+      expectedRevision: walkInProfile.revision,
+      requestId: randomUUID(),
+    },
+    verifiedHeaders,
+    200,
+    'PATCH',
+  );
+  const walkInAllergies = await reminderRead(walkInPath + '/allergies');
+  await ordinaryWrite(
+    walkInPath + '/allergies',
+    {
+      status: 'none-known',
+      text: '',
+      reason: 'Synthetic subsequent review',
+      expectedRevision: walkInAllergies.revision,
+      requestId: randomUUID(),
+    },
+    verifiedHeaders,
+    200,
+  );
+  assert.deepEqual(
+    await ordinaryWrite(registrationPath, chartCommand, verifiedHeaders, 200),
+    createdChart,
+  );
+  const currentWalkIn = (await reminderRead(walkInPath)).patient;
+  assert.equal(currentWalkIn.id, originalPatient.id);
+  assert.equal(currentWalkIn.phone, newPhone);
+  assert.equal(currentWalkIn.allergyStatus, 'none-known');
+  const secondChart = await ordinaryWrite(registrationPath, {
+    ...chartCommand,
+    requestId: randomUUID(),
+  });
+  assert.notEqual(secondChart.receipt.patient.id, originalPatient.id);
+  assert.deepEqual(secondChart.receipt.patient, {
+    ...originalPatient,
+    id: secondChart.receipt.patient.id,
+    createdAt: secondChart.receipt.patient.createdAt,
+  });
+  const chartDirectory = await reminderRead(
+    '/search/patients?q=' + encodeURIComponent(chartCommand.name),
+  );
+  assert.deepEqual(
+    chartDirectory.items.map((row) => row.id).sort(),
+    [originalPatient.id, secondChart.receipt.patient.id].sort(),
+  );
+  assert.equal(JSON.stringify(chartDirectory).includes(chartCommand.allergies), false);
+  assert.deepEqual(await reminderRead('/accounts'), beforeRegistrationAccounts);
+  for (const entry of [createdChart, secondChart]) {
+    const chartAudit = await reminderRead(
+      '/search/audit?entityType=patient&entityId=' + entry.receipt.patient.id,
+    );
+    assert.equal(chartAudit.items.filter((row) => row.action === 'created patient').length, 1);
+  }
+  const deniedRegistration = await ordinaryWrite(
+    registrationPath,
+    chartCommand,
+    patientHeaders,
+    403,
+  );
+  assert.equal(deniedRegistration.receipt, undefined);
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -4847,6 +4949,13 @@ try {
     200,
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
+  const deniedChartReplay = await ordinaryWrite(
+    registrationPath,
+    chartCommand,
+    verifiedHeaders,
+    401,
+  );
+  assert.equal(deniedChartReplay.receipt, undefined);
   const stateSmokeLoggedOut = await ordinaryWrite(
     `${stateSmokeBase}/state-changes`,
     stateSmokeCommand,
@@ -4870,7 +4979,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

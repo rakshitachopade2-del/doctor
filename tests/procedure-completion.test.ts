@@ -286,19 +286,19 @@ test('scheduling a visit and removing its link invalidates a prior unlinked revi
 });
 
 test('visit changes and the clinic-time start boundary are checked at submission, and the outcome remains bound to the original request', async (t) => {
+  const startsAt = Date.parse('2026-11-24T08:05:00+05:30');
+  // Issue the test sessions on the same clock as the visit.
+  t.mock.timers.enable({ apis: ['Date'], now: startsAt - 1 });
   const f = await fixture(t),
-    a = visit(f.db, 1),
+    a = visit(f.db, 0, '08:05'),
     p = await f.create(a.id);
   await p.decide();
-  const startsAt = Date.parse(a.date + 'T' + a.time + ':00+05:30');
-  let clock = startsAt - 1;
-  t.mock.method(Date, 'now', () => clock);
   const before = await p.context(),
     tooEarly = await p.command();
   assert.match(before.blockedReason!, /future/);
   const refusal = await f.call(p.path, f.doctor, tooEarly);
   refused(refusal, f.doctor, tooEarly);
-  clock = startsAt;
+  t.mock.timers.setTime(startsAt);
   const started = await p.context(),
     previous = await p.command();
   assert.equal(started.allowed, true);

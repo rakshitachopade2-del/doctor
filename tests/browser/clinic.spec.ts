@@ -37,9 +37,13 @@ test('clinician documents a full longitudinal care journey with private images a
   await dialog
     .getByLabel('Known allergies', { exact: true })
     .fill('Patient reports no known allergies. Verify during consultation.');
+  await dialog.getByRole('button', { name: 'Review registration', exact: true }).click();
+  await dialog.getByRole('checkbox').check();
   await dialog.getByRole('button', { name: 'Register patient', exact: true }).click();
-  await expect(dialog).toBeHidden();
-  await page.getByRole('link', { name: patientName, exact: true }).click();
+  await expect(
+    dialog.getByRole('heading', { name: 'Patient registered', exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole('link', { name: 'Open patient record', exact: true }).click();
   await expect(page.getByRole('heading', { name: patientName, exact: true })).toBeVisible();
   const patientUrl = page.url();
 
@@ -268,7 +272,9 @@ test('reception is limited to demographics and dialogs support keyboard dismissa
   await expect(dialog.getByLabel('Known allergies', { exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: 'Close dialog', exact: true })).toBeFocused();
   await page.keyboard.press('Shift+Tab');
-  await expect(dialog.getByRole('button', { name: 'Register patient', exact: true })).toBeFocused();
+  await expect(
+    dialog.getByRole('button', { name: 'Review registration', exact: true }),
+  ).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(addButton).toBeFocused();

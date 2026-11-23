@@ -237,6 +237,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)procedure-completion-recording\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5226' },
     },
+    {
+      name: 'staff-patient-registration',
+      testMatch: /(?:^|\/)staff-patient-registration\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5227' },
+    },
   ],
   webServer: [
     {
@@ -503,6 +508,12 @@ export default defineConfig({
       command:
         'E2E_API_PORT=3054 E2E_VITE_PORT=5226 E2E_APPOINTMENT_STATE_FIXTURES=1 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5226',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3055 E2E_VITE_PORT=5227 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5227/api/health',
       reuseExistingServer: false,
       timeout: 60000,
     },

@@ -1,5 +1,19 @@
 # Release verification
 
+## 1.51.0 · Staff patient registration
+
+Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **771 API, backup and recovery tests** and **204 browser journeys across 45 projects** passed. The production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for a container runtime check.
+
+On v1.50, a synthetic failure in the staff registration audit returned 500 after the chart was already in the directory. Repeating the same request returned 201 and created a second ID. The first chart had no creation audit. On v1.51 a write failure rolls the registration back, and an exact retry of a committed reviewed registration returns its original chart and audit association.
+
+Eight API regression groups cover the reviewed and compatibility routes, independent SQLite writers, rollback after chart, audit or receipt failures, account and session changes, original confirmations after corrections, and public signup with a matching email. Concurrent copies of one request created a single chart. Two fresh requests with identical details created two IDs.
+
+Six Chrome journeys exercise reception and clinical registration, recovery of lost or undelivered requests, invalid confirmations, distinct matching charts, session cleanup and delayed replies after navigation. The saved chart link opened the correct record by ID after a name change. The review, retry and confirmation screens passed axe scans at 320 pixels. The registration browser project waits for the API health check before signing in. An existing procedure timing test now issues its synthetic session on the same clock as the appointment, so runs near midnight reach the intended start-time check.
+
+The production smoke test registered a chart, corrected the phone and allergy record, and recovered the original confirmation. It then deliberately created a second chart with matching registration details. Both IDs appeared in the directory, each had one creation audit, and the portal account list stayed unchanged. The restore rehearsal recovered a receptionist’s original demographics after a clinician corrected the name and added private allergy information. The restored clinical record retained the corrections and the reception confirmation retained its original fields.
+
+An upgrade from a database created by v1.50 preserved the two older chart IDs and an existing clinical chart byte for byte. It created no retrospective audit or registration receipt. A newly reviewed chart with matching demographics recovered its own original ID after a subsequent clinical correction.
+
 ## 1.50.0 · Procedure completion and aftercare
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **763 API, backup and recovery tests** and **198 browser journeys across 44 projects** passed. The production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for a container runtime check.

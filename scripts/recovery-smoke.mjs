@@ -904,6 +904,59 @@ async function rehearseRecovery() {
       expectedRevision: enrolled.revision,
       requestId: randomUUID(),
     });
+    const receptionId = 'recovery-receptionist';
+    const receptionEmail = 'synthetic-reception@example.test';
+    createUser(
+      db,
+      {
+        id: receptionId,
+        name: 'Synthetic recovery receptionist',
+        email: receptionEmail,
+        role: 'receptionist',
+        active: true,
+      },
+      password,
+    );
+    const reception = client();
+    await call(source, '/auth/login', reception, 'POST', { email: receptionEmail, password });
+    const registrationPath = '/patients/register';
+    const registrationCommand = {
+      requestId: randomUUID(),
+      registeredByRole: 'receptionist',
+      name: 'Synthetic walk-in for recovery',
+      phone: '+91 9000000191',
+      email: '',
+      dob: '',
+      gender: 'Not specified',
+      allergies: '',
+      reviewedConfirmed: true,
+    };
+    const walkInResult = await call(
+      source,
+      registrationPath,
+      reception,
+      'POST',
+      registrationCommand,
+      201,
+    );
+    const walkInId = walkInResult.receipt.patient.id;
+    const walkInPath = '/patients/' + walkInId;
+    const originalWalkInProfile = await call(source, walkInPath + '/profile', admin);
+    const amendedWalkInProfile = await call(source, walkInPath + '/profile', admin, 'PATCH', {
+      ...originalWalkInProfile.demographics,
+      name: 'Synthetic corrected walk-in',
+      expectedRevision: originalWalkInProfile.revision,
+      reason: 'Synthetic correction after reception registration',
+      requestId: randomUUID(),
+    });
+    const originalWalkInAllergies = await call(source, walkInPath + '/allergies', admin);
+    const amendedWalkInAllergies = await call(source, walkInPath + '/allergies', admin, 'POST', {
+      status: 'recorded',
+      text: 'Private synthetic correction',
+      reason: 'Synthetic clinician review',
+      expectedRevision: originalWalkInAllergies.revision,
+      requestId: randomUUID(),
+    });
     const preservedCredential = db
       .prepare('SELECT userId,id,secret,enabledAt FROM mfaCredentials')
       .get();
@@ -918,7 +971,7 @@ async function rehearseRecovery() {
     const verified = await cli('verify', snapshot);
     assert.equal(verified.source.sha256, snapshotHash);
     assert.equal(verified.counts.mfaEnrolledAccounts, 1);
-    assert.equal(verified.counts.tables.patients, 1);
+    assert.equal(verified.counts.tables.patients, 2);
     assert.equal(verified.counts.tables.mfaPending, 1);
     const recovered = await cli(
       'restore',
@@ -1267,6 +1320,36 @@ async function rehearseRecovery() {
       assert.equal(JSON.stringify(restoredSummary).includes(command.body), false);
       assert.equal(JSON.stringify(restoredClinicalRecord).includes(command.requestId), false);
     }
+    const newReception = client();
+    await call(target, '/auth/login', newReception, 'POST', { email: receptionEmail, password });
+    assert.deepEqual(
+      await call(target, registrationPath, newReception, 'POST', registrationCommand),
+      walkInResult,
+    );
+    assert.equal(walkInResult.receipt.actorId, receptionId);
+    assert.equal(walkInResult.receipt.patient.name, registrationCommand.name);
+    assert.equal(walkInResult.receipt.patient.allergies, '');
+    assert.equal(Object.hasOwn(walkInResult.receipt.patient, 'allergyStatus'), false);
+    assert.deepEqual(
+      await call(target, walkInPath + '/profile', newReception),
+      amendedWalkInProfile,
+    );
+    assert.deepEqual(
+      await call(target, walkInPath + '/allergies', newAdmin),
+      amendedWalkInAllergies,
+    );
+    const walkInAudit = await call(
+      target,
+      '/search/audit?entityType=patient&entityId=' + walkInId,
+      newAdmin,
+    );
+    assert.equal(walkInAudit.items.filter((row) => row.action === 'created patient').length, 1);
+    assert.equal(
+      restoredDb
+        .prepare("SELECT count(*) AS n FROM users WHERE json_extract(data,'$.patientId')=?")
+        .get(walkInId).n,
+      0,
+    );
     const restoredWorkflows = await call(
       target,
       `/patients/${patientId}/clinical-workflows`,
@@ -1443,7 +1526,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, role-safe walk-in registration receipts after later corrections, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

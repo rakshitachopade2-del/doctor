@@ -1,0 +1,28 @@
+.patient-registration {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.registration-details {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+}
+.registration-details dt {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.registration-details dd {
+  margin: 0.15rem 0 0;
+  white-space: pre-wrap;
+}
+@media (max-width: 480px) {
+  .patient-registration .modal-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .patient-registration input,
+  .patient-registration select {
+    min-width: 0;
+    max-width: 100%;
+  }
+}

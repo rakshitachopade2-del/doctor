@@ -174,6 +174,12 @@ After the patient confirms a specific slot, staff can book directly from the req
 
 For procedure charges, open **Procedure billing** from the clinical record or choose a procedure when creating an invoice. Reception sees the procedure title, estimate and billing status without clinical discussion or outcomes. Enter agreed amounts explicitly. Each procedure links to one invoice, and reopening the action displays that invoice. Cancelling a procedure preserves an already issued invoice; refunds and adjustments are not automated.
 
+## Register a clinic patient
+
+Open **Patients**, choose **Add patient**, and enter the name and phone number. Email and date of birth are optional. Reception can enter demographics, while doctors and administrators can also enter reported allergies. Choose **Review registration**, check the details, then confirm. The confirmation includes the new chart ID and a link to the patient. Portal access is provisioned separately.
+
+If the reply is interrupted, choose **Retry exact registration**. After leaving the directory, choose **Resume patient registration** in the same signed-in tab. This recovers the original chart ID and the details entered at registration, even after a correction. A separately confirmed registration creates a distinct chart, including when the names and contact details match. Reloading or signing out clears any pending request from the tab. Check the directory before starting again.
+
 ## Find patients, appointments and older activity
 
 The **Patients** directory searches current names, email addresses and phone numbers and shows 25 matches per page, with new registrations first. Directory results contain demographics only. Use the existing record and patient-details actions to open authorized information.
@@ -448,7 +454,7 @@ npm run test:production
 npm run test:recovery
 ```
 
-API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5226** and API ports **3011–3054**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5227** and API ports **3011–3055**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
 
 The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards. Follow-up and activity tests cover stale-review rejection, preserved check-in versions, same-day corrections, private assessment redaction, module pauses, recipient isolation, stable pagination, and read-state changes that leave clinical review work unchanged.
 

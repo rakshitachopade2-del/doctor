@@ -14,7 +14,8 @@ import {
   receptionPatient,
   safeAllergyHistory,
 } from './patient-profile.ts';
-import { date, required, short, text } from './validation.ts';
+import { date, email, required, short, text } from './validation.ts';
+import { registerPatientRegistration } from './patient-registration.ts';
 import { registerCarePlanCreation } from './care-plan-creation.ts';
 import { registerCheckInSubmission } from './check-in-submission.ts';
 import { registerIntakeSubmission } from './intake-submission.ts';
@@ -105,12 +106,6 @@ const fail = (status: number, message: string): never => {
   throw new HttpError(status, message);
 };
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const email = z
-  .string()
-  .trim()
-  .email()
-  .max(254)
-  .transform((v) => v.toLowerCase());
 const password = z.string().min(12, 'Use at least 12 characters').max(128);
 const patientFields = z.object({
   name: required,
@@ -719,29 +714,12 @@ export function createApp(options: AppOptions = {}) {
       patients.map(user.role === 'receptionist' ? receptionPatient : patientWithAllergyStatus),
     );
   });
-  app.post('/api/patients', (req: AuthRequest, res) => {
-    const user = actor(req, ['admin', 'doctor', 'receptionist']);
-    const input = patientFields
-      .extend({
-        email: email.or(z.literal('')).default(''),
-        dob: date
-          .refine((d) => d <= clinicToday(), 'Date of birth must not be in the future')
-          .or(z.literal(''))
-          .default(''),
-      })
-      .parse(req.body);
-    if (user.role === 'receptionist' && input.allergies)
-      fail(403, 'Clinical information must be recorded by a clinician.');
-    const patient = { ...input, id: id(), createdAt: nowISO() };
-    insert(db, 'patients', patient);
-    audit(req, 'created patient', 'patient', patient.id);
-    res
-      .status(201)
-      .json(
-        user.role === 'receptionist'
-          ? receptionPatient(patient)
-          : patientWithAllergyStatus(patient),
-      );
+  registerPatientRegistration(app, {
+    db,
+    currentSessionUser,
+    transaction: scheduling.transaction,
+    audit,
+    fail,
   });
   app.get('/api/patients/:id', (req: AuthRequest, res) => {
     const key = String(req.params.id),

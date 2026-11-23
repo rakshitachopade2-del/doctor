@@ -71,6 +71,7 @@ flowchart LR
 | `server/follow-up.ts`                          | Review snapshots, owner assignments, optimistic revisions, plan state and worklist         |
 | `server/follow-up-escalation.ts`               | Operational policies, exact previews, immutable notices, dedupe and local scheduled checks |
 | `src/components/FollowUpEscalations.tsx`       | Policy controls, recipient previews, guarded retries and exact-plan notice histories       |
+| `server/patient-registration.ts`               | Atomic staff chart creation and original role-specific registration receipts               |
 | `server/patient-profile.ts`                    | Attributed demographic/allergy corrections, role projections and independent revisions     |
 | `src/pages/PatientProfilePage.tsx`             | Current patient details, staff corrections and shared allergy history                      |
 | `server/inventory.ts`                          | Whole-unit catalogue, immutable stock events, revisions and idempotent operations          |
@@ -427,6 +428,12 @@ Archive listing performs SQL count and bounded metadata pagination without decod
 The bounded ZIP writer uses uncompressed entries, CRC32, safe generated paths and fixed archive timestamps. The layout follows the [PKWARE ZIP format specification](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT). A canonical manifest binds the immutable summary and selected file hashes; its SHA-256 is the review revision. The archive also has an exact SHA-256 and byte length. Original capture/save timestamps remain in the manifest; archive timestamps are deterministic packaging metadata.
 
 The browser validates the selected preview, copy identity, returned revision, filename, content type, size and hash before creating a file download. Navigation and closed-modal guards discard obsolete reads and binary responses. There is no new persisted bundle or release-request table. The export contains existing patient-facing records and selected originals; record-release approval, retention and external delivery remain separate workflows.
+
+## Staff patient registration
+
+`server/patient-registration.ts` handles reviewed and compatibility staff registration. Inside a SQLite write transaction it checks the current session, role and password-change status and enforces the receptionist restriction on allergies. A new chart and its creation audit commit together. A reviewed submission also writes an immutable `patientRegistrationCommands` row containing the actor, command digest, patient ID and original role-appropriate chart snapshot. A retry reads this evidence after checking current access. Later corrections update the patient record independently.
+
+The directory opens the patient by the ID in the receipt. Names, phone numbers and email addresses can be shared by different people. Each deliberate registration gets a fresh command UUID. An unresolved request is held in the signed-in tab’s memory. Registration does not create a user account, associate a matching email with a login, or alter older charts.
 
 ## Current patient details and correction evidence
 
