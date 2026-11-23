@@ -525,6 +525,29 @@ async function rehearseRecovery() {
       consent: true,
     };
     const intakeResult = await call(source, intakePath, patient, 'POST', intakeCommand, 201);
+    const planPath = '/care-plans/create';
+    const planCommand = {
+      patientId,
+      doctorId: doctor.id,
+      requestId: randomUUID(),
+      reviewedConfirmed: true,
+      title: 'Synthetic retained care plan',
+      instructions: 'Rehearsal entry.',
+      warnings: '',
+      expectations: '',
+      cost: '',
+      startDate: visitDate,
+      endDate: visitDate,
+      followUpDate: visitDate,
+      medications: [],
+    };
+    const createdPlan = await call(source, planPath, admin, 'POST', planCommand, 201);
+    const originalPlan = createdPlan.receipt.plan;
+    assert.equal(originalPlan.status, 'active');
+    await call(source, `/care-plans/${originalPlan.id}`, admin, 'PATCH', { status: 'completed' });
+    const rejectedPlanCommand = { ...planCommand, doctorId: randomUUID(), requestId: randomUUID() };
+    const rejectedPlan = await call(source, planPath, admin, 'POST', rejectedPlanCommand, 409);
+    assert.equal(rejectedPlan.code, 'CARE_PLAN_NOT_CREATED');
     const summaryPath = `/patients/${patientId}/care-summary`;
     const summary = await call(source, summaryPath, patient);
     const copyInput = { expectedRevision: summary.revision, requestId: randomUUID() };
@@ -781,6 +804,16 @@ async function rehearseRecovery() {
     );
     const restoredClinicalRecord = await call(target, `/patients/${patientId}`, newAdmin);
     assert.deepEqual(restoredClinicalRecord.encounters, [consultation.encounter]);
+    assert.deepEqual(await call(target, planPath, newAdmin, 'POST', planCommand), createdPlan);
+    assert.deepEqual(
+      await call(target, planPath, newAdmin, 'POST', rejectedPlanCommand, 409),
+      rejectedPlan,
+    );
+    const patientPlans = await call(target, '/care-plans', newPatient);
+    assert.equal(patientPlans.length, 1);
+    assert.equal(patientPlans[0].id, originalPlan.id);
+    assert.equal(patientPlans[0].effectiveStatus, 'completed');
+    assert.equal(patientPlans[0].latestReview.source, 'status-change');
     assert.deepEqual(
       await call(target, intakePath, newPatient, 'POST', intakeCommand),
       intakeResult,
@@ -802,6 +835,11 @@ async function rehearseRecovery() {
     assert.deepEqual(thread, [sentMessage.receipt.message]);
     const restoredSummary = await call(target, summaryPath, newPatient);
     assert.equal(restoredSummary.revision, summary.revision);
+    for (const projection of [restoredSummary, restoredClinicalRecord, patientPlans]) {
+      const json = JSON.stringify(projection);
+      assert.equal(json.includes(planCommand.requestId), false);
+      assert.equal(json.includes(rejectedPlanCommand.requestId), false);
+    }
     assert.deepEqual(restoredSummary.intakes, [intakeResult.receipt.intake]);
     assert.deepEqual(restoredClinicalRecord.intakes, restoredSummary.intakes);
     for (const projection of [restoredSummary, restoredClinicalRecord]) {

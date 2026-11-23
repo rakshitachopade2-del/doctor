@@ -309,6 +309,14 @@ Interactive fulfillment uses `POST /appointment-bookings` with `waitlistId`, exp
 
 The server checks current access before returning an earlier outcome. A reused UUID with a different actor, patient or text returns 409 to an otherwise authorized caller. A new command submitted while follow-up is paused receives 403 with `{code:'MESSAGE_NOT_SENT',requestId,actorId,patientId,body,message}`. This stored rejection remains final for that command after messaging resumes. Existing successes remain recoverable during the pause. An error without a matching rejection leaves the outcome uncertain.
 
+## Reviewed care-plan creation
+
+`POST /care-plans/create` accepts a flat object with `requestId` (UUID), `patientId`, `doctorId` (the professional profile reviewed), `reviewedConfirmed:true`, `title`, `instructions`, `expectations`, `warnings`, `cost`, `startDate`, `endDate`, `followUpDate` and `medications`. All fields are required. The medication array accepts zero to 30 ordered items, each with `name`, `instructions`, `schedule`, `duration` and `warnings`. Empty strings are accepted for expectations, warnings and cost. Dates are real calendar dates in YYYY-MM-DD format. The end and follow-up dates must each fall on or after the start date.
+
+A new save returns 201 with `{receipt:{requestId,actorId,patientId,doctorId,plan}}`. An exact retry returns 200 with that original active plan, including the original names and creation timestamp. Current status, ownership and follow-up reviews remain available through the existing read endpoints. Pausing follow-up leaves care-plan creation available.
+
+Both new and repeated requests require current patient access and a doctor or administrator account linked to a professional profile. A different actor, reviewed professional, patient or normalized payload reusing the request ID receives an unmarked 409 after authorization. If a new request names a different professional from the account's current doctor, the clinic records a 409 with `{code:'CARE_PLAN_NOT_CREATED',actorId,command,message}`. The returned command contains the normalized reviewed values. A matching rejection lets the clinician review the draft again. Other errors leave the original outcome unresolved. The legacy `POST /care-plans` continues to return the plain saved plan.
+
 ## Reviewed intake submission
 
 `POST /intakes/submit` accepts a flat object with `requestId` (UUID), `patientId`, `concern`, `location`, `duration`, `symptoms`, `triggers`, `previousTreatment`, `medications`, `allergies`, `goals` and `consent:true`. All text is trimmed. Concern, location and duration each require 1–300 characters. The other six answers allow empty strings and up to 8,000 characters each. The portal uses this endpoint. A new save returns 201 with `{receipt:{requestId,actorId,patientId,intake}}`. An exact replay by a currently authorized submitter returns 200 and the original saved intake, even while new intake is paused.

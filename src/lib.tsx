@@ -234,3 +234,9 @@ export function money(value: number) {
     maximumFractionDigits: 2,
   }).format(value);
 }
+
+export function shiftDate(date: string, amount: number) {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + amount);
+  return d.toISOString().slice(0, 10);
+}

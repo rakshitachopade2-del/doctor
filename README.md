@@ -312,6 +312,12 @@ Each receipt creates a distinct lot with an optional supplier lot code and exact
 
 Expiry follows Asia/Kolkata: a lot becomes expired the day after its recorded expiry date, and the expiring-soon filter covers today through the next 30 days. A missing date is shown as **No expiry recorded** and is not proof that an item is suitable for use. Low stock compares the balance not marked expired with the item's reorder threshold. There is no automatic purchase, dispensing, invoice, expense entry or patient linkage.
 
+## Review and share a care plan
+
+Open the patient’s clinic record and choose **Care plan**. Enter the instructions, dates, costs and any treatment items in the order the patient should see them. Select **Review care plan**, check the patient, clinician and plan details, acknowledge the review, then save. The patient can read the plan in **My care**, and eligible patient accounts receive one creation notice.
+
+If the confirmation is interrupted, choose **Retry exact creation**. The same signed-in tab retains the submitted plan across navigation. Reloading the tab or signing out clears that pending request from memory. Check the patient’s care plans before starting again. Recovering an earlier confirmation shows the plan as originally shared, even after the plan is completed or follow-up is assigned to another clinician. If the clinic confirms the professional profile changed before the save, review the retained draft under the current clinician before sharing it.
+
 ## Share a patient history
 
 From **My care**, open the intake questionnaire, fill in your history and check the answers on **Review & share**. Agree to share them, then choose **Share with my clinic**. The confirmation shows the history saved to your record.
@@ -394,7 +400,7 @@ npm run test:production
 npm run test:recovery
 ```
 
-API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5217** and API ports **3011–3045**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5218** and API ports **3011–3046**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
 
 The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards. Follow-up and activity tests cover stale-review rejection, preserved check-in versions, same-day corrections, private assessment redaction, module pauses, recipient isolation, stable pagination, and read-state changes that leave clinical review work unchanged.
 

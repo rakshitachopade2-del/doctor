@@ -94,7 +94,15 @@ test('clinician documents a full longitudinal care journey with private images a
     .fill('No medicine prescribed in this test.');
   await dialog.getByLabel('Schedule', { exact: true }).fill('As discussed with the clinician');
   await dialog.getByLabel('Duration', { exact: true }).fill('Until next review');
+  await dialog.getByRole('button', { name: 'Review care plan', exact: true }).click();
+  await dialog
+    .getByRole('checkbox', { name: 'I reviewed this care plan and confirm it is ready to share.' })
+    .check();
   await dialog.getByRole('button', { name: 'Save and share care plan', exact: true }).click();
+  await expect(
+    dialog.getByRole('heading', { name: 'Care plan shared', exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close care plan', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(
     page.getByRole('heading', { name: 'Browser-tested care plan', exact: true }),

@@ -1,5 +1,15 @@
 # Release verification
 
+## 1.42.0 · Care-plan creation
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **703 API, backup and recovery tests** and **153 browser journeys** passed. Three existing clinic journeys also passed again after the final keyboard-focus adjustment. A connection reset interrupted the large-timesheet check in an earlier parallel run. The complete API suite passed on rerun after the browser servers stopped.
+
+Seven new API test groups cover reviewed and legacy creation, access checks inside the write transaction, ordered treatment items, and recovery after restart. Two independent server processes submitted the same request and produced one plan, one audit entry and one patient notice. Injected failures rolled back incomplete writes. The original confirmation retained its author, dates and regimen through later review, reassignment, completion and profile renames.
+
+Five new browser journeys cover clinical review and acknowledgment, patient access to the saved plan, recovery after an interrupted save and fresh review when the clinician profile changes. They also check that a late server response after navigation cannot dismiss a new form or sign out a valid session. The review, retry and confirmation screens passed accessibility and control checks at a 320-pixel viewport width.
+
+The local production smoke test compared the original active plan with the completed plan in the patient portal and checked for a single notice and audit entry. Restoring a synthetic backup into a separate database recovered the completed plan, its follow-up review, the original creation receipt and a previously rejected request. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. Container runtime checks require a Docker engine, which was unavailable on this machine.
+
 ## 1.41.0 · Patient intake submission
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **696 API, backup and recovery tests** and **148 browser journeys** passed. Browser projects ran in batches against isolated synthetic databases. TypeScript, the production frontend build, formatting and whitespace checks passed. The production dependency audit reported zero vulnerabilities.

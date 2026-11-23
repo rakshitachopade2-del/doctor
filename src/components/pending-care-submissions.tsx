@@ -1,9 +1,11 @@
 import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } from 'react';
 import type { CareMessageCommand } from '../../shared/care-message';
 import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
+import type { CarePlanAttempt } from './care-plan-creation-helpers';
 import { useSession } from '../lib';
 
 interface PendingCareSubmissions {
+  plans: Map<string, CarePlanAttempt>;
   messages: Map<string, CareMessageCommand>;
   intakes: Map<string, IntakeSubmissionCommand>;
 }
@@ -14,6 +16,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
   const pending = useMemo(
     () => ({
+      plans: new Map<string, CarePlanAttempt>(),
       messages: new Map<string, CareMessageCommand>(),
       intakes: new Map<string, IntakeSubmissionCommand>(),
     }),
@@ -21,6 +24,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   );
   useLayoutEffect(() => {
     const clear = () => {
+      pending.plans.clear();
       pending.messages.clear();
       pending.intakes.clear();
     };

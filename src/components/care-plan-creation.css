@@ -1,0 +1,38 @@
+.care-plan-creation .notice {
+  display: block;
+}
+.care-plan-creation p,
+.care-plan-summary dd {
+  overflow-wrap: anywhere;
+}
+.care-plan-summary {
+  display: grid;
+  margin: 0;
+  gap: 0.7rem;
+}
+.care-plan-summary dt {
+  font-weight: 600;
+}
+.care-plan-summary dd {
+  margin: 0.2rem 0 0;
+  white-space: pre-wrap;
+}
+.care-plan-acknowledgment {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+.care-plan-acknowledgment input[type='checkbox'] {
+  width: 16px;
+  flex: 0 0 16px;
+  margin-top: 0.25rem;
+}
+@media (max-width: 580px) {
+  .care-plan-creation .modal-actions {
+    flex-wrap: wrap;
+    position: static;
+  }
+  .care-plan-creation .modal-actions .button {
+    width: 100%;
+  }
+}

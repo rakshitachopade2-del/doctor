@@ -23,7 +23,6 @@ import type {
   CarePlan,
   Doctor,
   Encounter,
-  Medication,
   Patient,
 } from '../../shared/types';
 import type { WaitlistEntry } from '../../shared/waitlist';
@@ -34,6 +33,8 @@ import { useSearchPage } from '../record-search';
 import { Pagination } from '../components/Pagination';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
 import { DocumentsPanel } from '../components/DocumentsPanel';
+import { CarePlanModal } from '../components/CarePlanModal';
+import { usePendingCareSubmissions } from '../components/pending-care-submissions';
 import { CareMessageComposer } from '../components/CareMessageComposer';
 import { checkedMessageSettings, useCareMessages } from '../components/care-message-helpers';
 import { AppointmentResourcesModal } from '../components/AppointmentResourcesModal';
@@ -70,7 +71,17 @@ import {
 } from '../components/visit-duration-helpers';
 import { ImageAnnotationModal } from '../components/ImageAnnotations';
 import { FollowUpPlanSection } from './FollowUpPages';
-import { api, ApiError, formatDate, money, today, useResource, useSession, useToast } from '../lib';
+import {
+  api,
+  ApiError,
+  formatDate,
+  money,
+  shiftDate,
+  today,
+  useResource,
+  useSession,
+  useToast,
+} from '../lib';
 import {
   Avatar,
   Badge,
@@ -110,11 +121,6 @@ function safeQueryDate(value: string | null) {
     new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value
     ? value
     : today();
-}
-function shiftDate(date: string, amount: number) {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + amount);
-  return d.toISOString().slice(0, 10);
 }
 function timeLabel(time: string) {
   const [h, m] = time.split(':').map(Number);
@@ -1979,6 +1985,7 @@ export function PatientDetailPage() {
   const { id } = useParams();
   const { session } = useSession();
   const location = useLocation();
+  const { plans: pendingPlans } = usePendingCareSubmissions();
   const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
   const { data, loading, error, reload } = useAppointmentBookingData(
     id ? `/api/patients/${encodeURIComponent(id)}` : null,
@@ -2038,11 +2045,14 @@ export function PatientDetailPage() {
   });
   useLayoutEffect(() => {
     const recordPath = location.pathname.replace(/\/$/, '');
+    const closeCarePlan = () => setModal((open) => (open === 'care' ? null : open));
     const clearDocumentation = () => {
+      closeCarePlan();
       setDocumentation(null);
       setPendingDocumentation(null);
     };
     const navigateDocumentation = () => {
+      closeCarePlan();
       setDocumentation(null);
       if (window.location.pathname.replace(/\/$/, '') !== recordPath) setPendingDocumentation(null);
     };
@@ -2064,6 +2074,7 @@ export function PatientDetailPage() {
       previous.actorId !== session.user?.id ||
       previous.patientId !== id
     ) {
+      setModal((open) => (open === 'care' ? null : open));
       documentationOrigin.current = { key: location.key, actorId: session.user?.id, patientId: id };
       setDocumentation(null);
       if (previous.actorId !== session.user?.id || previous.patientId !== id)
@@ -2136,10 +2147,10 @@ export function PatientDetailPage() {
             </Link>
             <button
               className="button button-secondary"
-              disabled={!!pendingDocumentation}
+              disabled={!canDocument || !!pendingDocumentation}
               onClick={() => setModal('care')}
             >
-              <Plus size={16} /> Care plan
+              <Plus size={16} /> {pendingPlans.has(patient.id) ? 'Resume care plan' : 'Care plan'}
             </button>
             <button
               className="button button-primary"
@@ -2421,8 +2432,14 @@ export function PatientDetailPage() {
                 title="No care plans yet"
                 description="Give your patient clear instructions, expectations and a follow-up date."
                 action={
-                  <button className="button button-primary" onClick={() => setModal('care')}>
-                    Create a care plan
+                  <button
+                    className="button button-primary"
+                    disabled={!canDocument || !!pendingDocumentation}
+                    onClick={() => setModal('care')}
+                  >
+                    {pendingPlans.has(patient.id)
+                      ? 'Continue pending creation'
+                      : 'Create a care plan'}
                   </button>
                 }
               />
@@ -2582,12 +2599,14 @@ export function PatientDetailPage() {
       )}
       {modal === 'care' && (
         <CarePlanModal
-          patientId={patient.id}
-          onClose={() => setModal(null)}
-          onSaved={() => {
+          key={JSON.stringify([patient.id, location.key, session.user?.id, session.csrfToken])}
+          patient={patient}
+          onClose={(created) => {
             setModal(null);
-            setTab('care');
-            reload();
+            if (created) {
+              if (tab !== 'care') setTab('care');
+              else void reload();
+            }
           }}
         />
       )}
@@ -2610,217 +2629,6 @@ export function PatientDetailPage() {
         />
       )}
     </>
-  );
-}
-
-function CarePlanModal({
-  patientId,
-  onClose,
-  onSaved,
-}: {
-  patientId: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const emptyMedication = (): Medication => ({
-    name: '',
-    instructions: '',
-    schedule: '',
-    duration: '',
-    warnings: '',
-  });
-  const [medications, setMedications] = useState<Medication[]>([]);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const toast = useToast();
-  const [startDate, setStartDate] = useState(today());
-  const [endDate, setEndDate] = useState(shiftDate(today(), 30));
-  function editMedication(index: number, field: keyof Medication, value: string) {
-    setMedications((prev) => prev.map((m, i) => (i === index ? { ...m, [field]: value } : m)));
-  }
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    if (endDate < startDate) return setError('The end date must be on or after the start date.');
-    setError('');
-    setSaving(true);
-    try {
-      await api('/api/care-plans', { method: 'POST', body: { ...values, patientId, medications } });
-      toast('Care plan shared with patient.');
-      onSaved();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <Modal title="Create a care plan" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        {error && (
-          <div role="alert" className="notice notice-error">
-            {error}
-          </div>
-        )}
-        <Field label="Plan title">
-          <input
-            name="title"
-            required
-            maxLength={200}
-            placeholder="A clear name for this treatment journey"
-          />
-        </Field>
-        <Field label="Instructions">
-          <textarea
-            name="instructions"
-            required
-            rows={3}
-            maxLength={8000}
-            placeholder="Explain the plan in language the patient can understand"
-          />
-        </Field>
-        <div className="form-grid">
-          <Field label="Start date">
-            <input
-              name="startDate"
-              required
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-          </Field>
-          <Field label="End / review date">
-            <input
-              name="endDate"
-              required
-              type="date"
-              min={startDate}
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
-          </Field>
-          <Field label="Follow-up date">
-            <input
-              name="followUpDate"
-              required
-              type="date"
-              min={startDate}
-              defaultValue={shiftDate(today(), 14)}
-            />
-          </Field>
-          <Field label="Expected cost">
-            <input
-              name="cost"
-              maxLength={200}
-              placeholder="e.g. ₹800–1,200, confirmed with patient"
-            />
-          </Field>
-        </div>
-        <Field label="What to expect">
-          <textarea
-            name="expectations"
-            rows={2}
-            maxLength={5000}
-            placeholder="Expected duration, review points and realistic expectations"
-          />
-        </Field>
-        <Field label="Precautions and when to contact the clinic">
-          <textarea
-            name="warnings"
-            rows={2}
-            required
-            maxLength={5000}
-            placeholder="Specific clinician-reviewed warnings and escalation instructions"
-          />
-        </Field>
-        <div className="row between">
-          <h3 className="section-title">Medications / treatment steps</h3>
-          <button
-            type="button"
-            className="button button-secondary button-small"
-            onClick={() => setMedications((prev) => [...prev, emptyMedication()])}
-          >
-            <Plus size={14} /> Add item
-          </button>
-        </div>
-        {medications.length === 0 && (
-          <p className="muted small">
-            Add prescribed medications if applicable. No automated medication recommendations are
-            generated.
-          </p>
-        )}
-        {medications.map((m, index) => (
-          <div className="medication-editor" key={index}>
-            <div className="row between">
-              <strong>Item {index + 1}</strong>
-              <button
-                className="button button-ghost button-small"
-                type="button"
-                aria-label={`Remove medication ${index + 1}`}
-                onClick={() => setMedications((prev) => prev.filter((_, i) => i !== index))}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <Field label="Medication / treatment name">
-              <input
-                required
-                maxLength={200}
-                value={m.name}
-                onChange={(e) => editMedication(index, 'name', e.target.value)}
-              />
-            </Field>
-            <Field label="Dose and instructions">
-              <textarea
-                required
-                rows={2}
-                maxLength={2000}
-                value={m.instructions}
-                onChange={(e) => editMedication(index, 'instructions', e.target.value)}
-              />
-            </Field>
-            <div className="form-grid">
-              <Field label="Schedule">
-                <input
-                  required
-                  maxLength={200}
-                  value={m.schedule}
-                  onChange={(e) => editMedication(index, 'schedule', e.target.value)}
-                  placeholder="As prescribed"
-                />
-              </Field>
-              <Field label="Duration">
-                <input
-                  required
-                  maxLength={200}
-                  value={m.duration}
-                  onChange={(e) => editMedication(index, 'duration', e.target.value)}
-                />
-              </Field>
-            </div>
-            <Field label="Item-specific warnings">
-              <input
-                maxLength={2000}
-                value={m.warnings}
-                onChange={(e) => editMedication(index, 'warnings', e.target.value)}
-              />
-            </Field>
-          </div>
-        ))}
-        <p className="muted small">
-          This plan is visible to the patient immediately after saving. Confirm instructions, risks
-          and costs with them.
-        </p>
-        <div className="modal-actions">
-          <button type="button" className="button button-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="button button-primary" disabled={saving}>
-            {saving ? 'Saving…' : 'Save and share care plan'}
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 

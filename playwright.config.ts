@@ -192,6 +192,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)intake-submission\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5217' },
     },
+    {
+      name: 'care-plan-creation',
+      testMatch: /(?:^|\/)care-plan-creation\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5218' },
+    },
   ],
   webServer: [
     {
@@ -403,6 +408,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3045 E2E_VITE_PORT=5217 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5217',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3046 E2E_VITE_PORT=5218 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5218',
       reuseExistingServer: false,
       timeout: 60000,
     },

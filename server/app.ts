@@ -14,6 +14,8 @@ import {
   receptionPatient,
   safeAllergyHistory,
 } from './patient-profile.ts';
+import { date, required, short, text } from './validation.ts';
+import { registerCarePlanCreation } from './care-plan-creation.ts';
 import { registerIntakeSubmission } from './intake-submission.ts';
 import { registerCareMessages } from './care-message.ts';
 import { registerCareSummary } from './care-summary.ts';
@@ -107,18 +109,6 @@ const fail = (status: number, message: string): never => {
   throw new HttpError(status, message);
 };
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const text = z.string().trim().max(8000);
-const short = z.string().trim().max(300);
-const required = short.min(1);
-const date = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
-  .refine(
-    (s) =>
-      !Number.isNaN(Date.parse(`${s}T12:00:00Z`)) &&
-      new Date(`${s}T12:00:00Z`).toISOString().slice(0, 10) === s,
-    'Invalid calendar date',
-  );
 const email = z
   .string()
   .trim()
@@ -326,7 +316,7 @@ export function createApp(options: AppOptions = {}) {
     return pid;
   };
   // Called within the transaction that reads or changes the patient's record.
-  function authorizePatientRecord(req: AuthRequest, requestedPatient?: string) {
+  function currentCareUser(req: AuthRequest) {
     const session = db
       .prepare('SELECT userId,expiresAt,csrfToken,mfaCredentialId FROM sessions WHERE tokenHash=?')
       .get(req.sessionToken ?? '');
@@ -346,6 +336,10 @@ export function createApp(options: AppOptions = {}) {
     if (user.mustChangePassword || !['patient', 'doctor', 'admin'].includes(user.role))
       return fail(403, 'Clinical records are restricted to the care team and patient.');
     req.user = user;
+    return user;
+  }
+  function authorizePatientRecord(req: AuthRequest, requestedPatient?: string) {
+    const user = currentCareUser(req);
     const patientId = ownPatient(req, requestedPatient);
     patientAccess(req, patientId);
     return { user, patientId };
@@ -354,13 +348,14 @@ export function createApp(options: AppOptions = {}) {
   const moduleEnabled = (name: keyof ClinicSettings['modules']) => {
     if (!settings(db).modules[name]) fail(403, 'This module is currently disabled by the clinic.');
   };
-  const clinicianId = (req: AuthRequest) => {
+  const clinicianProfile = (req: AuthRequest) => {
     const user = clinical(req);
-    const doctorId = user.doctorId;
-    if (!doctorId || !get<Doctor>(db, 'doctors', doctorId))
+    const doctor = user.doctorId && get<Doctor>(db, 'doctors', user.doctorId);
+    if (!doctor)
       return fail(400, 'Sign in with a linked doctor account to document clinical care.');
-    return doctorId;
+    return doctor;
   };
+  const clinicianId = (req: AuthRequest) => clinicianProfile(req).id;
   const issueSession = (user: User, req: Request, mfaCredentialId?: string) => {
     if (!mfaSessionAllowed(db, user.id, mfaCredentialId))
       fail(409, 'MFA settings changed. Sign in again.');
@@ -976,55 +971,16 @@ export function createApp(options: AppOptions = {}) {
       ),
     );
   });
-  app.post('/api/care-plans', (req: AuthRequest, res) => {
-    const doctorId = clinicianId(req);
-    const input = z
-      .object({
-        patientId: required,
-        title: required,
-        instructions: text.min(1),
-        expectations: text.default(''),
-        warnings: text.default(''),
-        cost: short.default(''),
-        startDate: date,
-        endDate: date,
-        followUpDate: date,
-        medications: z
-          .array(
-            z.object({
-              name: required,
-              instructions: text.min(1),
-              schedule: required,
-              duration: required,
-              warnings: text.default(''),
-            }),
-          )
-          .max(30),
-      })
-      .refine((v) => v.endDate >= v.startDate, 'End date must not precede start date')
-      .refine((v) => v.followUpDate >= v.startDate, 'Follow-up must not precede start date')
-      .parse(req.body);
-    const p = patientAccess(req, input.patientId);
-    const plan: CarePlan = {
-      ...input,
-      id: id(),
-      doctorId,
-      doctorName: get<Doctor>(db, 'doctors', doctorId)!.name,
-      patientName: p.name,
-      status: 'active',
-      createdAt: nowISO(),
-    };
-    scheduling.transaction(() => {
-      insert(db, 'carePlans', plan);
-      audit(req, 'created care plan', 'carePlan', plan.id);
-      notifyPatient(db, plan.patientId, `care-plan-created:${plan.id}`, {
-        kind: 'care-plan',
-        title: 'Your care plan is ready',
-        detail: plan.title,
-        href: `/my-care?plan=${encodeURIComponent(plan.id)}`,
-      });
-    });
-    res.status(201).json(plan);
+  registerCarePlanCreation(app, {
+    db,
+    transaction: scheduling.transaction,
+    authorize: (req) => {
+      const user = currentCareUser(req);
+      return { user, doctor: clinicianProfile(req) };
+    },
+    patientAccess,
+    audit,
+    fail,
   });
   app.patch('/api/care-plans/:id', (req: AuthRequest, res) => {
     const input = z

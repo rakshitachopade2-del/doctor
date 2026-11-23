@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { once } from 'node:events';
 import { test } from 'node:test';
 import { get, openDatabase, type DB } from '../server/db.ts';
 import type { User } from '../shared/types.ts';
 import type { IntakeAnswers } from '../shared/intake-submission.ts';
-import { beforeTransaction, careApiFixture, changeUser } from './fixtures/care-api.ts';
+import {
+  beforeTransaction,
+  careApiFixture,
+  changeUser,
+  simultaneousCareRequests,
+} from './fixtures/care-api.ts';
 
 const submit = '/intakes/submit';
 const patientId = 'patient-ananya';
@@ -247,47 +250,10 @@ test('independent server processes converge on one intake; deliberate later subm
     patient = await f.login('patient'),
     input = command();
   const initial = counts(f.db);
-  // Run the second synchronous SQLite writer on its own event loop.
-  const program = `
-    import { createApp } from './server/app.ts';
-    const app = createApp({databasePath: process.argv[1], demoMode: true, production: false});
-    const server = app.listen(0, '127.0.0.1', () => process.send(server.address().port));
-    process.on('disconnect', () => { server.close(() => app.locals.close()); server.closeAllConnections(); });
-  `;
-  const child = spawn(
-    process.execPath,
-    ['--import', 'tsx', '--input-type=module', '-e', program, f.databasePath],
-    { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
-  );
-  const exited = once(child, 'exit');
-  let saved;
-  try {
-    const port = await Promise.race([
-      once(child, 'message').then(([port]) => Number(port)),
-      exited.then(() => {
-        throw new Error('Second intake test server exited before startup.');
-      }),
-    ]);
-    const second = async () => {
-      const res = await fetch(`http://127.0.0.1:${port}/api/intakes/submit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Cookie: patient.cookie,
-          'X-CSRF-Token': patient.csrf,
-        },
-        body: JSON.stringify(input),
-      });
-      return { status: res.status, data: await res.json() };
-    };
-    const outcomes = await Promise.all([f.call(submit, patient, input), second()]);
-    assert.deepEqual(outcomes.map((x) => x.status).sort(), [200, 201]);
-    assert.deepEqual(outcomes[0].data, outcomes[1].data);
-    saved = outcomes[0].data;
-  } finally {
-    if (child.connected) child.disconnect();
-    await exited;
-  }
+  const outcomes = await simultaneousCareRequests(f, submit, patient, input);
+  assert.deepEqual(outcomes.map((x) => x.status).sort(), [200, 201]);
+  assert.deepEqual(outcomes[0].data, outcomes[1].data);
+  const saved = outcomes[0].data;
   assert.deepEqual(counts(f.db), {
     ...initial,
     intakes: initial.intakes + 1,

@@ -3969,6 +3969,91 @@ try {
     ['submitted intake'],
   );
 
+  const creationPath = '/care-plans/create';
+  const planFields = {
+    title: 'Synthetic plan reviewed with the patient',
+    instructions: 'Synthetic instructions recorded for this test.',
+    expectations: 'Review at the next visit.',
+    warnings: 'Synthetic clinician-entered precautions.',
+    cost: 'Discussed at the visit',
+    startDate: visitDay,
+    endDate: visitDay,
+    followUpDate: visitDay,
+    medications: [
+      {
+        name: 'Synthetic item',
+        instructions: 'Test entry only.',
+        schedule: 'As recorded',
+        duration: 'One visit',
+        warnings: '',
+      },
+    ],
+  };
+  const planCommand = {
+    ...planFields,
+    requestId: randomUUID(),
+    patientId: registeredSession.user.patientId,
+    doctorId: visitDoctor.id,
+    reviewedConfirmed: true,
+  };
+  const createdPlan = await ordinaryWrite(creationPath, planCommand);
+  const originalPlan = createdPlan.receipt.plan;
+  assert.match(originalPlan.id, /^[a-f0-9-]{36}$/);
+  assert.equal(new Date(originalPlan.createdAt).toISOString(), originalPlan.createdAt);
+  const planAuthor = (await reminderRead('/doctors')).find((d) => d.id === visitDoctor.id);
+  assert.deepEqual(createdPlan.receipt, {
+    requestId: planCommand.requestId,
+    actorId: verified.user.id,
+    patientId: planCommand.patientId,
+    doctorId: planCommand.doctorId,
+    plan: {
+      ...planFields,
+      id: originalPlan.id,
+      createdAt: originalPlan.createdAt,
+      status: 'active',
+      patientId: planCommand.patientId,
+      patientName: intakeSummary.patient.name,
+      doctorId: planAuthor.id,
+      doctorName: planAuthor.name,
+    },
+  });
+  const completedPlan = await ordinaryWrite(
+    `/care-plans/${originalPlan.id}`,
+    { status: 'completed' },
+    verifiedHeaders,
+    200,
+    'PATCH',
+  );
+  assert.equal(completedPlan.effectiveStatus, 'completed');
+  assert.deepEqual(
+    await ordinaryWrite(creationPath, planCommand, verifiedHeaders, 200),
+    createdPlan,
+  );
+  const patientPlans = await reminderRead('/care-plans', patientHeaders);
+  const matchingPlans = patientPlans.filter((plan) => plan.id === originalPlan.id);
+  assert.equal(matchingPlans.length, 1);
+  assert.equal(matchingPlans[0].status, 'completed');
+  assert.deepEqual(matchingPlans[0].medications, planFields.medications);
+  const planNotice = (await reminderRead('/activity?limit=100', patientHeaders)).items.filter(
+    (notice) => notice.kind === 'care-plan' && notice.href === `/my-care?plan=${originalPlan.id}`,
+  );
+  assert.equal(planNotice.length, 1);
+  const planAudit = await reminderRead(
+    `/search/audit?entityType=carePlan&entityId=${originalPlan.id}`,
+  );
+  assert.equal(planAudit.items.filter((entry) => entry.action === 'created care plan').length, 1);
+  const stalePlan = { ...planCommand, doctorId: ordinaryDoctor.id, requestId: randomUUID() };
+  const rejection = await ordinaryWrite(creationPath, stalePlan, verifiedHeaders, 409);
+  assert.equal(rejection.code, 'CARE_PLAN_NOT_CREATED');
+  assert.deepEqual(rejection.command, stalePlan);
+  assert.deepEqual(await ordinaryWrite(creationPath, stalePlan, verifiedHeaders, 409), rejection);
+  const planSummary = await reminderRead(reminderSummaryPath, patientHeaders);
+  for (const projection of [patientPlans, planSummary, planNotice]) {
+    const json = JSON.stringify(projection);
+    assert.equal(json.includes(planCommand.requestId), false);
+    assert.equal(json.includes(stalePlan.requestId), false);
+  }
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
