@@ -309,6 +309,12 @@ Interactive fulfillment uses `POST /appointment-bookings` with `waitlistId`, exp
 
 The server checks current access before returning an earlier outcome. A reused UUID with a different actor, patient or text returns 409 to an otherwise authorized caller. A new command submitted while follow-up is paused receives 403 with `{code:'MESSAGE_NOT_SENT',requestId,actorId,patientId,body,message}`. This stored rejection remains final for that command after messaging resumes. Existing successes remain recoverable during the pause. An error without a matching rejection leaves the outcome uncertain.
 
+## Reviewed intake submission
+
+`POST /intakes/submit` accepts a flat object with `requestId` (UUID), `patientId`, `concern`, `location`, `duration`, `symptoms`, `triggers`, `previousTreatment`, `medications`, `allergies`, `goals` and `consent:true`. All text is trimmed. Concern, location and duration each require 1–300 characters. The other six answers allow empty strings and up to 8,000 characters each. The portal uses this endpoint. A new save returns 201 with `{receipt:{requestId,actorId,patientId,intake}}`. An exact replay by a currently authorized submitter returns 200 and the original saved intake, even while new intake is paused.
+
+An otherwise authorized attempt to reuse the UUID with different answers, actor or patient returns 409. A new submission during a pause returns 403 with `{code:'INTAKE_NOT_SUBMITTED',requestId,actorId,patientId,answers,message}`. Here `answers` contains all nine normalized strings and the original consent. This rejection is durable across module resumption. A client that receives an incomplete response can retry the original request. It can start a new attempt after validating a matching rejection and obtaining fresh agreement.
+
 ## Reviewed consultation documentation
 
 - `POST /consultation-notes {patientId,appointmentId?,history?,examination?,assessment,investigations?,plan,reviewedConfirmed:true,requestId}` records an original note.

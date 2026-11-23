@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { AppProviders } from './lib';
-import { PendingMessagesProvider } from './components/care-message-pending';
+import { PendingCareProvider } from './components/pending-care-submissions';
 import { PublicLibraryDocument } from './public-library/PublicLibraryDocument';
 import { checkedPublicLibraryBootstrap } from './public-library/bootstrap';
 import './styles.css';
@@ -40,9 +40,9 @@ if (bootstrap) {
     <React.StrictMode>
       <BrowserRouter>
         <AppProviders>
-          <PendingMessagesProvider>
+          <PendingCareProvider>
             <App />
-          </PendingMessagesProvider>
+          </PendingCareProvider>
         </AppProviders>
       </BrowserRouter>
     </React.StrictMode>,

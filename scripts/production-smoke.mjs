@@ -3918,12 +3918,66 @@ try {
   }
   assert.equal((await reminderRead(threadPath)).length, threadBefore.length + 2);
 
+  const intakePath = '/intakes/submit';
+  const intakeAnswers = {
+    concern: 'Synthetic patient history',
+    location: 'Forearm',
+    duration: 'Two days',
+    symptoms: 'Patient-reported change',
+    triggers: '',
+    previousTreatment: '',
+    medications: '',
+    allergies: 'A patient-reported sensitivity',
+    goals: 'Discuss the change at the next visit',
+    consent: true,
+  };
+  const intakeCommand = {
+    ...intakeAnswers,
+    goals: `  ${intakeAnswers.goals}  `,
+    requestId: randomUUID(),
+    patientId: registeredSession.user.patientId,
+  };
+  const intakeResult = await ordinaryWrite(intakePath, intakeCommand, patientHeaders);
+  const { intake } = intakeResult.receipt;
+  assert.match(intake.id, /^[a-f0-9-]{36}$/);
+  assert.equal(new Date(intake.createdAt).toISOString(), intake.createdAt);
+  assert.deepEqual(intakeResult.receipt, {
+    requestId: intakeCommand.requestId,
+    patientId: intakeCommand.patientId,
+    actorId: registeredSession.user.id,
+    intake: {
+      ...intakeAnswers,
+      id: intake.id,
+      patientId: intakeCommand.patientId,
+      createdAt: intake.createdAt,
+    },
+  });
+  assert.deepEqual(
+    await ordinaryWrite(intakePath, intakeCommand, patientHeaders, 200),
+    intakeResult,
+  );
+  const intakeSummary = await reminderRead(reminderSummaryPath, patientHeaders);
+  assert.deepEqual(intakeSummary.intakes, [intake]);
+  assert.notEqual(intakeSummary.revision, consultationSmokeSummary.revision);
+  assert.deepEqual(intakeSummary.patient, consultationSmokeSummary.patient);
+  assert.equal(JSON.stringify(intakeSummary).includes(intakeCommand.requestId), false);
+  const clinicRecord = await reminderRead(`/patients/${intake.patientId}`);
+  assert.deepEqual(clinicRecord.intakes, [intake]);
+  const intakeAudit = await reminderRead(`/search/audit?entityType=intake&entityId=${intake.id}`);
+  assert.deepEqual(
+    intakeAudit.items.map((entry) => entry.action),
+    ['submitted intake'],
+  );
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
     body: '{}',
   });
   assert.equal(patientLogout.status, 200);
+  const deniedIntake = await ordinaryWrite(intakePath, intakeCommand, patientHeaders, 401);
+  assert.equal(deniedIntake.receipt, undefined);
+  assert.equal(deniedIntake.code, undefined);
   const loggedOutBooking = await ordinaryWrite(ordinaryPath, ordinaryCommand, patientHeaders, 401);
   assert.equal(loggedOutBooking.bookingOutcome, undefined);
   const loggedOutMove = await ordinaryWrite(

@@ -187,6 +187,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)care-messages\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5216' },
     },
+    {
+      name: 'intake-submission',
+      testMatch: /(?:^|\/)intake-submission\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5217' },
+    },
   ],
   webServer: [
     {
@@ -392,6 +397,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3044 E2E_VITE_PORT=5216 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5216',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3045 E2E_VITE_PORT=5217 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5217',
       reuseExistingServer: false,
       timeout: 60000,
     },

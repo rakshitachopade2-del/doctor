@@ -254,6 +254,8 @@ The UI puts recovery tokens in the URL fragment, removes that fragment after loa
 
 ## Private reports and clinical workflow records
 
+The reviewed intake writer rechecks the session and patient access inside the SQLite write transaction. It binds each command UUID to the actor, patient and digest of the normalized answers and consent. A successful command references the immutable intake row. The answers, audit entry and receipt commit together. A paused command stores its rejection separately from shared history, and both saved and rejected outcomes survive restoration. The legacy intake route uses the same atomic record and audit write. Shared patient records and care summaries retain the existing intake shape.
+
 `documents` stores each PDF's immutable metadata and original bytes. Metadata includes the patient, authenticated uploader ID/name/role, timestamp, size and SHA-256 fingerprint. The uploader confirms private care use. Uploads use base64 JSON with a 5 MB decoded-file limit within the existing 7 MB request-body limit; canonical base64 and PDF header/end markers are checked. File names are validated for display but are never used as storage paths or download headers. Authenticated downloads use a server-generated filename, attachment disposition, sandbox CSP, `nosniff` and `no-store`.
 
 PDFs and raster clinical images have separate types, tables and endpoints. A PDF does not become a public asset or an inline image. The application retains original bytes rather than rewriting or parsing report contents. File checks are not PDF sanitization or malware scanning, and a fingerprint does not authenticate the report's issuing organization. These boundaries also apply when the file is opened outside the browser after download.

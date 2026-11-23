@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
@@ -47,6 +47,17 @@ import {
 } from '../components/ui';
 import './patient.css';
 import { DocumentsPanel } from '../components/DocumentsPanel';
+import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
+import { usePendingCareSubmissions } from '../components/pending-care-submissions';
+import {
+  confirmedIntake,
+  intakeKeys,
+  intakeLabels,
+  intakeNotSubmitted,
+  intakeValues,
+  type IntakeValues,
+} from '../components/intake-submission-helpers';
+import { checkedModules } from '../components/clinic-configuration-helpers';
 import { CareMessageComposer } from '../components/CareMessageComposer';
 import { checkedMessageSettings, useCareMessages } from '../components/care-message-helpers';
 import { PatientWorkflowPanel } from './PatientWorkflowPanel';
@@ -966,22 +977,23 @@ function BookingForm() {
 }
 
 const intakeSections = ['Your concern', 'Your history', 'Your priorities', 'Review & share'];
-const intakeLabels: Record<string, string> = {
-  concern: 'Main concern',
-  location: 'Area affected',
-  duration: 'How long it has been present',
-  symptoms: 'What you have noticed',
-  triggers: 'Possible triggers',
-  previousTreatment: 'Previous treatments',
-  medications: 'Current medicines or supplements',
-  allergies: 'Allergies or sensitivities',
-  goals: 'What matters to you',
-};
+function IntakeSummary({ values }: { values: IntakeValues }) {
+  return (
+    <dl className="intake-summary">
+      {intakeKeys.map((key) => (
+        <div key={key}>
+          <dt>{intakeLabels[key]}</dt>
+          <dd>{values[key] || 'Not provided'}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 export function IntakePage() {
   const { session } = useSession();
-  const settings = useResource<ClinicSettings>('/api/settings');
+  const location = useLocation();
   if (!session?.user) return <Navigate to="/login?next=%2Fintake" replace />;
-  if (session.user.role !== 'patient')
+  if (session.user.role !== 'patient' || !session.user.patientId)
     return (
       <EmptyState
         title="Patient preparation"
@@ -993,62 +1005,142 @@ export function IntakePage() {
         }
       />
     );
-  if (settings.loading) return <Loading />;
-  if (settings.error) return <ErrorState message={settings.error} retry={settings.reload} />;
-  if (!settings.data?.modules.intake)
-    return (
-      <EmptyState
-        title="Intake is not enabled"
-        description="You can share your history with your dermatologist during your visit."
-        action={
-          <Link to="/book" className="button button-primary">
-            Book a visit
-          </Link>
-        }
-      />
-    );
-  return <IntakeForm />;
+  return (
+    <IntakeForm
+      key={JSON.stringify([
+        session.user.id,
+        session.csrfToken,
+        session.user.patientId,
+        location.key,
+      ])}
+      patientId={session.user.patientId}
+      actorId={session.user.id}
+    />
+  );
 }
 
-function IntakeForm() {
-  const [step, setStep] = useState(0);
-  const [values, setValues] = useState({
-    concern: '',
-    location: '',
-    duration: '',
-    symptoms: '',
-    triggers: '',
-    previousTreatment: '',
-    medications: '',
-    allergies: '',
-    goals: '',
+function IntakeForm({ patientId, actorId }: { patientId: string; actorId: string }) {
+  const { intakes: pending } = usePendingCareSubmissions();
+  const command = pending.get(patientId);
+  const capture = useAppointmentBookingGuard();
+  const settings = useAppointmentBookingData('/api/settings', (value) => {
+    if (!value || typeof value !== 'object' || !('modules' in value))
+      throw new Error('Could not read the clinic’s intake settings.');
+    return checkedModules(value.modules);
   });
-  const [consent, setConsent] = useState(false);
+  const [step, setStep] = useState(command ? 3 : 0);
+  const [values, setValues] = useState(() => intakeValues(command));
+  const [consent, setConsent] = useState(!!command);
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const submitting = useRef(false);
+  const [saved, setSaved] = useState<Intake | null>(null);
+  const [draftState, setDraftState] = useState<'initial' | 'rejected' | 'editing'>('initial');
   const [error, setError] = useState('');
   const heading = useRef<HTMLHeadingElement>(null);
+  const confirmation = useRef<HTMLHeadingElement>(null);
+  const enabled = settings.data?.intake === true;
+  const locked = !!command || draftState === 'rejected';
+  useLayoutEffect(() => {
+    // A fast Back can return before the previous page unmounts. Keep the command for
+    // recovery but release that history entry's in-flight UI when navigation starts.
+    const release = () => {
+      if (submitting.current) {
+        submitting.current = false;
+        setBusy(false);
+      }
+    };
+    window.addEventListener('popstate', release);
+    window.addEventListener('hashchange', release);
+    return () => {
+      window.removeEventListener('popstate', release);
+      window.removeEventListener('hashchange', release);
+    };
+  }, []);
   useEffect(() => {
-    if (step > 0) heading.current?.focus();
-  }, [step]);
-  const update = (key: keyof typeof values, value: string) =>
+    if (saved) confirmation.current?.focus();
+    else if (step > 0 || draftState === 'editing') heading.current?.focus();
+  }, [step, saved, draftState]);
+  function update(key: keyof IntakeValues, value: string) {
     setValues((current) => ({ ...current, [key]: value }));
+    setConsent(false);
+    setError('');
+  }
+  function editDraft() {
+    setDraftState('editing');
+    setStep(0);
+    void settings.reload();
+  }
   async function next(event: FormEvent) {
     event.preventDefault();
+    if (submitting.current || draftState === 'rejected') return;
     setError('');
+    const answers = intakeValues(values);
     if (step < 3) {
+      if (
+        step === 0 &&
+        (answers.concern.length < 3 || !answers.location || !answers.duration || !answers.symptoms)
+      ) {
+        setError(
+          'Enter a concern of at least three characters, the affected area, duration and symptoms before continuing.',
+        );
+        return;
+      }
+      if (step === 2) setValues(answers);
       setStep((current) => current + 1);
       return;
     }
+    if (!command && (!enabled || !consent)) return;
+    const submitted: IntakeSubmissionCommand = command ?? {
+      ...answers,
+      patientId,
+      requestId: crypto.randomUUID(),
+      consent: true,
+    };
+    const origin = capture();
+    const current = () => origin() && pending.get(patientId) === submitted;
+    submitting.current = true;
+    pending.set(patientId, submitted);
     setBusy(true);
     try {
-      await api<Intake>('/api/intakes', { method: 'POST', body: { ...values, consent } });
-      setSaved(true);
+      const result = await api<unknown>('/api/intakes/submit', {
+        method: 'POST',
+        body: submitted,
+        isCurrent: current,
+      });
+      if (!current()) return;
+      const intake = confirmedIntake(result, submitted, actorId);
+      if (!intake) return;
+      pending.delete(patientId);
+      setSaved(intake);
     } catch (problem) {
-      setError(errorMessage(problem));
+      if (current() && intakeNotSubmitted(problem, submitted, actorId)) {
+        pending.delete(patientId);
+        setValues(intakeValues(submitted));
+        setConsent(false);
+        setDraftState('rejected');
+      }
     } finally {
-      setBusy(false);
+      if (origin()) {
+        submitting.current = false;
+        setBusy(false);
+      }
     }
+  }
+  if (!saved && !command && draftState === 'initial') {
+    if (settings.loading) return <Loading />;
+    if (settings.error) return <ErrorState message={settings.error} retry={settings.reload} />;
+    if (!enabled)
+      return (
+        <EmptyState
+          title="Intake is not enabled"
+          description="You can share your history with your dermatologist during your visit."
+          action={
+            <Link to="/book" className="button button-primary">
+              Book a visit
+            </Link>
+          }
+        />
+      );
   }
   if (saved)
     return (
@@ -1056,24 +1148,33 @@ function IntakeForm() {
         <div className="success-mark">
           <CheckCircle2 size={35} />
         </div>
-        <h1>Your story is ready.</h1>
+        <h1 ref={confirmation} tabIndex={-1}>
+          Your story is ready.
+        </h1>
         <p className="muted">
           Your summary is saved to your record for your dermatologist to review.
         </p>
         <Card>
-          <h3>{values.concern}</h3>
+          <h2>Shared history</h2>
           <p>
-            {values.location} · {values.duration}
+            Shared with your agreement on{' '}
+            <time dateTime={saved.createdAt}>
+              {new Date(saved.createdAt).toLocaleString('en-IN', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+                timeZone: 'Asia/Kolkata',
+              })}{' '}
+              IST
+            </time>
+            .
           </p>
-          <p className="muted">
-            {values.goals || 'You can discuss your priorities at your visit.'}
-          </p>
+          <IntakeSummary values={saved} />
         </Card>
         <div className="row">
           <Link to="/book" className="button button-primary">
             Find an appointment <ArrowRight size={17} />
           </Link>
-          <Link to="/my-care/record" className="button button-secondary">
+          <Link to="/my-care/record?tab=history" className="button button-secondary">
             View my record
           </Link>
         </div>
@@ -1244,22 +1345,17 @@ function IntakeForm() {
             {step === 3 && (
               <>
                 <p className="muted">
-                  Here is the summary your dermatologist will see. Go back to change anything before
-                  sharing.
+                  {locked
+                    ? 'These are the answers you submitted.'
+                    : 'Here is the summary your dermatologist will see. Go back to change anything before sharing.'}
                 </p>
-                <dl className="intake-summary">
-                  {Object.entries(values).map(([key, value]) => (
-                    <div key={key}>
-                      <dt>{intakeLabels[key]}</dt>
-                      <dd>{value || 'Not provided'}</dd>
-                    </div>
-                  ))}
-                </dl>
+                <IntakeSummary values={command ?? values} />
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
                     required
                     checked={consent}
+                    disabled={locked}
                     onChange={(event) => setConsent(event.target.checked)}
                   />
                   <span>
@@ -1268,6 +1364,29 @@ function IntakeForm() {
                   </span>
                 </label>
               </>
+            )}
+            {command && (
+              <p className="notice" role="status">
+                {busy
+                  ? 'Checking whether your history was shared.'
+                  : 'Submission unconfirmed. Retry the exact submission to recover the saved history.'}{' '}
+                You can return to this form in this tab. Reloading or signing out clears the retry
+                details.
+              </p>
+            )}
+            {draftState === 'rejected' && (
+              <p className="notice" role="alert">
+                Your history was not shared. The clinic paused intake. You can edit your answers and
+                review them again when intake resumes.
+              </p>
+            )}
+            {draftState === 'editing' && step === 3 && !command && !enabled && (
+              <p className="notice" role="status">
+                {settings.loading
+                  ? 'Checking intake availability…'
+                  : settings.error ||
+                    'The clinic has paused intake. Your draft is available to edit.'}
+              </p>
             )}
             {error && (
               <div className="notice notice-error" role="alert">
@@ -1279,6 +1398,7 @@ function IntakeForm() {
                 <button
                   type="button"
                   className="button button-secondary"
+                  disabled={locked}
                   onClick={() => setStep((current) => current - 1)}
                 >
                   <ChevronLeft size={16} /> Back
@@ -1288,10 +1408,41 @@ function IntakeForm() {
                   Return to my care
                 </Link>
               )}
-              <button className="button button-primary" disabled={busy}>
-                {busy ? 'Sharing…' : step === 3 ? 'Share with my clinic' : 'Continue'}
-                <ChevronRight size={17} />
-              </button>
+              {draftState === 'rejected' ? (
+                <button
+                  key="edit"
+                  type="button"
+                  className="button button-secondary"
+                  onClick={editDraft}
+                >
+                  Edit draft
+                </button>
+              ) : step === 3 && !command && !enabled ? (
+                <button
+                  key="availability"
+                  type="button"
+                  className="button button-secondary"
+                  disabled={settings.loading}
+                  onClick={settings.reload}
+                >
+                  Check availability
+                </button>
+              ) : (
+                <button
+                  key="submit"
+                  className="button button-primary"
+                  disabled={busy || (step === 3 && !command && !consent)}
+                >
+                  {busy
+                    ? 'Sharing…'
+                    : command
+                      ? 'Retry exact submission'
+                      : step === 3
+                        ? 'Share with my clinic'
+                        : 'Continue'}
+                  <ChevronRight size={17} />
+                </button>
+              )}
             </div>
           </form>
         </Card>
@@ -2045,14 +2196,7 @@ function PatientRecordView({ patientId }: { patientId: string }) {
                       Shared {formatDate(entry.createdAt.slice(0, 10))}
                     </span>
                   </div>
-                  <dl className="intake-summary">
-                    {Object.entries(intakeLabels).map(([key, label]) => (
-                      <div key={key}>
-                        <dt>{label}</dt>
-                        <dd>{String(entry[key as keyof Intake] || 'Not provided')}</dd>
-                      </div>
-                    ))}
-                  </dl>
+                  <IntakeSummary values={entry} />
                   <div className="small muted">
                     <ShieldCheck size={14} /> Shared with your care team with your agreement.
                   </div>

@@ -6,16 +6,17 @@ import type {
   CareMessageNotSent,
   CareMessageResult,
 } from '../shared/care-message.ts';
-import type { Message, Patient, User } from '../shared/types.ts';
+import type { Message, User } from '../shared/types.ts';
 import { notifyClinicians, notifyPatient } from './activity.ts';
 import type { AuthRequest } from './app.ts';
 import { get, id, insert, list, nowISO, settings, type DB } from './db.ts';
-import { mfaSessionAllowed } from './mfa.ts';
 
 interface Dependencies {
   db: DB;
-  ownPatient: (req: AuthRequest, input?: string) => string;
-  patientAccess: (req: AuthRequest, patientId: string) => Patient;
+  authorizePatientRecord: (
+    req: AuthRequest,
+    patientId?: string,
+  ) => { user: User; patientId: string };
   audit: (req: AuthRequest, action: string, entityType: string, entityId: string) => void;
   fail: (status: number, message: string) => never;
 }
@@ -39,7 +40,7 @@ const paused = 'This module is currently disabled by the clinic.';
 
 export function registerCareMessages(
   app: Express,
-  { db, ownPatient, patientAccess, audit, fail }: Dependencies,
+  { db, authorizePatientRecord, audit, fail }: Dependencies,
 ) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS careMessageCommands (
@@ -67,31 +68,6 @@ export function registerCareMessages(
       db.exec('ROLLBACK');
       throw error;
     }
-  }
-
-  function authorize(req: AuthRequest, requestedPatient?: string) {
-    const session = db
-      .prepare('SELECT userId,expiresAt,csrfToken,mfaCredentialId FROM sessions WHERE tokenHash=?')
-      .get(req.sessionToken ?? '');
-    const user = req.user && get<User>(db, 'users', req.user.id);
-    if (
-      !user ||
-      !session ||
-      user.active === false ||
-      session.userId !== user.id ||
-      Number(session.expiresAt) <= Date.now() ||
-      !req.csrfToken ||
-      session.csrfToken !== req.csrfToken ||
-      (req.method === 'POST' && req.headers['x-csrf-token'] !== session.csrfToken) ||
-      !mfaSessionAllowed(db, user.id, session.mfaCredentialId)
-    )
-      return fail(401, 'Your session changed. Sign in again.');
-    if (user.mustChangePassword || !['patient', 'doctor', 'admin'].includes(user.role))
-      return fail(403, 'Clinical records are restricted to the care team and patient.');
-    req.user = user;
-    const patientId = ownPatient(req, requestedPatient);
-    patientAccess(req, patientId);
-    return { user, patientId };
   }
 
   function send(req: AuthRequest, user: User, patientId: string, body: string): Message {
@@ -136,7 +112,7 @@ export function registerCareMessages(
     body: CareMessageResult | CareMessageNotSent;
   } {
     const { requestId, body } = command;
-    const { user, patientId } = authorize(req, command.patientId);
+    const { user, patientId } = authorizePatientRecord(req, command.patientId);
     const actorId = user.id;
     const bodyHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
     const stored = db.prepare('SELECT * FROM careMessageCommands WHERE requestId=?').get(requestId);
@@ -187,7 +163,7 @@ export function registerCareMessages(
     const query = z.object({ patientId: patientId.optional() }).parse(req.query);
     res.json(
       transaction('read', () => {
-        const scope = authorize(req, query.patientId);
+        const scope = authorizePatientRecord(req, query.patientId);
         return list<Message>(db, 'messages', scope.patientId).reverse();
       }),
     );
@@ -202,7 +178,7 @@ export function registerCareMessages(
     const message = transaction('write', () => {
       if (!settings(db).modules.followUp) return fail(403, paused);
       const input = fields.parse(req.body);
-      const { user, patientId } = authorize(req, input.patientId);
+      const { user, patientId } = authorizePatientRecord(req, input.patientId);
       return send(req, user, patientId, input.body);
     });
     res.status(201).json(message);

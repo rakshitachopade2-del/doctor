@@ -509,6 +509,22 @@ async function rehearseRecovery() {
       },
       201,
     );
+    const intakePath = '/intakes/submit';
+    const intakeCommand = {
+      patientId,
+      requestId: randomUUID(),
+      concern: 'Synthetic history retained through recovery',
+      location: 'Arm',
+      duration: 'Three days',
+      symptoms: 'A change recorded by the patient',
+      triggers: '',
+      previousTreatment: '',
+      medications: '',
+      allergies: '',
+      goals: 'Discuss at the next visit',
+      consent: true,
+    };
+    const intakeResult = await call(source, intakePath, patient, 'POST', intakeCommand, 201);
     const summaryPath = `/patients/${patientId}/care-summary`;
     const summary = await call(source, summaryPath, patient);
     const copyInput = { expectedRevision: summary.revision, requestId: randomUUID() };
@@ -523,7 +539,16 @@ async function rehearseRecovery() {
     };
     const sentMessage = await call(source, messagePath, patient, 'POST', messageCommand, 201);
     const { modules } = await call(source, '/settings', admin);
-    await call(source, '/settings', admin, 'PATCH', { modules: { ...modules, followUp: false } });
+    await call(source, '/settings', admin, 'PATCH', {
+      modules: { ...modules, intake: false, followUp: false },
+    });
+    const pausedIntakeCommand = {
+      ...intakeCommand,
+      concern: 'Unsubmitted synthetic history',
+      requestId: randomUUID(),
+    };
+    const pausedIntake = await call(source, intakePath, patient, 'POST', pausedIntakeCommand, 403);
+    assert.equal(pausedIntake.code, 'INTAKE_NOT_SUBMITTED');
     const pausedMessageCommand = {
       ...messageCommand,
       requestId: randomUUID(),
@@ -757,10 +782,18 @@ async function rehearseRecovery() {
     const restoredClinicalRecord = await call(target, `/patients/${patientId}`, newAdmin);
     assert.deepEqual(restoredClinicalRecord.encounters, [consultation.encounter]);
     assert.deepEqual(
+      await call(target, intakePath, newPatient, 'POST', intakeCommand),
+      intakeResult,
+    );
+    assert.deepEqual(
       await call(target, messagePath, newPatient, 'POST', messageCommand),
       sentMessage,
     );
     await call(target, '/settings', newAdmin, 'PATCH', { modules });
+    assert.deepEqual(
+      await call(target, intakePath, newPatient, 'POST', pausedIntakeCommand, 403),
+      pausedIntake,
+    );
     assert.deepEqual(
       await call(target, messagePath, newPatient, 'POST', pausedMessageCommand, 403),
       pausedMessage,
@@ -769,6 +802,17 @@ async function rehearseRecovery() {
     assert.deepEqual(thread, [sentMessage.receipt.message]);
     const restoredSummary = await call(target, summaryPath, newPatient);
     assert.equal(restoredSummary.revision, summary.revision);
+    assert.deepEqual(restoredSummary.intakes, [intakeResult.receipt.intake]);
+    assert.deepEqual(restoredClinicalRecord.intakes, restoredSummary.intakes);
+    for (const projection of [restoredSummary, restoredClinicalRecord]) {
+      const json = JSON.stringify(projection);
+      for (const value of [
+        intakeCommand.requestId,
+        pausedIntakeCommand.requestId,
+        pausedIntakeCommand.concern,
+      ])
+        assert.equal(json.includes(value), false);
+    }
     for (const command of [messageCommand, pausedMessageCommand]) {
       assert.equal(JSON.stringify(restoredSummary).includes(command.body), false);
       assert.equal(JSON.stringify(restoredClinicalRecord).includes(command.requestId), false);

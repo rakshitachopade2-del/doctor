@@ -1,5 +1,15 @@
 # Release verification
 
+## 1.41.0 · Patient intake submission
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **696 API, backup and recovery tests** and **148 browser journeys** passed. Browser projects ran in batches against isolated synthetic databases. TypeScript, the production frontend build, formatting and whitespace checks passed. The production dependency audit reported zero vulnerabilities.
+
+Six new API test groups cover full answer and consent matching, current permissions, forced write failures, restart and competing submissions from two server processes. Two requests with one UUID produced one intake and one audit entry. An audit failure rolled back the intake on both the new and legacy routes. Patients and clinicians could read the saved answers from the record and care summary. The original success remained recoverable during a pause and a rejected submission stayed rejected after intake resumed.
+
+Five browser journeys cover the four-step form, consent after edits, the saved snapshot, lost and malformed replies, exact retry, and editing after a confirmed rejection. Held responses after navigation and Back could neither confirm a later form nor expire a valid session. Reloading and signing out cleared the pending history from browser memory. At 320 pixels, the review, retry and confirmation screens passed the accessibility and control hit checks.
+
+The local production smoke test verified the saved answers from both portals, a single audit entry and an unchanged clinical allergy record. An isolated backup and restore preserved the submitted history, its private receipt, the rejected outcome and the saved care summary. Compose configuration passed. The machine had no Docker engine for container runtime checks.
+
 ## 1.40.0 · Private care messages
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **690 API, backup and recovery tests** and **143 browser journeys** passed. Browser projects ran in batches against separate synthetic databases. The affected messaging, activity, patient, clinic and configuration journeys passed again after the final composer correction.

@@ -14,6 +14,7 @@ import {
   receptionPatient,
   safeAllergyHistory,
 } from './patient-profile.ts';
+import { registerIntakeSubmission } from './intake-submission.ts';
 import { registerCareMessages } from './care-message.ts';
 import { registerCareSummary } from './care-summary.ts';
 import { registerCareSummaryCopies } from './care-summary-copies.ts';
@@ -324,6 +325,32 @@ export function createApp(options: AppOptions = {}) {
       fail(403, 'You can only access your own care record.');
     return pid;
   };
+  // Called within the transaction that reads or changes the patient's record.
+  function authorizePatientRecord(req: AuthRequest, requestedPatient?: string) {
+    const session = db
+      .prepare('SELECT userId,expiresAt,csrfToken,mfaCredentialId FROM sessions WHERE tokenHash=?')
+      .get(req.sessionToken ?? '');
+    const user = req.user && get<User>(db, 'users', req.user.id);
+    if (
+      !user ||
+      !session ||
+      user.active === false ||
+      session.userId !== user.id ||
+      Number(session.expiresAt) <= Date.now() ||
+      !req.csrfToken ||
+      session.csrfToken !== req.csrfToken ||
+      (req.method === 'POST' && req.headers['x-csrf-token'] !== session.csrfToken) ||
+      !mfaSessionAllowed(db, user.id, session.mfaCredentialId)
+    )
+      return fail(401, 'Your session changed. Sign in again.');
+    if (user.mustChangePassword || !['patient', 'doctor', 'admin'].includes(user.role))
+      return fail(403, 'Clinical records are restricted to the care team and patient.');
+    req.user = user;
+    const patientId = ownPatient(req, requestedPatient);
+    patientAccess(req, patientId);
+    return { user, patientId };
+  }
+
   const moduleEnabled = (name: keyof ClinicSettings['modules']) => {
     if (!settings(db).modules[name]) fail(403, 'This module is currently disabled by the clinic.');
   };
@@ -933,29 +960,12 @@ export function createApp(options: AppOptions = {}) {
         ].join('\r\n'),
       );
   });
-  app.post('/api/intakes', (req: AuthRequest, res) => {
-    moduleEnabled('intake');
-    const input = z
-      .object({
-        patientId: required.optional(),
-        concern: required,
-        location: required,
-        duration: required,
-        symptoms: text.default(''),
-        triggers: text.default(''),
-        previousTreatment: text.default(''),
-        medications: text.default(''),
-        allergies: text.default(''),
-        goals: text.default(''),
-        consent: z.literal(true),
-      })
-      .parse(req.body);
-    const patientId = ownPatient(req, input.patientId);
-    patientAccess(req, patientId);
-    const intake = { ...input, patientId, id: id(), createdAt: nowISO() };
-    insert(db, 'intakes', intake);
-    audit(req, 'submitted intake', 'intake', intake.id);
-    res.status(201).json(intake);
+  registerIntakeSubmission(app, {
+    db,
+    transaction: scheduling.transaction,
+    authorizePatientRecord,
+    audit,
+    fail,
   });
   app.get('/api/care-plans', (req: AuthRequest, res) => {
     const user = actor(req, ['admin', 'doctor', 'patient']);
@@ -1148,7 +1158,7 @@ export function createApp(options: AppOptions = {}) {
     );
     res.type(image.mimeType).send(Buffer.from(row.bytes));
   });
-  registerCareMessages(app, { db, ownPatient, patientAccess, audit, fail });
+  registerCareMessages(app, { db, authorizePatientRecord, audit, fail });
   app.get('/api/audit', (req: AuthRequest, res) => {
     actor(req, ['admin']);
     res.json(

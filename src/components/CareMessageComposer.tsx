@@ -6,7 +6,7 @@ import type { Message, User } from '../../shared/types';
 import { api, useSession } from '../lib';
 import { useAppointmentBookingGuard } from './appointment-booking-helpers';
 import { checkedMessageSettings, confirmedMessage, messageNotSent } from './care-message-helpers';
-import { usePendingMessages } from './care-message-pending';
+import { usePendingCareSubmissions } from './pending-care-submissions';
 import { Field } from './ui';
 
 type Props = { patientId: string; canSend: boolean; onSaved: () => void };
@@ -25,7 +25,7 @@ export function CareMessageComposer(props: Props) {
 }
 
 function Composer({ patientId, canSend, onSaved, actor }: Props & { actor: User }) {
-  const pending = usePendingMessages();
+  const { messages: pending } = usePendingCareSubmissions();
   const command = pending.get(patientId);
   const [draft, setDraft] = useState(command?.body ?? '');
   const [busy, setBusy] = useState(false);
