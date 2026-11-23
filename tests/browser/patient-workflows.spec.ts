@@ -161,14 +161,16 @@ test('patient shares a private report, reads a published review, and records a p
       dialog.getByText('Example risks for documentation testing.', { exact: true }),
     ).toBeVisible();
     await expect(
-      dialog.getByRole('button', { name: 'Record my decision', exact: true }),
+      dialog.getByRole('button', { name: 'Review decision', exact: true }),
     ).toBeDisabled();
     await dialog.getByLabel('Your decision', { exact: true }).selectOption('declined');
     await dialog
       .getByLabel('Note for your clinic', { exact: true })
       .fill('I would like to discuss this first.');
+    await dialog.getByRole('button', { name: 'Review decision', exact: true }).click();
     await dialog.getByRole('checkbox').check();
     await dialog.getByRole('button', { name: 'Record my decision', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(
       procedureCard.getByText('Latest recorded choice: Declined', { exact: true }),
@@ -176,8 +178,10 @@ test('patient shares a private report, reads a published review, and records a p
     await procedureCard.getByRole('button', { name: 'Update my decision', exact: true }).click();
     dialog = page.getByRole('dialog');
     await dialog.getByLabel('Your decision', { exact: true }).selectOption('agreed');
+    await dialog.getByRole('button', { name: 'Review decision', exact: true }).click();
     await dialog.getByRole('checkbox').check();
     await dialog.getByRole('button', { name: 'Record my decision', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(
       procedureCard.getByText('Latest recorded choice: Agreed', { exact: true }),

@@ -29,6 +29,8 @@ import { useInvestigationResultSubmission } from '../components/InvestigationRes
 import { usePatientDocuments } from '../components/private-upload-helpers';
 import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
 import { ProcedureAppointmentModal } from '../components/ProcedureAppointmentModal';
+import { useProcedureDecisionRecording } from '../components/ProcedureDecisionModal';
+import { decisionMethods } from '../components/procedure-decision-helpers';
 import { ProcedurePlanModal } from '../components/ProcedurePlanModal';
 import { ProcedureTemplateSource } from '../components/ProcedureTemplateSource';
 import './clinical-workflows.css';
@@ -44,7 +46,7 @@ type WorkflowAction =
   | { kind: 'cancel-investigation'; investigation: Investigation }
   | { kind: 'review'; investigation: Investigation; result: InvestigationResult }
   | {
-      kind: 'agreement' | 'complete' | 'cancel-procedure' | 'scheduling';
+      kind: 'complete' | 'cancel-procedure' | 'scheduling';
       procedure: ProcedureRecord;
     };
 const failure = (error: unknown) =>
@@ -114,6 +116,7 @@ export function ClinicalWorkflowPanel({
     void resource.reload();
     void documents.reload();
   });
+  const decisions = useProcedureDecisionRecording(patientId, patientName, resource.reload);
   const [action, setAction] = useState<WorkflowAction | null>(null);
   const [busy, setBusy] = useState('');
   const [filter, setFilter] = useState('active');
@@ -216,6 +219,7 @@ export function ClinicalWorkflowPanel({
     return (
       <div>
         {resultSubmission.controls}
+        {decisions.controls}
         <Loading />
       </div>
     );
@@ -223,10 +227,17 @@ export function ClinicalWorkflowPanel({
     return (
       <div>
         {resultSubmission.controls}
+        {decisions.controls}
         <ErrorState message={resource.error} retry={resource.reload} />
       </div>
     );
-  if (!data) return resultSubmission.controls;
+  if (!data)
+    return (
+      <>
+        {resultSubmission.controls}
+        {decisions.controls}
+      </>
+    );
   const investigations = data.investigations.filter(
     (i) => filter === 'all' || i.status !== 'cancelled' || i.id === selectedInvestigationId,
   );
@@ -234,6 +245,7 @@ export function ClinicalWorkflowPanel({
   return (
     <div className="cw-workspace">
       {resultSubmission.controls}
+      {decisions.controls}
       <div className="cw-intro">
         <span className="cw-intro-icon">
           <Stethoscope size={24} />
@@ -502,7 +514,7 @@ export function ClinicalWorkflowPanel({
         <div className="cw-section-heading">
           <div>
             <span className="eyebrow">PROCEDURES</span>
-            <h2>
+            <h2 tabIndex={-1} data-procedure-decisions-heading>
               A plan, a decision, a documented outcome{' '}
               <span className="cw-count">{procedures.length}</span>
             </h2>
@@ -519,9 +531,7 @@ export function ClinicalWorkflowPanel({
         {procedures.length ? (
           <div className="cw-records">
             {procedures.map((procedure) => {
-              const agreements = [...procedure.agreements].sort((a, b) =>
-                a.createdAt.localeCompare(b.createdAt),
-              );
+              const agreements = procedure.agreements;
               const latest = agreements.at(-1);
               const effectiveAppointmentId =
                 procedure.effectiveAppointmentId === undefined
@@ -622,13 +632,10 @@ export function ClinicalWorkflowPanel({
                                 'Patient submitted their decision through the portal.'}
                             </p>
                             <small>
-                              {agreement.recordedByName} ·{' '}
-                              {agreement.method === 'portal'
-                                ? 'Patient portal'
-                                : agreement.method === 'phone'
-                                  ? 'By phone'
-                                  : 'In person'}{' '}
-                              · {timestamp(agreement.createdAt)} IST
+                              {agreement.id === latest?.id && <>Latest recorded choice · </>}
+                              {agreement.recordedByName} · {agreement.recordedByRole} ·{' '}
+                              {decisionMethods[agreement.method]} · {timestamp(agreement.createdAt)}{' '}
+                              IST
                             </small>
                           </div>
                         </div>
@@ -679,12 +686,15 @@ export function ClinicalWorkflowPanel({
                   {canDocument && procedure.status === 'planned' && (
                     <>
                       <div className="cw-record-actions">
-                        <button
-                          className="button button-secondary button-small"
-                          onClick={() => setAction({ kind: 'agreement', procedure })}
-                        >
-                          <MessageSquareText size={14} /> Record patient decision
-                        </button>
+                        {!decisions.hasPending(procedure.id) && (
+                          <button
+                            data-procedure-decision={procedure.id}
+                            className="button button-secondary button-small"
+                            onClick={() => decisions.open(procedure.id)}
+                          >
+                            <MessageSquareText size={14} /> Record patient decision
+                          </button>
+                        )}
                         <button
                           className="button button-primary button-small"
                           disabled={latest?.decision !== 'agreed'}
@@ -744,13 +754,6 @@ export function ClinicalWorkflowPanel({
           procedureId={action.procedure.id}
           onClose={() => setAction(null)}
           onSaved={resource.reload}
-        />
-      )}
-      {action?.kind === 'agreement' && (
-        <DecisionModal
-          procedure={action.procedure}
-          onClose={() => setAction(null)}
-          onSaved={afterSave}
         />
       )}
       {action?.kind === 'complete' && (
@@ -882,62 +885,6 @@ function OrderModal({ patientId, ...callbacks }: ModalCallbacks & { patientId: s
       <div className="notice">
         This records your order and instructions. It does not send a request to a laboratory or
         interpret a result.
-      </div>
-    </ClinicalForm>
-  );
-}
-
-function DecisionModal({
-  procedure,
-  ...callbacks
-}: ModalCallbacks & { procedure: ProcedureRecord }) {
-  return (
-    <ClinicalForm
-      title="Record the patient’s decision"
-      endpoint={`/api/procedures/${procedure.id}/agreements`}
-      payload={(form) => ({
-        decision: form.get('decision'),
-        method: form.get('method'),
-        note: form.get('note'),
-        patientDecisionConfirmed: true,
-      })}
-      label="Save patient decision"
-      {...callbacks}
-    >
-      <p className="muted">{procedure.title}</p>
-      <div className="form-grid">
-        <Field label="Patient decision">
-          <select name="decision">
-            <option value="agreed">Agreed to the plan</option>
-            <option value="declined">Declined the plan</option>
-          </select>
-        </Field>
-        <Field label="Discussion method">
-          <select name="method">
-            <option value="in-person">In person</option>
-            <option value="phone">By phone</option>
-          </select>
-        </Field>
-      </div>
-      <Field label="Discussion and decision notes">
-        <textarea
-          name="note"
-          required
-          rows={4}
-          maxLength={8000}
-          placeholder="Record the discussion, questions, and what the patient communicated"
-        />
-      </Field>
-      <label className="checkbox-field">
-        <input type="checkbox" required />
-        <span>
-          I confirm that this records the patient’s actual communicated decision, including their
-          opportunity to ask questions.
-        </span>
-      </label>
-      <div className="notice">
-        This is a record of communication. It is not a legally validated consent form or electronic
-        signature. Follow your clinic’s procedure-specific consent process.
       </div>
     </ClinicalForm>
   );

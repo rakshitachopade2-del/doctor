@@ -4476,12 +4476,141 @@ try {
   for (const cmd of [resultCommand, supplementCommand, closedCommand])
     assert.equal(JSON.stringify(visibleInvestigation).includes(cmd.requestId), false);
 
+  const decisionPlan = await ordinaryWrite('/procedures', {
+    patientId: resultPatient,
+    title: 'Synthetic decision confirmation rehearsal',
+    indication: 'Synthetic indication',
+    benefits: 'Synthetic benefits',
+    risks: 'Synthetic risks',
+    alternatives: 'Synthetic alternatives',
+    aftercare: 'Synthetic aftercare',
+  });
+  const procedurePath = '/procedures/' + decisionPlan.id;
+  const decisionPath = procedurePath + '/agreements/record';
+  const portalDecision = {
+    requestId: randomUUID(),
+    patientId: resultPatient,
+    procedureId: decisionPlan.id,
+    recordedByRole: 'patient',
+    expectedLatestDecisionId: null,
+    decision: 'agreed',
+    method: 'portal',
+    note: 'Synthetic patient choice',
+    patientDecisionConfirmed: false,
+    reviewedConfirmed: true,
+  };
+  const firstDecision = await ordinaryWrite(decisionPath, portalDecision, patientHeaders);
+  const phoneDecision = {
+    ...portalDecision,
+    requestId: randomUUID(),
+    recordedByRole: verified.user.role,
+    expectedLatestDecisionId: firstDecision.receipt.agreement.id,
+    decision: 'declined',
+    method: 'phone',
+    note: 'Synthetic phone discussion',
+    patientDecisionConfirmed: true,
+  };
+  const changedDecision = await ordinaryWrite(decisionPath, phoneDecision);
+  for (const [command, recorder, result] of [
+    [portalDecision, registeredSession.user, firstDecision],
+    [phoneDecision, verified.user, changedDecision],
+  ]) {
+    const agreement = result.receipt.agreement;
+    assert.match(agreement.id, /^[a-f0-9-]{36}$/);
+    assert.equal(new Date(agreement.createdAt).toISOString(), agreement.createdAt);
+    assert.deepEqual(result.receipt, {
+      requestId: command.requestId,
+      actorId: recorder.id,
+      patientId: resultPatient,
+      procedureId: decisionPlan.id,
+      expectedLatestDecisionId: command.expectedLatestDecisionId,
+      agreement: {
+        id: agreement.id,
+        procedureId: decisionPlan.id,
+        decision: command.decision,
+        method: command.method,
+        note: command.note,
+        recordedById: recorder.id,
+        recordedByName: recorder.name,
+        recordedByRole: recorder.role,
+        createdAt: agreement.createdAt,
+      },
+    });
+  }
+  assert.deepEqual(
+    await ordinaryWrite(decisionPath, portalDecision, patientHeaders, 200),
+    firstDecision,
+  );
+  const staleDecision = { ...portalDecision, requestId: randomUUID() };
+  const refusedDecision = await ordinaryWrite(decisionPath, staleDecision, patientHeaders, 409);
+  assert.equal(refusedDecision.code, 'PROCEDURE_DECISION_NOT_RECORDED');
+  assert.deepEqual(refusedDecision.command, staleDecision);
+  await ordinaryWrite(
+    procedurePath + '/complete',
+    {
+      outcome: 'Synthetic outcome',
+      aftercare: 'Synthetic aftercare',
+    },
+    verifiedHeaders,
+    409,
+  );
+  await ordinaryWrite(
+    procedurePath + '/cancel',
+    { reason: 'Synthetic rehearsal complete' },
+    verifiedHeaders,
+    200,
+  );
+  assert.deepEqual(
+    await ordinaryWrite(decisionPath, phoneDecision, verifiedHeaders, 200),
+    changedDecision,
+  );
+  assert.deepEqual(
+    await ordinaryWrite(decisionPath, staleDecision, patientHeaders, 409),
+    refusedDecision,
+  );
+  for (const headers of [patientHeaders, verifiedHeaders]) {
+    const history = (
+      await reminderRead('/patients/' + resultPatient + '/clinical-workflows', headers)
+    ).procedures.find((entry) => entry.id === decisionPlan.id);
+    assert.deepEqual(history.agreements, [
+      firstDecision.receipt.agreement,
+      changedDecision.receipt.agreement,
+    ]);
+    assert.equal(history.status, 'cancelled');
+    assert.equal(history.completion, null);
+    for (const cmd of [portalDecision, phoneDecision, staleDecision])
+      assert.equal(JSON.stringify(history).includes(cmd.requestId), false);
+  }
+  const decisionAudits = await reminderRead(
+    '/search/audit?entityType=procedure&entityId=' + decisionPlan.id,
+  );
+  assert.equal(
+    decisionAudits.items.filter((entry) => entry.action.startsWith('recorded procedure decision:'))
+      .length,
+    2,
+  );
+  for (const [headers, title] of [
+    [patientHeaders, 'Your procedure discussion was recorded'],
+    [verifiedHeaders, 'A patient recorded a procedure decision'],
+  ]) {
+    const activity = await reminderRead('/activity?limit=100', headers);
+    assert.equal(
+      activity.items.filter(
+        (item) => item.title === title && item.detail.includes(decisionPlan.title),
+      ).length,
+      1,
+    );
+  }
+
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
     body: '{}',
   });
   assert.equal(patientLogout.status, 200);
+  const loggedOutDecision = await ordinaryWrite(decisionPath, portalDecision, patientHeaders, 401);
+  assert.equal(loggedOutDecision.receipt, undefined);
+  assert.equal(loggedOutDecision.command, undefined);
   const deniedIntake = await ordinaryWrite(intakePath, intakeCommand, patientHeaders, 401);
   assert.equal(deniedIntake.receipt, undefined);
   assert.equal(deniedIntake.code, undefined);
@@ -4597,7 +4726,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

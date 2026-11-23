@@ -194,7 +194,10 @@ test('clinician preserves amendments, reviews attached results, and documents a 
       .getByLabel('Discussion and decision notes', { exact: true })
       .fill(`The test patient ${decision} after the synthetic discussion.`);
     await dialog.getByRole('checkbox').check();
+    await dialog.getByRole('button', { name: 'Review decision', exact: true }).click();
+    await dialog.getByRole('checkbox').check();
     await dialog.getByRole('button', { name: 'Save patient decision', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(dialog).toBeHidden();
     if (decision === 'declined')
       await expect(

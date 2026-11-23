@@ -1,0 +1,38 @@
+.procedure-decision-form,
+.decision-resume {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.procedure-decision-form h3 {
+  margin-bottom: 0.4rem;
+}
+.decision-entry p,
+.decision-entry time {
+  display: block;
+  margin-top: 0.25rem;
+}
+.decision-entry time {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.decision-history {
+  padding-inline-start: 1.4rem;
+}
+.decision-history li + li {
+  margin-top: 0.75rem;
+}
+.decision-resume {
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+@media (max-width: 480px) {
+  .procedure-decision-form .form-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .procedure-decision-form select {
+    min-width: 0;
+    max-width: 100%;
+  }
+}

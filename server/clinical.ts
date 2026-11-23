@@ -18,6 +18,11 @@ import type {
   InvestigationResultResponse,
   InvestigationResultNotSubmitted,
 } from '../shared/investigation-result-submission.ts';
+import type {
+  ProcedureDecisionCommand,
+  ProcedureDecisionNotRecorded,
+  ProcedureDecisionResponse,
+} from '../shared/procedure-decision.ts';
 import { clinicToday, get, id, insert, list, nowISO, type DB } from './db.ts';
 import { notifyPatient, notifyClinicians } from './activity.ts';
 import {
@@ -80,6 +85,31 @@ const resultCommand = resultFields
   .strict()
   .superRefine(validateResult);
 const noQuery = z.object({}).strict();
+const closedProcedure =
+  'This procedure is already completed or cancelled. Its documentation cannot be changed.';
+const decisionFields = z.object({
+  decision: z.enum(['agreed', 'declined']),
+  method: z.enum(['portal', 'in-person', 'phone']),
+  note: text,
+  patientDecisionConfirmed: z.boolean(),
+});
+const legacyDecision = decisionFields.extend({
+  note: text.default(''),
+  patientDecisionConfirmed: z.boolean().optional(),
+});
+const decisionCommand = decisionFields
+  .extend({
+    requestId: z
+      .string()
+      .uuid()
+      .transform((value) => value.toLowerCase()),
+    patientId: required,
+    procedureId: required,
+    recordedByRole: z.enum(['patient', 'doctor', 'admin']),
+    expectedLatestDecisionId: required.nullable(),
+    reviewedConfirmed: z.literal(true),
+  })
+  .strict();
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -108,6 +138,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     CREATE TABLE IF NOT EXISTS encounterAmendments (id TEXT PRIMARY KEY, patientId TEXT NOT NULL REFERENCES patients(id), encounterId TEXT NOT NULL REFERENCES encounters(id), data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS procedures (id TEXT PRIMARY KEY, patientId TEXT NOT NULL REFERENCES patients(id), data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS procedureAgreements (id TEXT PRIMARY KEY, procedureId TEXT NOT NULL REFERENCES procedures(id), data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS procedureDecisionCommands (
+      requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id),
+      procedureId TEXT NOT NULL REFERENCES procedures(id), commandHash TEXT NOT NULL,
+      agreementId TEXT UNIQUE REFERENCES procedureAgreements(id), rejection TEXT,
+      CHECK ((agreementId IS NOT NULL AND rejection IS NULL) OR (agreementId IS NULL AND rejection IS NOT NULL))
+    );
     CREATE TABLE IF NOT EXISTS procedureCompletions (id TEXT PRIMARY KEY REFERENCES procedures(id), data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS procedureCancellations (id TEXT PRIMARY KEY REFERENCES procedures(id), data TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS investigation_results_order ON investigationResults(investigationId);
@@ -124,6 +160,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     'encounterAmendments',
     'procedures',
     'procedureAgreements',
+    'procedureDecisionCommands',
     'procedureCompletions',
     'procedureCancellations',
   ]) {
@@ -229,11 +266,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     if (get(db, 'investigationCancellations', order.id)) fail(409, cancelledInvestigation);
   }
   function requirePlannedProcedure(plan: ProcedurePlan) {
-    if (procedureView(plan).status !== 'planned')
-      fail(
-        409,
-        'This procedure is already completed or cancelled. Its documentation cannot be changed.',
-      );
+    if (procedureView(plan).status !== 'planned') fail(409, closedProcedure);
   }
   function workflows(patientId: string, forPatient: boolean): PatientClinicalWorkflows {
     return {
@@ -622,22 +655,21 @@ export function registerClinical(app: Express, context: ClinicalContext) {
           : result.procedure,
       );
   });
-  app.post('/api/procedures/:id/agreements', (req: AuthRequest, res) => {
-    const user = actor(req),
-      plan = procedureAccess(req, String(req.params.id));
-    const input = z
-      .object({
-        decision: z.enum(['agreed', 'declined']),
-        method: z.enum(['portal', 'in-person', 'phone']),
-        note: text.default(''),
-        patientDecisionConfirmed: z.boolean().optional(),
-      })
-      .parse(req.body);
+  function decisionContext(req: AuthRequest) {
+    const user = context.currentCareUser(req);
+    const plan = procedureAccess(req, String(req.params.id));
+    return { user, plan };
+  }
+  function validateDecisionMethod(
+    req: AuthRequest,
+    user: User,
+    input: z.infer<typeof legacyDecision>,
+  ) {
     if (user.role === 'patient') {
       if (input.method !== 'portal')
         fail(403, 'Patients must record their own decision through the portal.');
     } else {
-      doctorIdentity(req);
+      clinicianId(req);
       if (input.method === 'portal')
         fail(403, 'A portal acknowledgement must be submitted by the patient.');
       if (!input.patientDecisionConfirmed || !input.note)
@@ -646,47 +678,135 @@ export function registerClinical(app: Express, context: ClinicalContext) {
           'Confirm the patient decision and record a discussion note for an in-person or phone agreement.',
         );
     }
-    transaction(() => {
-      requirePlannedProcedure(plan);
-      const agreement: ProcedureAgreement = {
-        id: id(),
-        procedureId: plan.id,
-        decision: input.decision,
-        method: input.method,
-        note: input.note,
-        recordedById: user.id,
-        recordedByName: user.name,
-        recordedByRole: user.role,
-        createdAt: nowISO(),
-      };
-      db.prepare('INSERT INTO procedureAgreements(id,procedureId,data) VALUES (?,?,?)').run(
-        agreement.id,
-        plan.id,
-        JSON.stringify(agreement),
-      );
-      audit(req, `recorded procedure decision: ${agreement.decision}`, 'procedure', plan.id);
-      if (user.role === 'patient')
-        notifyClinicians(
-          db,
-          plan.patientId,
-          `procedure-decision:${agreement.id}`,
-          {
-            kind: 'procedure',
-            title: 'A patient recorded a procedure decision',
-            detail: `${user.name} · ${plan.title}`,
-            href: `/clinic/patients/${plan.patientId}?tab=workup`,
-          },
-          { doctorId: plan.doctorId, excludeActorId: user.id },
-        );
-      else
-        notifyPatient(db, plan.patientId, `procedure-decision:${agreement.id}`, {
+  }
+  function appendDecision(
+    req: AuthRequest,
+    user: User,
+    plan: ProcedurePlan,
+    input: z.infer<typeof legacyDecision>,
+  ) {
+    const agreement: ProcedureAgreement = {
+      id: id(),
+      procedureId: plan.id,
+      decision: input.decision,
+      method: input.method,
+      note: input.note,
+      recordedById: user.id,
+      recordedByName: user.name,
+      recordedByRole: user.role,
+      createdAt: nowISO(),
+    };
+    db.prepare('INSERT INTO procedureAgreements(id,procedureId,data) VALUES (?,?,?)').run(
+      agreement.id,
+      plan.id,
+      JSON.stringify(agreement),
+    );
+    audit(req, `recorded procedure decision: ${agreement.decision}`, 'procedure', plan.id);
+    if (user.role === 'patient')
+      notifyClinicians(
+        db,
+        plan.patientId,
+        `procedure-decision:${agreement.id}`,
+        {
           kind: 'procedure',
-          title: 'Your procedure discussion was recorded',
-          detail: plan.title,
-          href: '/my-care/record?tab=workflows',
-        });
+          title: 'A patient recorded a procedure decision',
+          detail: `${user.name} · ${plan.title}`,
+          href: `/clinic/patients/${plan.patientId}?tab=workup`,
+        },
+        { doctorId: plan.doctorId, excludeActorId: user.id },
+      );
+    else
+      notifyPatient(db, plan.patientId, `procedure-decision:${agreement.id}`, {
+        kind: 'procedure',
+        title: 'Your procedure discussion was recorded',
+        detail: plan.title,
+        href: '/my-care/record?tab=workflows',
+      });
+    return agreement;
+  }
+  app.post('/api/procedures/:id/agreements', (req: AuthRequest, res) => {
+    const view = transaction(() => {
+      const { user, plan } = decisionContext(req);
+      const input = legacyDecision.parse(req.body);
+      validateDecisionMethod(req, user, input);
+      requirePlannedProcedure(plan);
+      appendDecision(req, user, plan, input);
+      return procedureView(plan);
     });
-    res.status(201).json(procedureView(plan));
+    res.status(201).json(view);
+  });
+  app.post('/api/procedures/:id/agreements/record', (req: AuthRequest, res) => {
+    const outcome = transaction(() => {
+      const { user, plan } = decisionContext(req);
+      noQuery.parse(req.query);
+      const command: ProcedureDecisionCommand = decisionCommand.parse(req.body);
+      const { requestId, procedureId, patientId, recordedByRole, expectedLatestDecisionId } =
+        command;
+      const actorId = user.id;
+      if (recordedByRole !== user.role)
+        return fail(403, 'The reviewed recording role does not match this account.');
+      if (procedureId !== plan.id || patientId !== plan.patientId)
+        return fail(409, 'The reviewed procedure and patient must match this record.');
+      validateDecisionMethod(req, user, command);
+      if (user.role === 'patient' && command.patientDecisionConfirmed)
+        return fail(
+          400,
+          'Only staff documenting a discussion can attest to a communicated decision.',
+        );
+
+      const commandHash = createHash('sha256').update(JSON.stringify(command)).digest('hex');
+      const success = (agreement: ProcedureAgreement): ProcedureDecisionResponse => ({
+        receipt: {
+          requestId,
+          actorId,
+          patientId,
+          procedureId,
+          expectedLatestDecisionId,
+          agreement,
+        },
+      });
+      const rejected = (message: string): ProcedureDecisionNotRecorded => ({
+        code: 'PROCEDURE_DECISION_NOT_RECORDED',
+        actorId,
+        command,
+        message,
+      });
+      const prior = db
+        .prepare(
+          'SELECT c.*, a.data AS originalAgreement FROM procedureDecisionCommands c LEFT JOIN procedureAgreements a ON a.id=c.agreementId WHERE c.requestId=?',
+        )
+        .get(requestId);
+      if (prior) {
+        if (
+          prior.actorId !== actorId ||
+          prior.procedureId !== procedureId ||
+          prior.commandHash !== commandHash
+        )
+          return fail(409, 'This request ID was already used for another procedure decision.');
+        if (typeof prior.rejection === 'string')
+          return { status: 409, body: rejected(prior.rejection) };
+        return { status: 200, body: success(JSON.parse(String(prior.originalAgreement))) };
+      }
+      const current = procedureView(plan);
+      const latestId = current.agreements.at(-1)?.id ?? null;
+      const rejection =
+        current.status !== 'planned'
+          ? closedProcedure
+          : latestId !== expectedLatestDecisionId
+            ? 'The latest procedure decision has changed. Review the current decision before recording another.'
+            : null;
+      const store = db.prepare(
+        'INSERT INTO procedureDecisionCommands(requestId,actorId,procedureId,commandHash,agreementId,rejection) VALUES (?,?,?,?,?,?)',
+      );
+      if (rejection) {
+        store.run(requestId, actorId, procedureId, commandHash, null, rejection);
+        return { status: 409, body: rejected(rejection) };
+      }
+      const agreement = appendDecision(req, user, plan, command);
+      store.run(requestId, actorId, procedureId, commandHash, agreement.id, null);
+      return { status: 201, body: success(agreement) };
+    });
+    res.status(outcome.status).json(outcome.body);
   });
   app.post('/api/procedures/:id/complete', (req: AuthRequest, res) => {
     const identity = doctorIdentity(req),

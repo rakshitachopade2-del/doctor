@@ -97,6 +97,7 @@ export async function simultaneousCareRequests(
   route: string,
   who: Client,
   body: unknown,
+  other: { who: Client; body: unknown } = { who, body },
 ) {
   const program = `
     import { createApp } from './server/app.ts';
@@ -122,10 +123,10 @@ export async function simultaneousCareRequests(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Cookie: who.cookie,
-          'X-CSRF-Token': who.csrf,
+          Cookie: other.who.cookie,
+          'X-CSRF-Token': other.who.csrf,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(other.body),
       });
       return { status: res.status, data: await res.json() };
     };

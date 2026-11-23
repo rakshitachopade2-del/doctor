@@ -566,6 +566,60 @@ async function rehearseRecovery() {
     const closedCommand = { ...resultCommand, requestId: randomUUID() };
     const closedResult = await call(source, resultPath, patient, 'POST', closedCommand, 409);
     assert.equal(closedResult.code, 'INVESTIGATION_RESULT_NOT_SUBMITTED');
+    const decisionPlan = await call(
+      source,
+      '/procedures',
+      admin,
+      'POST',
+      {
+        patientId,
+        title: 'Synthetic recovery procedure decision',
+        indication: 'Synthetic indication',
+        benefits: 'Synthetic benefits',
+        risks: 'Synthetic risks',
+        alternatives: 'Synthetic alternatives',
+        aftercare: 'Synthetic aftercare',
+      },
+      201,
+    );
+    const decisionPath = '/procedures/' + decisionPlan.id + '/agreements/record';
+    const patientDecision = {
+      requestId: randomUUID(),
+      patientId,
+      procedureId: decisionPlan.id,
+      recordedByRole: 'patient',
+      expectedLatestDecisionId: null,
+      decision: 'declined',
+      method: 'portal',
+      note: 'Synthetic patient decision',
+      patientDecisionConfirmed: false,
+      reviewedConfirmed: true,
+    };
+    const portalRecord = await call(source, decisionPath, patient, 'POST', patientDecision, 201);
+    const staffDecision = {
+      ...patientDecision,
+      requestId: randomUUID(),
+      recordedByRole: 'admin',
+      decision: 'agreed',
+      expectedLatestDecisionId: portalRecord.receipt.agreement.id,
+      method: 'in-person',
+      note: 'Synthetic discussion in person',
+      patientDecisionConfirmed: true,
+    };
+    const visitRecord = await call(source, decisionPath, admin, 'POST', staffDecision, 201);
+    const staleDecision = { ...patientDecision, requestId: randomUUID() };
+    const refusedDecision = await call(source, decisionPath, patient, 'POST', staleDecision, 409);
+    assert.equal(refusedDecision.code, 'PROCEDURE_DECISION_NOT_RECORDED');
+    const completedProcedure = await call(
+      source,
+      '/procedures/' + decisionPlan.id + '/complete',
+      admin,
+      'POST',
+      {
+        outcome: 'Synthetic recorded outcome',
+        aftercare: 'Synthetic aftercare',
+      },
+    );
     const intakePath = '/intakes/submit';
     const intakeCommand = {
       patientId,
@@ -1194,6 +1248,34 @@ async function rehearseRecovery() {
       await call(target, resultPath, newPatient, 'POST', closedCommand, 409),
       closedResult,
     );
+    assert.deepEqual(
+      await call(target, decisionPath, newPatient, 'POST', patientDecision),
+      portalRecord,
+    );
+    assert.deepEqual(
+      await call(target, decisionPath, newAdmin, 'POST', staffDecision),
+      visitRecord,
+    );
+    assert.deepEqual(
+      await call(target, decisionPath, newPatient, 'POST', staleDecision, 409),
+      refusedDecision,
+    );
+    const restoredPatientWorkflows = await call(
+      target,
+      '/patients/' + patientId + '/clinical-workflows',
+      newPatient,
+    );
+    for (const view of [restoredWorkflows, restoredPatientWorkflows]) {
+      const procedure = view.procedures.find((entry) => entry.id === decisionPlan.id);
+      assert.equal(procedure.status, 'completed');
+      assert.deepEqual(procedure.agreements, [
+        portalRecord.receipt.agreement,
+        visitRecord.receipt.agreement,
+      ]);
+      assert.deepEqual(procedure.completion, completedProcedure.completion);
+      for (const cmd of [patientDecision, staffDecision, staleDecision])
+        assert.equal(JSON.stringify(procedure).includes(cmd.requestId), false);
+    }
     const restoredOrder = restoredWorkflows.investigations.find((row) => row.id === order.id);
     assert.deepEqual(restoredOrder.results, [
       originalInvestigationResult,
@@ -1201,9 +1283,9 @@ async function rehearseRecovery() {
     ]);
     assert.deepEqual(restoredOrder.reviews, reviewedOrder.reviews);
     assert.equal(restoredOrder.status, 'cancelled');
-    const restoredPatientOrder = (
-      await call(target, `/patients/${patientId}/clinical-workflows`, newPatient)
-    ).investigations.find((row) => row.id === order.id);
+    const restoredPatientOrder = restoredPatientWorkflows.investigations.find(
+      (row) => row.id === order.id,
+    );
     assert.deepEqual(restoredPatientOrder.reviews, []);
     assert.deepEqual(restoredPatientOrder.results, restoredOrder.results);
     for (const data of [restoredSummary, restoredPatientOrder]) {
@@ -1304,7 +1386,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, procedure decision receipts and stale refusals after completion, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

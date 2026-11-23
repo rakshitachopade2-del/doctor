@@ -177,6 +177,11 @@ export function checkedConsultationWorkflows(
     !['investigations', 'procedures', 'amendments'].every((key) => Array.isArray(value[key]))
   )
     throw bad();
+  const procedures = value.procedures as unknown[];
+  if (
+    !procedures.every((entry) => object(entry) && text(entry.id) && entry.patientId === patientId)
+  )
+    throw bad();
   const amendments = (value.amendments as unknown[]).map((entry) =>
     checkedEncounterAmendment(entry, patientId),
   );

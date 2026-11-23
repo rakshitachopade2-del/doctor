@@ -2,6 +2,7 @@ import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } f
 import type { CareMessageCommand } from '../../shared/care-message';
 import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
 import type { CarePlanAttempt } from './care-plan-creation-helpers';
+import type { DecisionAttempt } from './procedure-decision-helpers';
 import type { ResultAttempt } from './investigation-result-helpers';
 import type { ReviewAttempt } from './follow-up-review-helpers';
 import type { ReviewedCheckIn } from './check-in-submission-helpers';
@@ -11,6 +12,7 @@ import type { UploadAttempt } from './private-upload-helpers';
 import { useSession } from '../lib';
 
 interface PendingCareSubmissions {
+  procedureDecisions: Map<string, DecisionAttempt>;
   investigationResults: Map<string, ResultAttempt>;
   followUpReviews: Map<string, ReviewAttempt>;
   checkInSubmission: { current: ReviewedCheckIn | null };
@@ -28,6 +30,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
   const pending = useMemo(
     () => ({
+      procedureDecisions: new Map<string, DecisionAttempt>(),
       investigationResults: new Map<string, ResultAttempt>(),
       followUpReviews: new Map<string, ReviewAttempt>(),
       checkInSubmission: { current: null as ReviewedCheckIn | null },
@@ -38,10 +41,17 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
       messages: new Map<string, CareMessageCommand>(),
       intakes: new Map<string, IntakeSubmissionCommand>(),
     }),
-    [session.user?.id, session.csrfToken],
+    [
+      session.user?.id,
+      session.user?.role,
+      session.user?.patientId,
+      session.user?.doctorId,
+      session.csrfToken,
+    ],
   );
   useLayoutEffect(() => {
     const clear = () => {
+      pending.procedureDecisions.clear();
       pending.investigationResults.clear();
       pending.followUpReviews.clear();
       pending.checkInSubmission.current = null;

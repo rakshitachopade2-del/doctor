@@ -289,9 +289,13 @@ test('published explanations become tailored immutable patient plans while later
       exact: true,
     });
     await choice.getByLabel('Your decision', { exact: true }).selectOption('agreed');
-    await choice.getByRole('checkbox').check();
-    await choice.getByRole('button', { name: 'Record my decision', exact: true }).click();
-    await expect(choice).toBeHidden();
+    await choice.getByRole('button', { name: 'Review decision', exact: true }).click();
+    const confirm = portal.getByRole('dialog', { name: 'Confirm procedure decision', exact: true });
+    await confirm.getByRole('checkbox').check();
+    await confirm.getByRole('button', { name: 'Record my decision', exact: true }).click();
+    const savedDecision = portal.getByRole('dialog', { name: 'Decision recorded', exact: true });
+    await savedDecision.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(savedDecision).toBeHidden();
     const summary = await get<CareSummary>(
       patient.request,
       '/api/patients/patient-ananya/care-summary',

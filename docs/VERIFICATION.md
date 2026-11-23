@@ -1,5 +1,19 @@
 # Release verification
 
+## 1.49.0 · Recording and changing a procedure decision
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **755 API, backup and recovery tests** and **191 browser journeys across 43 projects** passed. The production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for a container runtime check.
+
+On v1.48 a patient agreed through the portal and a clinician then documented a decline communicated by phone. Retrying the first request appended another agreement, sent the clinician a second notice and allowed the procedure to be completed with that stale choice. On v1.49 an exact retry recovers the original decision. A new submission based on the earlier history receives a refusal and the decline still blocks completion.
+
+Seven API regression groups cover changes of mind, repeated choices, patient and clinician authorship, portal and staff methods, validation, both write routes and current access. Two independent SQLite writers competed to record opposite choices against the same prior decision. Only one choice was appended. Injected failures exercised rollback of the decision, audit, activity and command, and reopening the database preserved the original confirmations and refusals.
+
+Six new Chrome journeys cover lost and undelivered requests, deliberate changes, stale history, malformed replies, cancellation, and a late reply while another procedure is open. They verify that a clinician must attest again after a changed patient choice and that signing out or reloading clears pending notes. At 320 pixels, review, retry, refusal and confirmation passed axe scans with their primary controls in view. Moving to review also placed focus inside the form. The existing patient, clinician and procedure catalogue journeys also use the new review step. An older consultation-note test now finishes its intercepted requests before closing the dialog and reloading the patient record.
+
+The local production smoke test checked both portals against the same history after a patient agreement, a phone decline and cancellation. The original confirmation stayed recoverable, the decline blocked completion, and each decision generated one audit entry and one notice for its intended recipient.
+
+A database created using v1.48 kept all three original decision entries, including the older duplicate. Their IDs, authors, notes, methods and ordering survived upgrade. A patient then recorded a decline and a clinician documented a subsequent agreement by phone. Exact retries after completion recovered those new entries and the prior stale refusal. The independent online backup and restore rehearsal recovered a patient’s portal decline, a clinician’s in-person agreement, the stale refusal and the completed outcome.
+
 ## 1.48.0 · Investigation result submission
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **748 API, backup and recovery tests** and **185 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for container runtime verification.

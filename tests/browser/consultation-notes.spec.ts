@@ -667,6 +667,8 @@ test('an uncommitted note stays locked for an unrelated outcome marker, then a r
   expect(saved.encounter).not.toHaveProperty('appointmentId');
   expect(attempts.slice(0, 3)).toEqual([attempts[0], attempts[0], attempts[0]]);
   expect(attempts[3].requestId).not.toBe(attempts[0].requestId);
+  // Closing reloads the patient record. Let the mock finish before that read.
+  await page.unrouteAll({ behavior: 'wait' });
   await closeRecorded(dialog);
   expect(
     (await get<PatientRecord>(page.request, `/api/patients/${patient.id}`)).encounters,

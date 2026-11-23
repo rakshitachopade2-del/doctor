@@ -1,5 +1,3 @@
-import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
 import {
   CalendarDays,
   CheckCircle2,
@@ -8,23 +6,25 @@ import {
   FileText,
   FlaskConical,
   RefreshCw,
-  ShieldCheck,
   Upload,
 } from 'lucide-react';
 import type { Investigation, ProcedureRecord } from '../../shared/clinical';
 import type { PatientDocument } from '../../shared/documents';
-import type { ProcedureAppointmentSnapshot } from '../../shared/procedure-scheduling';
-import { api, formatDate, useToast } from '../lib';
-import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
+import { formatDate } from '../lib';
+import { Badge, Card, EmptyState, ErrorState, Loading } from '../components/ui';
 import { checkedConsultationWorkflows } from '../components/consultation-recording-helpers';
 import { useAppointmentBookingData } from '../components/appointment-booking-helpers';
 import { useInvestigationResultSubmission } from '../components/InvestigationResultModal';
 import { usePatientDocuments } from '../components/private-upload-helpers';
-import { ProcedureTemplateSource } from '../components/ProcedureTemplateSource';
+import {
+  CurrentProcedureVisit,
+  ProcedureDetails,
+  ProcedureVisit,
+} from '../components/PatientProcedureInformation';
+import { useProcedureDecisionRecording } from '../components/ProcedureDecisionModal';
+import { decisionMethods } from '../components/procedure-decision-helpers';
 import './patient-workflows.css';
 
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : 'Your update could not be saved. Please try again.';
 const investigationKinds: Record<Investigation['kind'], string> = {
   laboratory: 'Laboratory',
   pathology: 'Pathology',
@@ -54,7 +54,7 @@ export function PatientWorkflowPanel({
     void workflows.reload();
     void documents.reload();
   });
-  const [agreementFor, setAgreementFor] = useState<ProcedureRecord | null>(null);
+  const decisions = useProcedureDecisionRecording(patientId, patientName, workflows.reload);
   const waiting =
     workflows.data?.investigations.filter((item) => item.status === 'ordered').length ?? 0;
   const withClinic =
@@ -65,6 +65,7 @@ export function PatientWorkflowPanel({
     return (
       <div>
         {resultSubmission.controls}
+        {decisions.controls}
         <Loading />
       </div>
     );
@@ -72,6 +73,7 @@ export function PatientWorkflowPanel({
     return (
       <div>
         {resultSubmission.controls}
+        {decisions.controls}
         <ErrorState
           message={workflows.error || 'Your next steps could not be loaded.'}
           retry={workflows.reload}
@@ -81,6 +83,7 @@ export function PatientWorkflowPanel({
   return (
     <div className="patient-workflows">
       {resultSubmission.controls}
+      {decisions.controls}
       <div className="section-heading">
         <div>
           <h2>Clear next steps, together.</h2>
@@ -150,7 +153,9 @@ export function PatientWorkflowPanel({
       </section>
       <section aria-labelledby="patient-procedures-heading" className="patient-workflow-section">
         <div className="patient-workflow-section-heading">
-          <h2 id="patient-procedures-heading">Your procedures</h2>
+          <h2 id="patient-procedures-heading" data-procedure-decisions-heading tabIndex={-1}>
+            Your procedures
+          </h2>
           <span className="muted small">Information and recorded choices</span>
         </div>
         {workflows.data.procedures.length ? (
@@ -159,7 +164,11 @@ export function PatientWorkflowPanel({
               <ProcedureCard
                 key={procedure.id}
                 procedure={procedure}
-                onDecision={() => setAgreementFor(procedure)}
+                onDecision={
+                  decisions.hasPending(procedure.id)
+                    ? undefined
+                    : () => decisions.open(procedure.id)
+                }
               />
             ))}
           </div>
@@ -172,16 +181,6 @@ export function PatientWorkflowPanel({
           </Card>
         )}
       </section>
-      {agreementFor && (
-        <ProcedureDecisionModal
-          procedure={agreementFor}
-          onClose={() => setAgreementFor(null)}
-          onSaved={() => {
-            setAgreementFor(null);
-            void workflows.reload();
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -320,114 +319,12 @@ function InvestigationCard({
   );
 }
 
-function ProcedureDetails({ procedure }: { procedure: ProcedureRecord }) {
-  return (
-    <>
-      <ProcedureTemplateSource source={procedure.templateSource} />
-      <dl className="patient-workflow-details procedure-information">
-        {[
-          ['Reason for the procedure', procedure.indication],
-          ['Expected benefits', procedure.benefits],
-          ['Risks and precautions', procedure.risks],
-          ['Alternatives', procedure.alternatives],
-          ['Planned aftercare', procedure.aftercare],
-          ['Estimated cost', procedure.estimatedCost],
-        ].map(([label, text]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>{text || 'Not recorded. Ask your clinician for clarification.'}</dd>
-          </div>
-        ))}
-      </dl>
-    </>
-  );
-}
-
-function ProcedureVisit({
-  appointment,
-  linked,
-  completed = false,
-  planned = false,
-}: {
-  appointment: ProcedureAppointmentSnapshot | null | undefined;
-  linked: boolean;
-  completed?: boolean;
-  planned?: boolean;
-}) {
-  const [hours, minutes] = (appointment?.time ?? '00:00').split(':').map(Number);
-  const end = hours * 60 + minutes + (appointment?.durationMinutes ?? 0);
-  const needsAttention =
-    planned &&
-    appointment &&
-    (['cancelled', 'no-show', 'completed'].includes(appointment.status) ||
-      (appointment.status === 'scheduled' &&
-        Date.parse(`${appointment.date}T${appointment.time}:00+05:30`) <= Date.now()));
-  return (
-    <div className="patient-procedure-visit">
-      <h4>{completed ? 'Visit recorded at completion' : 'Linked visit'}</h4>
-      {appointment ? (
-        <>
-          <p>
-            {formatDate(appointment.date)} · {appointment.time}–
-            {String(Math.floor(end / 60)).padStart(2, '0')}:{String(end % 60).padStart(2, '0')} IST
-            · {appointment.durationMinutes} minutes
-          </p>
-          <p>
-            {appointment.doctorName} ·{' '}
-            {appointment.mode === 'online' ? 'Online visit' : 'In-person visit'}
-            {appointment.durationPolicy === 'custom' && ' · Custom length'}
-          </p>
-          <p>Appointment status: {appointment.status.replaceAll('-', ' ')}</p>
-          {needsAttention && (
-            <p>Contact the clinic to confirm the visit for this planned procedure.</p>
-          )}
-        </>
-      ) : (
-        <p>
-          {completed
-            ? 'No appointment was linked when completion was recorded.'
-            : linked
-              ? 'The linked visit details are unavailable. Contact the clinic for confirmation.'
-              : 'No appointment is currently linked to this procedure.'}
-        </p>
-      )}
-      {!completed && (
-        <p className="small muted">
-          A visit link does not change your recorded procedure decision.
-          {appointment && (
-            <>
-              {' '}
-              <Link to="/my-care" className="text-link">
-                View your appointments
-              </Link>
-            </>
-          )}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function CurrentProcedureVisit({ procedure }: { procedure: ProcedureRecord }) {
-  const effectiveId =
-    procedure.effectiveAppointmentId === undefined
-      ? procedure.appointmentId
-      : procedure.effectiveAppointmentId;
-  return (
-    <ProcedureVisit
-      appointment={procedure.scheduledAppointment}
-      linked={effectiveId !== null}
-      planned={procedure.status === 'planned'}
-    />
-  );
-}
-
 function ProcedureCard({
   procedure,
   onDecision,
 }: {
   procedure: ProcedureRecord;
-  onDecision: () => void;
+  onDecision?: () => void;
 }) {
   const latest = procedure.agreements.at(-1);
   return (
@@ -484,10 +381,8 @@ function ProcedureCard({
               Latest recorded choice: {latest.decision === 'agreed' ? 'Agreed' : 'Declined'}
             </strong>
             <p>
-              {latest.method === 'portal'
-                ? 'Shared through the patient portal'
-                : `Recorded by ${latest.recordedByName} · ${latest.method === 'phone' ? 'By phone' : 'In person'}`}{' '}
-              · {formatDate(latest.createdAt)}
+              Recorded by {latest.recordedByName} · {latest.recordedByRole} ·{' '}
+              {decisionMethods[latest.method]} · {formatDate(latest.createdAt)}
             </p>
             {latest.note && <p className="pre-line">{latest.note}</p>}
           </div>
@@ -501,7 +396,8 @@ function ProcedureCard({
               <li key={agreement.id}>
                 <strong>{agreement.decision === 'agreed' ? 'Agreed' : 'Declined'}</strong>
                 <span>
-                  {formatDate(agreement.createdAt)} · Recorded by {agreement.recordedByName}
+                  {formatDate(agreement.createdAt)} · Recorded by {agreement.recordedByName} ·{' '}
+                  {agreement.recordedByRole} · {decisionMethods[agreement.method]}
                 </span>
                 {agreement.note && <p className="pre-line">{agreement.note}</p>}
               </li>
@@ -509,134 +405,21 @@ function ProcedureCard({
           </ol>
         </details>
       )}
-      {procedure.status === 'planned' && (
+      {procedure.status === 'planned' && onDecision && (
         <div className="patient-workflow-card-footer">
           <span className="muted small">
             Your choice is recorded for the clinic. This is not a legal e-signature.
           </span>
-          <button className="button button-primary" onClick={onDecision}>
+          <button
+            data-procedure-decision={procedure.id}
+            className="button button-primary"
+            onClick={onDecision}
+          >
             <ClipboardCheck size={15} />
             {latest ? 'Update my decision' : 'Review and decide'}
           </button>
         </div>
       )}
     </Card>
-  );
-}
-
-function ProcedureDecisionModal({
-  procedure,
-  onClose,
-  onSaved,
-}: {
-  procedure: ProcedureRecord;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [decision, setDecision] = useState<'agreed' | 'declined' | ''>('');
-  const [reviewed, setReviewed] = useState(false);
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const toast = useToast();
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!decision || !reviewed || busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      await api(`/api/procedures/${procedure.id}/agreements`, {
-        method: 'POST',
-        body: { decision, method: 'portal', note: note.trim() },
-      });
-      toast('Your decision has been recorded for your clinic.');
-      onSaved();
-    } catch (problem) {
-      setError(errorMessage(problem));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal
-      title="Review your procedure decision"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <form onSubmit={submit} className="stack">
-        <div>
-          <h3>{procedure.title}</h3>
-          <p className="muted">
-            Review the information your clinician shared. Contact the clinic if you need anything
-            explained before making a choice.
-          </p>
-        </div>
-        <CurrentProcedureVisit procedure={procedure} />
-        <ProcedureDetails procedure={procedure} />
-        <Field label="Your decision">
-          <select
-            required
-            value={decision}
-            disabled={busy}
-            onChange={(event) => setDecision(event.target.value as typeof decision)}
-          >
-            <option value="">Choose your decision</option>
-            <option value="agreed">I agree to the proposed procedure</option>
-            <option value="declined">I decline the proposed procedure</option>
-          </select>
-        </Field>
-        <Field
-          label="Note for your clinic"
-          hint="Optional. Include any questions or context for your choice."
-        >
-          <textarea
-            rows={3}
-            maxLength={8000}
-            value={note}
-            disabled={busy}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </Field>
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            required
-            checked={reviewed}
-            disabled={busy}
-            onChange={(event) => setReviewed(event.target.checked)}
-          />
-          <span>
-            I have reviewed the information above and want to record this choice for my clinic.
-          </span>
-        </label>
-        <div className="notice">
-          <ShieldCheck size={18} />
-          <span>
-            This records a choice and its history. It is not a legal e-signature or a substitute for
-            a discussion with your clinician. You can update your decision while the procedure is
-            planned.
-          </span>
-        </div>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="form-actions">
-          <button
-            className="button button-secondary"
-            type="button"
-            disabled={busy}
-            onClick={onClose}
-          >
-            Decide later
-          </button>
-          <button className="button button-primary" disabled={busy || !decision || !reviewed}>
-            {busy ? 'Saving…' : 'Record my decision'}
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }
