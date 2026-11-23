@@ -53,7 +53,7 @@ export async function careApiFixture(t: TestContext, path?: string) {
       user: r.data.user,
     };
   }
-  return { db, databasePath, call, login, close };
+  return { db, databasePath, base, call, login, close };
 }
 
 export function changeUser(db: DB, original: User, patch: Partial<User>) {

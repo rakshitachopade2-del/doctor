@@ -11,16 +11,15 @@ import {
   ShieldCheck,
   Upload,
 } from 'lucide-react';
-import type {
-  Investigation,
-  PatientClinicalWorkflows,
-  ProcedureRecord,
-} from '../../shared/clinical';
+import type { Investigation, ProcedureRecord } from '../../shared/clinical';
 import type { PatientDocument } from '../../shared/documents';
 import type { ProcedureAppointmentSnapshot } from '../../shared/procedure-scheduling';
-import { api, formatDate, useResource, useToast } from '../lib';
+import { api, formatDate, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
-import { DocumentUploadModal } from '../components/DocumentsPanel';
+import { checkedConsultationWorkflows } from '../components/consultation-recording-helpers';
+import { useAppointmentBookingData } from '../components/appointment-booking-helpers';
+import { DocumentUploadModal } from '../components/PrivateUploadModal';
+import { usePatientDocuments } from '../components/private-upload-helpers';
 import { ProcedureTemplateSource } from '../components/ProcedureTemplateSource';
 import './patient-workflows.css';
 
@@ -40,12 +39,11 @@ const investigationStatuses: Record<Investigation['status'], string> = {
 };
 
 export function PatientWorkflowPanel({ patientId }: { patientId: string }) {
-  const workflows = useResource<PatientClinicalWorkflows>(
+  const workflows = useAppointmentBookingData(
     `/api/patients/${encodeURIComponent(patientId)}/clinical-workflows`,
+    (value) => checkedConsultationWorkflows(value, patientId),
   );
-  const documents = useResource<PatientDocument[]>(
-    `/api/documents?patientId=${encodeURIComponent(patientId)}`,
-  );
+  const documents = usePatientDocuments(patientId);
   const [resultFor, setResultFor] = useState<Investigation | null>(null);
   const [resultNote, setResultNote] = useState('');
   const [documentIds, setDocumentIds] = useState<string[]>([]);
@@ -299,10 +297,14 @@ export function PatientWorkflowPanel({ patientId }: { patientId: string }) {
         <DocumentUploadModal
           patientId={patientId}
           onClose={() => setUploadReport(false)}
-          onUploaded={(document) => {
-            setDocumentIds((current) =>
-              current.length < 10 ? [...current, document.id] : current,
-            );
+          investigationId={resultFor.id}
+          onUploaded={(document, sameInvestigation) => {
+            if (sameInvestigation)
+              setDocumentIds((current) =>
+                current.length < 10 && !current.includes(document.id)
+                  ? [...current, document.id]
+                  : current,
+              );
             setUploadReport(false);
             void documents.reload();
           }}

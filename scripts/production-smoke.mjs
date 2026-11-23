@@ -1881,33 +1881,75 @@ try {
     'base64',
   );
   const bundlePdfBytes = Buffer.from('%PDF-1.7\nSynthetic portable report only.\n%%EOF\n');
-  const bundleImage = await visitWrite(
-    '/images',
-    {
+  const imageCommand = {
+    requestId: randomUUID(),
+    patientId: patient.id,
+    caption: 'Synthetic portable photograph',
+    category: 'clinical',
+    consent: true,
+    sha256: createHash('sha256').update(bundleImageBytes).digest('hex'),
+    dataUrl: `data:image/png;base64,${bundleImageBytes.toString('base64')}`,
+  };
+  const documentCommand = {
+    requestId: randomUUID(),
+    patientId: patient.id,
+    title: 'Synthetic portable report',
+    originalName: 'synthetic-report.pdf',
+    consent: true,
+    sha256: createHash('sha256').update(bundlePdfBytes).digest('hex'),
+    dataUrl: `data:application/pdf;base64,${bundlePdfBytes.toString('base64')}`,
+  };
+  const imageUpload = await visitWrite('/images/upload', imageCommand, 201);
+  const documentUpload = await visitWrite('/documents/upload', documentCommand, 201);
+  const bundleImage = imageUpload.receipt.file;
+  const bundleDocument = documentUpload.receipt.file;
+  for (const [path, kind, command, result, originalBytes, action] of [
+    [
+      '/images/upload',
+      'image',
+      imageCommand,
+      imageUpload,
+      bundleImageBytes,
+      'uploaded private image',
+    ],
+    [
+      '/documents/upload',
+      'document',
+      documentCommand,
+      documentUpload,
+      bundlePdfBytes,
+      'uploaded private report document',
+    ],
+  ]) {
+    assert.deepEqual(await visitWrite(path, command), result);
+    const file = result.receipt.file;
+    assert.deepEqual(result.receipt, {
+      requestId: command.requestId,
+      actorId: account.user.id,
       patientId: patient.id,
-      caption: 'Synthetic portable photograph',
-      category: 'clinical',
-      consent: true,
-      dataUrl: `data:image/png;base64,${bundleImageBytes.toString('base64')}`,
-    },
-    201,
-  );
-  const bundleDocument = await visitWrite(
-    '/documents',
-    {
-      patientId: patient.id,
-      title: 'Synthetic portable report',
-      originalName: 'synthetic-report.pdf',
-      consent: true,
-      dataUrl: `data:application/pdf;base64,${bundlePdfBytes.toString('base64')}`,
-    },
-    201,
-  );
+      kind,
+      file,
+    });
+    assert.equal(file.sha256, command.sha256);
+    assert.equal(file.sizeBytes, originalBytes.length);
+    assert.equal(file.createdById, account.user.id);
+    assert.equal(file.consent, true);
+    const download = await fetch(`${base}${file.url}`, { headers: apiHeaders });
+    assert.equal(download.status, 200);
+    assert.deepEqual(Buffer.from(await download.arrayBuffer()), originalBytes);
+    const audit = await fetch(`${base}/api/search/audit?entityType=${kind}&entityId=${file.id}`, {
+      headers: apiHeaders,
+    });
+    assert.equal(audit.status, 200);
+    assert.equal((await audit.json()).items.filter((entry) => entry.action === action).length, 1);
+  }
   const summaryUrl = `${base}/api/patients/${patient.id}/care-summary`;
   const summaryResponse = await fetch(summaryUrl, { headers: apiHeaders });
   assert.equal(summaryResponse.status, 200);
   const summary = await summaryResponse.json();
   assert.equal(summary.audience, 'patient');
+  for (const command of [imageCommand, documentCommand])
+    assert.equal(JSON.stringify(summary).includes(command.requestId), false);
   assert.equal(summary.clinic.name, profileCommand.profile.name);
   assert.equal(summary.clinic.phone, legacyConfiguration.phone);
   assert.equal(JSON.stringify(summary).includes(privateConfigurationReason), false);
@@ -2095,17 +2137,14 @@ try {
   const repeatBundle = await fetchBundle();
   assert.equal(repeatBundle.status, 200);
   assert.deepEqual(Buffer.from(await repeatBundle.arrayBuffer()), bundleBytes);
-  const laterBundleImage = await visitWrite(
-    '/images',
-    {
-      patientId: patient.id,
-      caption: 'Later image excluded from the earlier saved copy',
-      category: 'clinical',
-      consent: true,
-      dataUrl: `data:image/png;base64,${bundleImageBytes.toString('base64')}`,
-    },
+  const secondImageUpload = await visitWrite(
+    '/images/upload',
+    { ...imageCommand, requestId: randomUUID() },
     201,
   );
+  const laterBundleImage = secondImageUpload.receipt.file;
+  assert.notEqual(laterBundleImage.id, bundleImage.id);
+  assert.equal(laterBundleImage.sha256, bundleImage.sha256);
   await visitWrite(
     `${bundlePath}/preview`,
     { attachments: [{ type: 'image', id: laterBundleImage.id }] },

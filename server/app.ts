@@ -22,10 +22,10 @@ import { registerCareSummary } from './care-summary.ts';
 import { registerCareSummaryCopies } from './care-summary-copies.ts';
 import {
   registerImageAnnotations,
-  imageProvenance,
   publishedImageAnnotationsForPatient,
 } from './image-annotations.ts';
 import { registerDocuments } from './documents.ts';
+import { registerPrivateUploads } from './private-upload.ts';
 import {
   initializeActivity,
   notifyPatient,
@@ -1049,58 +1049,6 @@ export function createApp(options: AppOptions = {}) {
     });
     res.status(existing ? 200 : 201).json(check);
   });
-  app.post('/api/images', (req: AuthRequest, res) => {
-    moduleEnabled('images');
-    const input = z
-      .object({
-        patientId: required.optional(),
-        caption: short.min(1),
-        category: z.enum(['clinical', 'report']),
-        consent: z.literal(true),
-        dataUrl: z.string().max(7 * 1024 * 1024),
-      })
-      .parse(req.body);
-    const patientId = ownPatient(req, input.patientId);
-    patientAccess(req, patientId);
-    const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(
-      input.dataUrl,
-    );
-    if (!match) return fail(400, 'Upload a JPEG, PNG or WebP image.');
-    const mimeType = match[1],
-      bytes = Buffer.from(match[2], 'base64');
-    if (bytes.length > 5 * 1024 * 1024) fail(413, 'Images must be 5 MB or smaller.');
-    if (bytes.length < 12) fail(400, 'The image file is invalid.');
-    const valid =
-      mimeType === 'image/png'
-        ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-        : mimeType === 'image/jpeg'
-          ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
-          : bytes.subarray(0, 4).toString() === 'RIFF' &&
-            bytes.subarray(8, 12).toString() === 'WEBP';
-    if (!valid) fail(400, 'The image content does not match its file type.');
-    const key = id();
-    const image: ClinicalImage = {
-      id: key,
-      patientId,
-      caption: input.caption,
-      category: input.category,
-      consent: true,
-      mimeType,
-      createdAt: nowISO(),
-      url: `/api/images/${key}/file`,
-      ...imageProvenance(bytes, actor(req)),
-    };
-    scheduling.transaction(() => {
-      db.prepare('INSERT INTO images(id,patientId,data,bytes) VALUES (?,?,?,?)').run(
-        key,
-        patientId,
-        JSON.stringify(image),
-        bytes,
-      );
-      audit(req, 'uploaded private image', 'image', key);
-    });
-    res.status(201).json(image);
-  });
   app.get('/api/images/:id/file', (req: AuthRequest, res) => {
     const key = String(req.params.id),
       image = get<ClinicalImage>(db, 'images', key);
@@ -1213,6 +1161,14 @@ export function createApp(options: AppOptions = {}) {
   waitlist.register(app);
   registerActivity(app, { db, actor, audit, fail });
   registerDocuments(app, { db, actor, patientAccess, audit, fail });
+  registerPrivateUploads(app, {
+    db,
+    resolvePatient: (req, supplied) => patientAccess(req, ownPatient(req, supplied)).id,
+    authorizePatientRecord,
+    transaction: scheduling.transaction,
+    audit,
+    fail,
+  });
   registerOperations(app, { db, demoMode, actor, patientAccess, audit, fail });
   registerPatientProfile(app, { db, actor, patientAccess, clinicianId, audit, fail });
   const clinicalWorkflows = registerClinical(app, {

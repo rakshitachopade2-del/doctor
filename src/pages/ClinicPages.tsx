@@ -32,6 +32,8 @@ import type { AppointmentStateChangeStatus } from '../../shared/appointment-stat
 import { useSearchPage } from '../record-search';
 import { Pagination } from '../components/Pagination';
 import { ClinicalWorkflowPanel, EncounterAmendments } from './ClinicalWorkflowPanel';
+import { PrivateUploadModal } from '../components/PrivateUploadModal';
+import { uploadKey } from '../components/private-upload-helpers';
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import { CarePlanModal } from '../components/CarePlanModal';
 import { usePendingCareSubmissions } from '../components/pending-care-submissions';
@@ -1985,7 +1987,7 @@ export function PatientDetailPage() {
   const { id } = useParams();
   const { session } = useSession();
   const location = useLocation();
-  const { plans: pendingPlans } = usePendingCareSubmissions();
+  const { plans: pendingPlans, uploads } = usePendingCareSubmissions();
   const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
   const { data, loading, error, reload } = useAppointmentBookingData(
     id ? `/api/patients/${encodeURIComponent(id)}` : null,
@@ -2045,14 +2047,13 @@ export function PatientDetailPage() {
   });
   useLayoutEffect(() => {
     const recordPath = location.pathname.replace(/\/$/, '');
-    const closeCarePlan = () => setModal((open) => (open === 'care' ? null : open));
     const clearDocumentation = () => {
-      closeCarePlan();
+      setModal(null);
       setDocumentation(null);
       setPendingDocumentation(null);
     };
     const navigateDocumentation = () => {
-      closeCarePlan();
+      setModal(null);
       setDocumentation(null);
       if (window.location.pathname.replace(/\/$/, '') !== recordPath) setPendingDocumentation(null);
     };
@@ -2074,7 +2075,7 @@ export function PatientDetailPage() {
       previous.actorId !== session.user?.id ||
       previous.patientId !== id
     ) {
-      setModal((open) => (open === 'care' ? null : open));
+      setModal(null);
       documentationOrigin.current = { key: location.key, actorId: session.user?.id, patientId: id };
       setDocumentation(null);
       if (previous.actorId !== session.user?.id || previous.patientId !== id)
@@ -2097,7 +2098,7 @@ export function PatientDetailPage() {
     );
     return () => window.cancelAnimationFrame(frame);
   }, [tab, selectedPlan, loading]);
-  const imagesEnabled = settings.data?.modules.images !== false;
+  const imagesEnabled = settings.data?.modules.images === true;
   function openAnnotations(imageId: string | null) {
     setRecordParams(
       (previous) => {
@@ -2114,6 +2115,7 @@ export function PatientDetailPage() {
   if (error) return <ErrorState message={error} retry={reload} />;
   if (!data) return <EmptyState title="Patient not found" />;
   const { patient } = data;
+  const pendingImage = uploads.has(uploadKey('image', patient.id));
   const annotationImage =
     tab === 'images'
       ? data.images.find((image) => image.id === recordParams.get('image'))
@@ -2469,10 +2471,10 @@ export function PatientDetailPage() {
             </div>
             <button
               className="button button-secondary"
-              disabled={!imagesEnabled}
+              disabled={!imagesEnabled && !pendingImage}
               onClick={() => setModal('image')}
             >
-              <ImagePlus size={16} /> Add image
+              <ImagePlus size={16} /> {pendingImage ? 'Resume image upload' : 'Add image'}
             </button>
           </div>
           {!imagesEnabled && (
@@ -2553,7 +2555,7 @@ export function PatientDetailPage() {
               title="A clearer picture over time"
               description="Add clinical photographs or image-based investigation reports with the patient’s permission. JPEG, PNG or WebP, up to 5 MB."
               action={
-                imagesEnabled ? (
+                !pendingImage && imagesEnabled ? (
                   <button className="button button-secondary" onClick={() => setModal('image')}>
                     <ImagePlus size={16} /> Upload first image
                   </button>
@@ -2610,11 +2612,12 @@ export function PatientDetailPage() {
           }}
         />
       )}
-      {modal === 'image' && imagesEnabled && (
-        <UploadModal
+      {modal === 'image' && tab === 'images' && (
+        <PrivateUploadModal
+          kind="image"
           patientId={patient.id}
           onClose={() => setModal(null)}
-          onSaved={() => {
+          onUploaded={() => {
             setModal(null);
             reload();
           }}
@@ -2699,107 +2702,6 @@ function CarePlanCard({
       </div>
       <FollowUpPlanSection plan={plan} enabled={followUpEnabled} onChanged={onChanged} />
     </Card>
-  );
-}
-
-function UploadModal({
-  patientId,
-  onClose,
-  onSaved,
-}: {
-  patientId: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [file, setFile] = useState<File | null>(null);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const toast = useToast();
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!file) return setError('Select an image to upload.');
-    if (file.size > 5 * 1024 * 1024) return setError('Choose an image smaller than 5 MB.');
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type))
-      return setError('Choose a JPEG, PNG or WebP image.');
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    setSaving(true);
-    setError('');
-    try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error('The selected file could not be read.'));
-        reader.readAsDataURL(file);
-      });
-      await api('/api/images', {
-        method: 'POST',
-        body: {
-          patientId,
-          caption: values.caption,
-          category: values.category,
-          consent: true,
-          dataUrl,
-        },
-      });
-      toast('Private image added to the patient record.');
-      onSaved();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <Modal title="Add a clinical image" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        {error && (
-          <div className="notice notice-error" role="alert">
-            {error}
-          </div>
-        )}
-        <Field label="Image file" hint="JPEG, PNG or WebP · Maximum 5 MB">
-          <input
-            required
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-          />
-        </Field>
-        <Field label="Caption">
-          <input
-            name="caption"
-            required
-            maxLength={300}
-            placeholder="Area, view and relevant capture details"
-          />
-        </Field>
-        <Field label="Category">
-          <select name="category">
-            <option value="clinical">Clinical photograph</option>
-            <option value="report">Investigation report image</option>
-          </select>
-        </Field>
-        <label className="checkbox-field">
-          <input type="checkbox" required />
-          <span>
-            I have confirmed the patient’s permission to store this image for their treatment and
-            clinical record.
-          </span>
-        </label>
-        <div className="notice">
-          Images remain private to the patient and authorized clinicians. This permission does not
-          authorize teaching, research or public use.
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="button button-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="button button-primary" disabled={saving}>
-            {saving ? 'Uploading…' : 'Upload privately'}
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 

@@ -63,7 +63,8 @@ flowchart LR
 | `src/components/AppointmentResourcesModal.tsx` | Full-set allocation, source review, safe retries and visit resource history                |
 | `server/waitlist.ts`                           | Immutable requests, terminal history, active claims and atomic confirmed booking           |
 | `server/identity.ts`                           | Account lifecycle, session metadata migration/revocation, recovery grants                  |
-| `server/documents.ts`                          | Immutable PDF originals, upload provenance, patient-scoped attachment downloads            |
+| `server/private-upload.ts`                     | Image and PDF validation, authorized saves, original attribution and upload receipts       |
+| `server/documents.ts`                          | Immutable PDF storage, patient-scoped report lists and attachment downloads                |
 | `server/procedure-catalogue.ts`                | Private versioned procedure templates, publication, availability and creation receipts     |
 | `server/clinical.ts`                           | Investigation review/publication, procedure agreement/completion, encounter amendments     |
 | `server/follow-up.ts`                          | Review snapshots, owner assignments, optimistic revisions, plan state and worklist         |
@@ -253,6 +254,8 @@ After an administrator confirms identity, recovery creates a cryptographically r
 The UI puts recovery tokens in the URL fragment, removes that fragment after loading, and submits the token in the recovery request body. Audit events identify the action and account without storing the raw token. There is no email/SMS delivery provider: verification and private link delivery remain clinic operations.
 
 ## Private reports and clinical workflow records
+
+Image and PDF uploads use a shared request-ID namespace. The server checks the decoded file fingerprint, uploader, patient, kind and normalized metadata before replaying a stored outcome. A new save commits the original bytes, provenance, upload audit and retry evidence in the same SQLite transaction. The receipt references the immutable file row, so a retry reads its original metadata without storing another copy of the bytes. The portal keeps an unresolved upload in memory for the signed-in tab, which lets a patient or clinician navigate and retry without storing private files in browser storage.
 
 The reviewed intake writer rechecks the session and patient access inside the SQLite write transaction. It binds each command UUID to the actor, patient and digest of the normalized answers and consent. A successful command references the immutable intake row. The answers, audit entry and receipt commit together. A paused command stores its rejection separately from shared history, and both saved and rejected outcomes survive restoration. The legacy intake route uses the same atomic record and audit write. Shared patient records and care summaries retain the existing intake shape.
 

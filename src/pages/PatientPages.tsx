@@ -19,7 +19,6 @@ import {
   Search,
   ShieldCheck,
   Stethoscope,
-  Upload,
   Video,
   X,
 } from 'lucide-react';
@@ -46,6 +45,8 @@ import {
   PageHeader,
 } from '../components/ui';
 import './patient.css';
+import { PrivateUploadModal } from '../components/PrivateUploadModal';
+import { uploadKey } from '../components/private-upload-helpers';
 import { DocumentsPanel } from '../components/DocumentsPanel';
 import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
 import { usePendingCareSubmissions } from '../components/pending-care-submissions';
@@ -1466,8 +1467,8 @@ export function MyCarePage() {
   );
 }
 
-function PatientCare({ patientId, name }: { patientId: string; name: string }) {
-  const record = useAppointmentBookingData<PatientRecord>(`/api/patients/${patientId}`, (value) => {
+function usePatientRecord(patientId: string) {
+  return useAppointmentBookingData<PatientRecord>(`/api/patients/${patientId}`, (value) => {
     const data = value as PatientRecord | null;
     if (
       !data ||
@@ -1485,6 +1486,10 @@ function PatientCare({ patientId, name }: { patientId: string; name: string }) {
       throw new Error('Your care record could not be confirmed. Please try again.');
     return data;
   });
+}
+
+function PatientCare({ patientId, name }: { patientId: string; name: string }) {
+  const record = usePatientRecord(patientId);
   const settings = useResource<ClinicSettings>('/api/settings');
   const [checkIn, setCheckIn] = useState<CarePlan | null>(null);
   const [cancelId, setCancelId] = useState<string | null>(null);
@@ -1973,8 +1978,12 @@ export function MyRecordPage() {
 }
 
 function PatientRecordView({ patientId }: { patientId: string }) {
-  const record = useResource<PatientRecord>(`/api/patients/${patientId}`);
-  const settings = useResource<ClinicSettings>('/api/settings');
+  const location = useLocation();
+  const { session } = useSession();
+  const { uploads } = usePendingCareSubmissions();
+  const pendingImage = uploads.has(uploadKey('image', patientId));
+  const record = usePatientRecord(patientId);
+  const settings = useAppointmentBookingData('/api/settings', checkedMessageSettings);
   const [params, setParams] = useSearchParams();
   const requestedTab = params.get('tab') ?? 'timeline';
   const aliases: Record<string, string> = {
@@ -2013,6 +2022,10 @@ function PatientRecordView({ patientId }: { patientId: string }) {
     setParams(next, { replace: true });
   }
   const [upload, setUpload] = useState(false);
+  useLayoutEffect(
+    () => setUpload(false),
+    [location.key, patientId, session.user?.id, session.csrfToken],
+  );
   const [compare, setCompare] = useState(false);
   const [firstImage, setFirstImage] = useState('');
   const [secondImage, setSecondImage] = useState('');
@@ -2240,9 +2253,9 @@ function PatientRecordView({ patientId }: { patientId: string }) {
                       Compare images
                     </button>
                   )}
-                  {settings.data?.modules.images && (
+                  {(settings.data?.modules.images || pendingImage) && (
                     <button className="button button-primary" onClick={() => setUpload(true)}>
-                      <ImagePlus size={17} /> Add image
+                      <ImagePlus size={17} /> {pendingImage ? 'Resume image upload' : 'Add image'}
                     </button>
                   )}
                 </div>
@@ -2355,11 +2368,12 @@ function PatientRecordView({ patientId }: { patientId: string }) {
           <ImageAnnotationViewer image={viewedImage} enabled={settings.data?.modules.images} />
         </Modal>
       )}
-      {upload && settings.data?.modules.images && (
-        <UploadModal
+      {upload && tab === 'images' && (
+        <PrivateUploadModal
+          kind="image"
           patientId={patientId}
           onClose={() => setUpload(false)}
-          onSave={() => {
+          onUploaded={() => {
             setUpload(false);
             record.reload();
           }}
@@ -2406,119 +2420,6 @@ function PatientRecordView({ patientId }: { patientId: string }) {
         </Modal>
       )}
     </div>
-  );
-}
-
-function UploadModal({
-  patientId,
-  onClose,
-  onSave,
-}: {
-  patientId: string;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const [file, setFile] = useState<File | null>(null);
-  const [caption, setCaption] = useState('');
-  const [category, setCategory] = useState<'clinical' | 'report'>('clinical');
-  const [consent, setConsent] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const toast = useToast();
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setError('');
-    if (!file) {
-      setError('Choose an image to upload.');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Choose an image smaller than 5 MB.');
-      return;
-    }
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setError('Please choose a JPEG, PNG, or WebP image.');
-      return;
-    }
-    setBusy(true);
-    try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error('The image could not be read.'));
-        reader.readAsDataURL(file);
-      });
-      await api('/api/images', {
-        method: 'POST',
-        body: { patientId, caption, category, consent, dataUrl },
-      });
-      toast('Image securely added to your record.');
-      onSave();
-    } catch (problem) {
-      setError(errorMessage(problem));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal title="Add to your health record" onClose={onClose}>
-      <form onSubmit={submit} className="stack">
-        <div className="upload-dropzone">
-          <Upload size={26} />
-          <strong>Choose a clinical photo or report image</strong>
-          <span className="muted small">JPEG, PNG, or WebP · up to 5 MB</span>
-          <input
-            type="file"
-            aria-label="Choose image"
-            accept="image/jpeg,image/png,image/webp"
-            required
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          />
-        </div>
-        <Field label="Description">
-          <input
-            className="input"
-            required
-            minLength={3}
-            maxLength={300}
-            value={caption}
-            onChange={(event) => setCaption(event.target.value)}
-            placeholder="For example, left hand before follow-up"
-          />
-        </Field>
-        <Field label="Type of record">
-          <select
-            className="select"
-            value={category}
-            onChange={(event) => setCategory(event.target.value as typeof category)}
-          >
-            <option value="clinical">Clinical photograph</option>
-            <option value="report">Photographed investigation report</option>
-          </select>
-        </Field>
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            required
-            checked={consent}
-            onChange={(event) => setConsent(event.target.checked)}
-          />
-          <span>
-            I agree to share this image with my clinic for my care. This does not authorize
-            teaching, research, or public use.
-          </span>
-        </label>
-        {error && (
-          <div className="notice notice-error" role="alert">
-            {error}
-          </div>
-        )}
-        <button className="button button-primary" disabled={busy}>
-          {busy ? 'Uploading…' : 'Upload to my record'}
-          <Upload size={16} />
-        </button>
-      </form>
-    </Modal>
   );
 }
 

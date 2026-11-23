@@ -23,10 +23,10 @@ import type {
   PatientClinicalWorkflows,
   ProcedureRecord,
 } from '../../shared/clinical';
-import type { PatientDocument } from '../../shared/documents';
-import { api, formatDate, today, useResource, useSession, useToast } from '../lib';
+import { api, formatDate, today, useSession, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
-import { DocumentUploadModal } from '../components/DocumentsPanel';
+import { DocumentUploadModal } from '../components/PrivateUploadModal';
+import { usePatientDocuments } from '../components/private-upload-helpers';
 import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
 import { ProcedureAppointmentModal } from '../components/ProcedureAppointmentModal';
 import { ProcedurePlanModal } from '../components/ProcedurePlanModal';
@@ -107,9 +107,7 @@ export function ClinicalWorkflowPanel({
 }) {
   const { session } = useSession();
   const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
-  const documents = useResource<PatientDocument[]>(
-    `/api/documents?patientId=${encodeURIComponent(patientId)}`,
-  );
+  const documents = usePatientDocuments(patientId);
   const [action, setAction] = useState<WorkflowAction | null>(null);
   const [busy, setBusy] = useState('');
   const [filter, setFilter] = useState('active');
@@ -881,9 +879,7 @@ function ResultModal({
   investigation,
   ...callbacks
 }: ModalCallbacks & { patientId: string; investigation: Investigation }) {
-  const documents = useResource<PatientDocument[]>(
-    `/api/documents?patientId=${encodeURIComponent(patientId)}`,
-  );
+  const documents = usePatientDocuments(patientId);
   const [selected, setSelected] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [note, setNote] = useState('');
@@ -892,9 +888,13 @@ function ResultModal({
       <DocumentUploadModal
         patientId={patientId}
         onClose={() => setUploading(false)}
-        onUploaded={(document) => {
+        investigationId={investigation.id}
+        onUploaded={(document, sameInvestigation) => {
           setUploading(false);
-          setSelected((ids) => [...ids, document.id]);
+          if (sameInvestigation)
+            setSelected((ids) =>
+              ids.length < 10 && !ids.includes(document.id) ? [...ids, document.id] : ids,
+            );
           void documents.reload();
         }}
       />

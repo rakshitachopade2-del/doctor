@@ -197,6 +197,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)care-plan-creation\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5218' },
     },
+    {
+      name: 'private-upload',
+      testMatch: /(?:^|\/)private-upload\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5219' },
+    },
   ],
   webServer: [
     {
@@ -414,6 +419,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3046 E2E_VITE_PORT=5218 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5218',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3047 E2E_VITE_PORT=5219 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5219',
       reuseExistingServer: false,
       timeout: 60000,
     },

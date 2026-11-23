@@ -1,8 +1,7 @@
 import type { Express } from 'express';
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
-import { get, id, list, nowISO, type DB } from './db.ts';
+import { get, list, type DB } from './db.ts';
 import type { Patient, User } from '../shared/types.ts';
 import type { PatientDocument } from '../shared/documents.ts';
 
@@ -41,72 +40,6 @@ export function registerDocuments(app: Express, context: DocumentsContext) {
     const patientId = owner(req, input.patientId);
     audit(req, 'viewed report document list', 'patient', patientId);
     res.json(list<PatientDocument>(db, 'documents', patientId));
-  });
-  app.post('/api/documents', (req: AuthRequest, res) => {
-    const input = z
-      .object({
-        patientId: z.string().min(1).optional(),
-        title: z.string().trim().min(1).max(200),
-        originalName: z
-          .string()
-          .trim()
-          .min(1)
-          .max(200)
-          .refine(
-            (value) => !/[\\/\u0000-\u001f\u007f]/.test(value),
-            'Use a filename without path separators or control characters',
-          )
-          .refine((value) => /\.pdf$/i.test(value), 'Choose a PDF report'),
-        dataUrl: z.string().max(7 * 1024 * 1024),
-        consent: z.literal(true),
-      })
-      .strict()
-      .parse(req.body);
-    const patientId = owner(req, input.patientId);
-    const user = actor(req);
-    const match = /^data:application\/pdf;base64,([A-Za-z0-9+/]+={0,2})$/.exec(input.dataUrl);
-    if (!match) return fail(400, 'Upload a PDF report.');
-    const bytes = Buffer.from(match[1], 'base64');
-    if (bytes.length > 5 * 1024 * 1024) return fail(413, 'Reports must be 5 MB or smaller.');
-    // These are file-format checks, not a claim of malware scanning. Files are
-    // downloaded as sandboxed attachments; uploaded PDFs are never embedded.
-    if (
-      bytes.toString('base64') !== match[1] ||
-      !/^%PDF-(?:1\.[0-7]|2\.0)[\r\n ]/.test(bytes.subarray(0, 16).toString('latin1')) ||
-      !/%%EOF\s*$/.test(bytes.subarray(-1024).toString('latin1'))
-    )
-      return fail(400, 'The file does not appear to be a complete PDF report.');
-    const key = id();
-    const document: PatientDocument = {
-      id: key,
-      patientId,
-      title: input.title,
-      originalName: input.originalName,
-      mimeType: 'application/pdf',
-      sizeBytes: bytes.length,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
-      createdById: user.id,
-      createdByName: user.name,
-      createdByRole: user.role,
-      createdAt: nowISO(),
-      consent: true,
-      url: `/api/documents/${key}/file`,
-    };
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      db.prepare('INSERT INTO documents(id,patientId,data,bytes) VALUES (?,?,?,?)').run(
-        key,
-        patientId,
-        JSON.stringify(document),
-        bytes,
-      );
-      audit(req, 'uploaded private report document', 'document', key);
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
-    res.status(201).json(document);
   });
   app.get('/api/documents/:id/file', (req: AuthRequest, res) => {
     actor(req);

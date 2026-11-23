@@ -1,0 +1,14 @@
+.private-upload-form input[type='file'] {
+  width: 100%;
+  min-width: 0;
+}
+.private-upload-state dd,
+.private-upload-form p {
+  overflow-wrap: anywhere;
+}
+.private-upload-state dd {
+  margin: 0 0 0.65rem;
+}
+.private-upload-state dt {
+  font-weight: 600;
+}

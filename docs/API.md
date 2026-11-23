@@ -423,6 +423,14 @@ Limits are 5 MiB per selected original and 25 MiB for the whole ZIP, including t
 
 The archive contains `care-summary.json` with the exact stored bytes, `manifest.json`, and selected originals under generated `attachments/` paths. User labels and filenames never become archive paths. The version-one manifest records the frozen copy and summary hash, file labels/MIME/size/hash/upload attribution and verification kind. Files with a saved hash use `saved-sha256`; legacy images lacking one use `computed-at-export`, which does not prove historical byte identity. PDF reports require their saved fingerprint. Original images are not rasterized with overlays; shared annotations remain in the saved JSON. No current-only files or private clinical fields are added, and referenced URLs are never fetched. Repeating the same copy/selection with unchanged originals produces identical bytes, independent of selection order or requesting account. Bundles are generated on demand and not persisted; ordinary JSON download remains available.
 
+## Retrying a private upload
+
+The patient and clinic portals use `POST /images/upload` for photographs and report images and `POST /documents/upload` for PDF reports. Supply `requestId` (UUID), `patientId`, `consent:true`, the base64 `dataUrl` and `sha256` (64 lowercase hexadecimal digits computed over the decoded original bytes). Images also require `caption` and `category` (`clinical` or `report`). PDFs require `title` and `originalName`. Both enforce the existing format and five-megabyte limits.
+
+A first save returns 201 with `{receipt:{requestId,actorId,patientId,kind,file}}`. The kind is `image` or `document`, and `file` contains the original metadata, including the private download URL, uploader, size, fingerprint and creation date. An authorized exact retry returns 200 with the same receipt. A new request ID permits a deliberate second upload of the same file. Reusing an ID for another upload, patient, actor, file type or accepted metadata returns 409 to an otherwise authorized caller.
+
+Image capture can be paused independently of PDF uploads. An authorized retry of a successful image upload still returns its original receipt during a pause. A valid new image upload during the pause receives a durable 403 with `{code:'UPLOAD_NOT_SAVED',requestId,actorId,patientId,kind:'image',sha256,caption,category,mimeType,sizeBytes,consent:true,message}`. Replaying it after resumption returns the same rejection. The portal matches the complete outcome before allowing a new attempt. Authentication errors, collisions and interrupted responses leave a pending request unresolved. The existing `POST /images` and `POST /documents` endpoints continue returning plain file metadata.
+
 ## Private PDF reports
 
 - `GET /documents?patientId=` → `PatientDocument[]` (doctor/administrator or owning patient; reception denied). Patient accounts default to their own record; clinical staff supply `patientId`.

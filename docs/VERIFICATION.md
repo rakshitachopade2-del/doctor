@@ -1,5 +1,15 @@
 # Release verification
 
+## 1.43.0 · Private image and PDF uploads
+
+Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **710 API, backup and recovery tests** and **159 browser journeys** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A Docker engine was unavailable for container runtime verification.
+
+Seven new API test groups cover upload permissions, exact original bytes and attribution, file-format checks, the five-megabyte boundary, request collisions and durable image-pause rejections. Two independent server processes submitting the same request produced one original and one upload audit entry for each format. Changing patient or account access while the writer waited prevented unauthorized saves and replays. Failures at the file, audit, receipt or rejection write rolled back the transaction.
+
+Six browser journeys cover patient and staff uploads, a lost response, mismatched confirmations, a clinic pause, sign-out and navigation during a file read, fingerprint calculation or request. A recovered investigation PDF was available in the patient record and was automatically selected only in its original investigation. The mobile checks exercised accessibility and action controls at a viewport width of 320 pixels.
+
+The production smoke test compared the downloaded image and PDF with their original bytes, checked the upload audits and verified both files in a saved-summary ZIP. A second intentional submission of identical image bytes produced a distinct record. After a backup and restore, the owning patient recovered both receipts and downloaded both files while image capture was paused. The restored database held one image and one PDF, and the rejected image request still returned its original rejection after capture resumed.
+
 ## 1.42.0 · Care-plan creation
 
 Verified locally on **23 November 2026** with Node.js **24.22.3** and Google Chrome. All **703 API, backup and recovery tests** and **153 browser journeys** passed. Three existing clinic journeys also passed again after the final keyboard-focus adjustment. A connection reset interrupted the large-timesheet check in an earlier parallel run. The complete API suite passed on rerun after the browser servers stopped.

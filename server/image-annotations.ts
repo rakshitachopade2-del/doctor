@@ -35,15 +35,6 @@ interface AnnotationPublication {
 }
 const fingerprint = (bytes: Uint8Array | string) =>
   createHash('sha256').update(bytes).digest('hex');
-export function imageProvenance(bytes: Uint8Array, user: User) {
-  return {
-    sha256: fingerprint(bytes),
-    sizeBytes: bytes.byteLength,
-    createdById: user.id,
-    createdByName: user.name,
-    createdByRole: user.role,
-  };
-}
 
 function safeVersion(
   version: StoredVersion,

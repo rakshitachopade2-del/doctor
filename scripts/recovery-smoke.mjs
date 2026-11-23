@@ -483,32 +483,28 @@ async function rehearseRecovery() {
       'base64',
     );
     const pdfBytes = Buffer.from('%PDF-1.7\nSynthetic recovery report only.\n%%EOF\n');
-    const image = await call(
-      source,
-      '/images',
-      patient,
-      'POST',
-      {
-        caption: 'Synthetic recovery photograph',
-        category: 'clinical',
-        consent: true,
-        dataUrl: `data:image/png;base64,${imageBytes.toString('base64')}`,
-      },
-      201,
-    );
-    const document = await call(
-      source,
-      '/documents',
-      patient,
-      'POST',
-      {
-        title: 'Synthetic recovery report',
-        originalName: 'synthetic-report.pdf',
-        consent: true,
-        dataUrl: `data:application/pdf;base64,${pdfBytes.toString('base64')}`,
-      },
-      201,
-    );
+    const imageCommand = {
+      patientId,
+      requestId: randomUUID(),
+      caption: 'Synthetic recovery photograph',
+      category: 'clinical',
+      consent: true,
+      sha256: createHash('sha256').update(imageBytes).digest('hex'),
+      dataUrl: `data:image/png;base64,${imageBytes.toString('base64')}`,
+    };
+    const pdfCommand = {
+      patientId,
+      requestId: randomUUID(),
+      title: 'Synthetic recovery report',
+      originalName: 'synthetic-report.pdf',
+      consent: true,
+      sha256: createHash('sha256').update(pdfBytes).digest('hex'),
+      dataUrl: `data:application/pdf;base64,${pdfBytes.toString('base64')}`,
+    };
+    const imageUpload = await call(source, '/images/upload', patient, 'POST', imageCommand, 201);
+    const pdfUpload = await call(source, '/documents/upload', patient, 'POST', pdfCommand, 201);
+    const image = imageUpload.receipt.file;
+    const document = pdfUpload.receipt.file;
     const intakePath = '/intakes/submit';
     const intakeCommand = {
       patientId,
@@ -563,8 +559,18 @@ async function rehearseRecovery() {
     const sentMessage = await call(source, messagePath, patient, 'POST', messageCommand, 201);
     const { modules } = await call(source, '/settings', admin);
     await call(source, '/settings', admin, 'PATCH', {
-      modules: { ...modules, intake: false, followUp: false },
+      modules: { ...modules, intake: false, followUp: false, images: false },
     });
+    const pausedImageCommand = { ...imageCommand, requestId: randomUUID() };
+    const pausedImage = await call(
+      source,
+      '/images/upload',
+      patient,
+      'POST',
+      pausedImageCommand,
+      403,
+    );
+    assert.equal(pausedImage.code, 'UPLOAD_NOT_SAVED');
     const pausedIntakeCommand = {
       ...intakeCommand,
       concern: 'Unsubmitted synthetic history',
@@ -710,6 +716,14 @@ async function rehearseRecovery() {
       email: 'recovery-admin@example.test',
       password,
     });
+    assert.deepEqual(
+      await call(target, '/images/upload', newPatient, 'POST', imageCommand),
+      imageUpload,
+    );
+    assert.deepEqual(
+      await call(target, '/documents/upload', newPatient, 'POST', pdfCommand),
+      pdfUpload,
+    );
     assert.deepEqual(await call(target, `/images/${image.id}/file`, newPatient), imageBytes);
     assert.deepEqual(await call(target, `/documents/${document.id}/file`, newPatient), pdfBytes);
     assert.deepEqual(
@@ -824,6 +838,18 @@ async function rehearseRecovery() {
     );
     await call(target, '/settings', newAdmin, 'PATCH', { modules });
     assert.deepEqual(
+      await call(target, '/images/upload', newPatient, 'POST', pausedImageCommand, 403),
+      pausedImage,
+    );
+    for (const table of ['images', 'documents'])
+      assert.equal(
+        restoredDb
+          .prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE patientId=?`)
+          .get(patientId).count,
+        1,
+      );
+
+    assert.deepEqual(
       await call(target, intakePath, newPatient, 'POST', pausedIntakeCommand, 403),
       pausedIntake,
     );
@@ -845,6 +871,9 @@ async function rehearseRecovery() {
     for (const projection of [restoredSummary, restoredClinicalRecord]) {
       const json = JSON.stringify(projection);
       for (const value of [
+        imageCommand.requestId,
+        pdfCommand.requestId,
+        pausedImageCommand.requestId,
         intakeCommand.requestId,
         pausedIntakeCommand.requestId,
         pausedIntakeCommand.concern,
