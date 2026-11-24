@@ -21,6 +21,21 @@ jobs:
       - run: npm run build
       - run: npm run test:production
       - run: npm run test:recovery
+  container:
+    name: Production image and backup restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: docker compose config --quiet
+      - run: docker build --tag derma-platform:verify .
+      - name: Exercise the packaged application
+        run: node scripts/production-smoke.mjs --image derma-platform:verify
+      - name: Back up and restore synthetic clinic data inside the image
+        run: node scripts/recovery-smoke.mjs --image derma-platform:verify
   browser:
     name: Browser group ${{ matrix.group }}/11
     runs-on: ubuntu-latest

@@ -267,9 +267,10 @@ To check the container locally:
 ```sh
 docker build -t derma-platform:verify .
 npm run test:production -- --image derma-platform:verify
+npm run test:recovery -- --image derma-platform:verify
 ```
 
-The container check publishes only to a random loopback port and removes its disposable container and anonymous data volume after verification. The production image build and startup were verified locally on 10 November 2026. These checks do not provision public hosting, HTTPS certificates, or external providers.
+GitHub Actions runs both checks against the same image on a disposable Linux runner. The production rehearsal binds a random loopback port and exercises the packaged application. The recovery rehearsal runs inside a separate container, opens a restored synthetic database and checks the original records and credentials. Both containers and their temporary data are removed after verification.
 
 Care-summary JSON exports and printed pages contain private patient-facing care information. They omit internal notes and original file bytes; they are not a full database or internal-record export. Download permission is checked for every request. Live downloads and new saves require a current reviewed revision. Saved-copy downloads return the original bytes even after the live record changes; these historical copies may be outdated, and their image/PDF references still require current authorization.
 
