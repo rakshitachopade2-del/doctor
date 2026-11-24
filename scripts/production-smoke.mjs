@@ -3218,17 +3218,44 @@ try {
   assert.equal(collision.bookingOutcome, undefined);
   const otherActor = await ordinaryWrite(ordinaryPath, ordinaryCommand, verifiedHeaders, 409);
   assert.equal(otherActor.bookingOutcome, undefined);
-  await ordinaryWrite(
-    `/doctors/${ordinaryDoctor.id}`,
-    {
-      ...ordinaryDoctor,
-      name: 'Renamed synthetic booking doctor',
-      fee: 850,
-    },
-    verifiedHeaders,
-    200,
-    'PATCH',
-  );
+  const doctorBase = `/doctors/${ordinaryDoctor.id}`;
+  const doctorEditPath = doctorBase + '/profile-changes';
+  const editSource = await reminderRead(doctorBase + '/profile-context');
+  assert.deepEqual(editSource.doctor, ordinaryDoctor);
+  const proposedProfile = {
+    ...ordinaryProfile,
+    color: ordinaryDoctor.color,
+    name: 'Renamed synthetic booking doctor',
+    fee: 850,
+  };
+  const editCommand = {
+    profile: proposedProfile,
+    expectedRevision: editSource.revision,
+    requestId: randomUUID(),
+    reviewedConfirmed: true,
+  };
+  const doctorChange = await ordinaryWrite(doctorEditPath, editCommand);
+  assert.equal(doctorChange.receipt.actorId, verified.user.id);
+  assert.equal(doctorChange.receipt.doctorId, ordinaryDoctor.id);
+  assert.equal(doctorChange.receipt.requestId, editCommand.requestId);
+  assert.equal(doctorChange.receipt.expectedRevision, editSource.revision);
+  assert.notEqual(doctorChange.receipt.revision, editSource.revision);
+  assert.deepEqual(doctorChange.receipt.before, ordinaryDoctor);
+  assert.deepEqual(doctorChange.receipt.after, { ...proposedProfile, id: ordinaryDoctor.id });
+  const conflictingEdit = {
+    ...editCommand,
+    requestId: randomUUID(),
+    profile: { ...proposedProfile, fee: 350, qualifications: 'Concurrent synthetic edit' },
+  };
+  const refusedEdit = await ordinaryWrite(doctorEditPath, conflictingEdit, verifiedHeaders, 409);
+  assert.equal(refusedEdit.code, 'DOCTOR_PROFILE_CHANGED');
+  assert.deepEqual(refusedEdit.profile, conflictingEdit.profile);
+  assert.equal(refusedEdit.requestId, conflictingEdit.requestId);
+  const editContext = await reminderRead(doctorBase + '/profile-context');
+  assert.deepEqual(editContext, {
+    doctor: doctorChange.receipt.after,
+    revision: doctorChange.receipt.revision,
+  });
   const movedOrdinary = await ordinaryWrite(
     `/appointments/${ordinaryBooked.appointment.id}`,
     {
@@ -3461,6 +3488,27 @@ try {
     200,
     'PATCH',
   );
+  assert.deepEqual(
+    await ordinaryWrite(doctorEditPath, editCommand, verifiedHeaders, 200),
+    doctorChange,
+  );
+  assert.deepEqual(
+    await ordinaryWrite(doctorEditPath, conflictingEdit, verifiedHeaders, 409),
+    refusedEdit,
+  );
+  const editHistory = await reminderRead(doctorBase + '/profile-history');
+  assert.equal(editHistory.total, 2);
+  assert.deepEqual(
+    editHistory.items.map((entry) => entry.source),
+    ['legacy', 'reviewed'],
+  );
+  assert.deepEqual(editHistory.items[1].before, ordinaryDoctor);
+  assert.deepEqual(editHistory.items[1].after, doctorChange.receipt.after);
+  assert.equal(editHistory.items[0].after.fee, 950);
+  for (const path of ['/profile-context', '/profile-history']) {
+    const response = await fetch(`${base}/api${doctorBase}${path}`, { headers: patientHeaders });
+    assert.equal(response.status, 403);
+  }
   const staleMove = await ordinaryWrite(
     `${moveBase}/reschedules`,
     staleMoveCommand,
@@ -5133,7 +5181,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, original doctor profile recovery after a fee change and booking pause, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, original doctor profile recovery after a fee change and booking pause, retained doctor edit confirmations and conflicting edits, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

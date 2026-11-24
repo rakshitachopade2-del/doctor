@@ -996,11 +996,40 @@ async function rehearseRecovery() {
       expectedRevision: originalWalkInAllergies.revision,
       requestId: randomUUID(),
     });
-    const updatedDoctor = await call(source, '/doctors/' + doctor.id, admin, 'PATCH', {
-      ...doctor,
+    const doctorEditBase = '/doctors/' + doctor.id;
+    const doctorEditPath = doctorEditBase + '/profile-changes';
+    const doctorEditSource = await call(source, doctorEditBase + '/profile-context', admin);
+    assert.deepEqual(doctorEditSource.doctor, doctor);
+    const doctorEditCommand = {
+      profile: {
+        ...doctorProfile,
+        color: doctor.color,
+        qualifications: 'Reviewed synthetic qualifications',
+      },
+      expectedRevision: doctorEditSource.revision,
+      requestId: randomUUID(),
+      reviewedConfirmed: true,
+    };
+    const editedProfile = await call(source, doctorEditPath, admin, 'POST', doctorEditCommand, 201);
+    assert.deepEqual(editedProfile.receipt.before, doctor);
+    assert.deepEqual(editedProfile.receipt.after, { ...doctorEditCommand.profile, id: doctor.id });
+    const staleDoctorEdit = {
+      ...doctorEditCommand,
+      requestId: randomUUID(),
+      profile: { ...doctorEditCommand.profile, title: 'Superseded synthetic title' },
+    };
+    const rejectedEdit = await call(source, doctorEditPath, admin, 'POST', staleDoctorEdit, 409);
+    assert.equal(rejectedEdit.code, 'DOCTOR_PROFILE_CHANGED');
+    const updatedDoctor = await call(source, doctorEditBase, admin, 'PATCH', {
+      ...editedProfile.receipt.after,
       qualifications: 'Updated synthetic qualifications',
       languages: ['Hindi', 'English'],
     });
+    const doctorEditHistory = await call(source, doctorEditBase + '/profile-history', admin);
+    assert.deepEqual(
+      doctorEditHistory.items.map((entry) => entry.source),
+      ['legacy', 'reviewed'],
+    );
     const preservedCredential = db
       .prepare('SELECT userId,id,secret,enabledAt FROM mfaCredentials')
       .get();
@@ -1112,6 +1141,21 @@ async function rehearseRecovery() {
       await call(target, doctorCreationPath, newAdmin, 'POST', doctorCommand),
       doctorCreation,
     );
+    assert.deepEqual(
+      await call(target, doctorEditPath, newAdmin, 'POST', doctorEditCommand),
+      editedProfile,
+    );
+    assert.deepEqual(
+      await call(target, doctorEditPath, newAdmin, 'POST', staleDoctorEdit, 409),
+      rejectedEdit,
+    );
+    assert.deepEqual(
+      await call(target, doctorEditBase + '/profile-history', newAdmin),
+      doctorEditHistory,
+    );
+    const restoredEditSource = await call(target, doctorEditBase + '/profile-context', newAdmin);
+    assert.deepEqual(restoredEditSource.doctor, updatedDoctor);
+    assert.notEqual(restoredEditSource.revision, editedProfile.receipt.revision);
     const linkedAdmin = (await call(target, '/session', newAdmin)).user;
     assert.equal(linkedAdmin.doctorId, doctor.id);
     const doctorAudit = await call(
@@ -1626,7 +1670,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, role-safe walk-in registration receipts after later corrections, staff account creation outcomes after a mandatory credential change, the original doctor profile after a public correction and booking pause, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, role-safe walk-in registration receipts after later corrections, staff account creation outcomes after a mandatory credential change, doctor profile creation and edit confirmations, edit history and a superseded edit after a public correction and booking pause, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

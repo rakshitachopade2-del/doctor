@@ -16,7 +16,7 @@ import {
 } from './patient-profile.ts';
 import { date, email, required, short, text } from './validation.ts';
 import { registerStaffAccountCreation } from './staff-account-creation.ts';
-import { doctorProfileFields } from '../shared/doctor-profile-creation.ts';
+import { registerDoctorProfileEdits } from './doctor-profile-edit.ts';
 import { registerDoctorProfileCreation } from './doctor-profile-creation.ts';
 import { registerPatientRegistration } from './patient-registration.ts';
 import { registerCarePlanCreation } from './care-plan-creation.ts';
@@ -622,14 +622,12 @@ export function createApp(options: AppOptions = {}) {
     audit,
     fail,
   });
-  app.patch('/api/doctors/:id', (req: AuthRequest, res) => {
-    actor(req, ['admin']);
-    const key = String(req.params.id);
-    if (!get(db, 'doctors', key)) fail(404, 'Doctor not found.');
-    const doctor = { ...doctorProfileFields.parse(req.body), id: key };
-    db.prepare('UPDATE doctors SET data=? WHERE id=?').run(JSON.stringify(doctor), key);
-    audit(req, 'updated doctor profile', 'doctor', key);
-    res.json(doctor);
+  registerDoctorProfileEdits(app, {
+    db,
+    currentSessionUser,
+    transaction: scheduling.transaction,
+    audit,
+    fail,
   });
   registerClinicConfiguration(app, { db, actor, audit, fail });
   app.get('/api/slots', (req: AuthRequest, res) => {

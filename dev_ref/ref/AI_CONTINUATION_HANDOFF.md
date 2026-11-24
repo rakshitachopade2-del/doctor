@@ -1,6 +1,6 @@
 # Dermatology platform: complete AI continuation handoff
 
-**Continuation checkpoint, 24 November 2026 (v1.53.0).** Doctor-profile creation in section 7F now saves the public profile, audit and reviewed confirmation together. Retrying returns the original profile ID and public details, including after later edits. On the next “continue,” take **administrator edits to existing doctor profiles** (Settings and `PATCH /api/doctors/:id`). On a disposable v1.52 database, two administrators opened the same profile. Saving a fee change from the older copy silently reverted the first administrator’s qualification change. An injected update-audit failure also returned 500 after changing the public fee. Address conflicting edits, atomic updates and recovery of the original confirmation. Preserve historical booking fees and clinician attribution, existing account links, weekly schedules and booking status. [Verification](../../docs/VERIFICATION.md)
+**Continuation checkpoint, 24 November 2026 (v1.54.0).** Administrator edits to published doctor profiles in section 7F now use a reviewed revision, atomic update and audit, private attributed history and exact retry confirmation. Sections 7A–D and the four administrative creation/edit paths in 7F have shipped. On the next “continue,” take **clinician creation of investigation orders** in section 7E. On a disposable v1.53 database, submitting the same order twice after a simulated lost confirmation returned two different IDs, both visible in the patient's record. Limit the change to order creation and recovery. Preserve deliberate separately reviewed orders, current linked-clinician authority, patient access and the existing result/review workflow. [Verification](../../docs/VERIFICATION.md)
 
 Prepared on **20 November 2026**, Asia/Kolkata, for a new AI chat taking over this repository.
 
@@ -316,8 +316,7 @@ Consider one coherent upload release or separate image/PDF releases if needed. B
 
 Lower-priority items deserve evidence-based review, not automatic blanket rewrites:
 
-- Ordinary invoices and payments already have basic transaction/idempotency infrastructure. Inspect actor binding and fresh authorization under lock before claiming they are fully equivalent to the newer commands.
-- `server/operations.ts` invoice creation and `InvoiceForm` in `src/pages/OperationsPages.tsx` are known review points: current invoice retries are not all actor-bound, success checks are limited, and some UI errors are treated as definitive after an unknown outcome without durable command proof.
+- Completed in v1.44 and v1.45. Staff invoice issuance and payment recording now have reviewed, actor-bound commands and recovery of original confirmations. See the release verification for the compatibility routes and existing invoices.
 - Check-in/report submissions, investigation results, procedure agreements and remaining older generic clinical forms may still need exact retry/navigation review. Their semantics differ: a same-day check-in is intentionally a correction/update, while an appended result is a new event. Do not copy one idempotency model blindly.
 - Completed in v1.46. The patient portal uses `POST /api/check-ins/submit`. Recovery preserves the original report and its clinician review state. An intentional correction checks the version the patient saw and generates one update. The older plain check-in route remains available to compatibility clients.
 - Completed in v1.47. Both clinician review entry points recover the original review, report versions and authorship via an account-bound request. Later corrections remain unreviewed until a clinician deliberately reviews them. The compatibility writer still accepts the original optimistic revision contract.
@@ -328,15 +327,15 @@ Lower-priority items deserve evidence-based review, not automatic blanket rewrit
 - Look for any remaining independently reproducible draft-loss, duplicate-write, stale-authorization or private-response leak. Fix concrete material defects, then stop; do not invent endless hardening releases.
 - Large single-clinic list/storage limits and performance can be documented if no deployment scale is specified. Multi-clinic architecture is a separate product decision.
 
-### F. Administrative creation and doctor-profile review candidates
+### F. Administrative creation and doctor-profile edits
 
-The handoff's independent source review also identified these older paths. They are real candidates to include in the final triage, not unfinished changes already being worked on:
+Releases v1.51–v1.54 addressed the four administrative workflows identified in the original review.
 
 - Completed in v1.51. Staff patient registration now commits the chart and audit together on both routes. Reviewed registrations also preserve the original role-appropriate chart snapshot and recover the same ID. Existing charts retain their original records and IDs.
 - Completed in v1.52. Both staff-account creation routes write the user and audit atomically. The reviewed route saves the original access flags and linkage and supports a password-free outcome check. Existing users keep their IDs, credentials and audit history.
 - Completed in v1.53. Both doctor-profile creation routes save the public profile and audit atomically. The reviewed route recovers the original profile even after a later public edit or booking pause. Distinct doctors may share the same public details.
 - This is **not** the public authentication registration flow: patient/account/session/audit creation for public signup was already made atomic in the authentication work.
-- Doctor-profile editing in `src/pages/SettingsPages.tsx` still submits a whole-profile unversioned PATCH and writes the audit separately. Overlapping edits can silently restore stale fields. The next release should cover current profile review, conflict handling, an atomic update and audit, and exact retries.
+- Completed in v1.54. Settings reviews the current doctor-profile revision, reconciles concurrent edits field by field and can recover the original confirmation. Both edit routes update the public record, private attributed history and audit atomically for a change. Old unversioned PATCH clients still submit a full replacement.
 - Preserve historical appointment fees/names and clinical author attribution. Profile editing must remain independent of already-versioned booking pause, weekly schedules, time off and clinic configuration.
 - Existing SQL-paginated directory screens are implemented, but some legacy booking selectors still load complete patient arrays. Full patient histories and care-summary construction also accumulate data before some size checks. Document or address these limits based on evidence; they do not by themselves justify replacing SQLite.
 

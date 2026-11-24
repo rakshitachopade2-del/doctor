@@ -270,7 +270,11 @@ test('editing before confirmation retains zero values and sends only the correct
   const row = page.locator('[data-doctor-id="' + result.receipt.doctor.id + '"]');
   await row.getByRole('button', { name: 'Edit profile', exact: true }).click();
   await field(page, 'Professional title').fill('Revised consultant title');
-  await button(page, 'Save doctor').click();
+  await button(page, 'Review changes').click();
+  await checkbox(page).check();
+  await button(page, 'Save profile changes').click();
+  await expect(title(page, 'Doctor profile updated')).toBeVisible();
+  await button(page, 'Done').click();
   await expect(dialog(page)).toHaveCount(0);
   const [current] = await directory(admin, final.name);
   expect(current).toMatchObject({ ...result.receipt.doctor, title: 'Revised consultant title' });

@@ -1,4 +1,4 @@
-:is(.patient-registration, .reviewed-account-form, .doctor-profile-creation) {
+:is(.patient-registration, .reviewed-account-form, .doctor-profile-creation, .doctor-profile-edit) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -16,13 +16,41 @@
   white-space: pre-wrap;
 }
 @media (max-width: 480px) {
-  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation) .modal-actions {
+  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation, .doctor-profile-edit)
+    .modal-actions {
     flex-direction: column-reverse;
     align-items: stretch;
   }
-  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation) input,
-  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation) select {
+  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation, .doctor-profile-edit)
+    input,
+  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation, .doctor-profile-edit)
+    select {
     min-width: 0;
     max-width: 100%;
   }
+}
+
+.profile-choice,
+.profile-ordered-list {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+.profile-list-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: end;
+}
+.profile-list-entry textarea {
+  min-height: 2.5rem;
+}
+.profile-history-item {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.profile-value-list {
+  margin: 0;
+  padding-left: 1.4rem;
 }

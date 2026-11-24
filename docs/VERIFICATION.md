@@ -1,5 +1,17 @@
 # Release verification
 
+## 1.54.0 · Concurrent edits to doctor profiles
+
+Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **792 API, backup and recovery tests** and **219 browser journeys across 48 projects** passed. TypeScript, the production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A local Docker engine was unavailable for the container runtime check.
+
+On v1.53, two administrators opened the same public profile. One corrected the qualifications. When the second saved a fee change from the older copy, the original qualifications reappeared. An injected audit failure also returned 500 after a changed fee was already public. The reviewed editor now checks its source revision under the write lock. Both edit routes save the profile change, its attributed history and the update audit together.
+
+Seven new API tests cover independent writers, permission changes, unchanged proposals, revisions that changed away and back, audit and history failures, restart and paginated administrator history. An interrupted edit recovered the original before/after values after a later change. Prior appointments retained their booked clinician and fee, and staff accounts retained their doctor links.
+
+Five Chrome journeys exercise two administrators making different edits, choosing between conflicting values field by field, recovering a lost reply, refreshing after a profile changed away and back, and recovering a pending edit after navigation while discarding it on sign-out. A fee-only edit preserved embedded commas, list order and mixed line endings in the stored profile through a later edit and recovery. The conflict, review, original confirmation and history screens passed automated accessibility checks at 320 pixels. The tests exposed low-contrast initials on dark profile colors. Initials now use a foreground selected for the profile background.
+
+The production smoke test changed a fee, refused an older edit, and recovered the original confirmation after a compatibility client changed the fee again. Backup and restore retained the later public values, both history entries, the saved edit receipt, the stale rejection and the linked administrator. An upgrade from a v1.53 database preserved three profiles, five account records, 42 appointments, the creation receipt and the existing audits. The edit history began empty, then attributed the first two reviewed changes to their respective administrators.
+
 ## 1.53.0 · Doctor-profile creation
 
 Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **785 API, backup and recovery tests** and **214 browser journeys across 47 projects** passed. The production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. Docker runtime verification was unavailable because this machine had no running engine. After timeouts and a local connection reset under heavy load, the complete passing runs used smaller browser groups and three concurrent API test files.

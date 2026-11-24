@@ -2,20 +2,11 @@ import { useLocation, useSearchParams, Link } from 'react-router-dom';
 import { useState, type FormEvent } from 'react';
 import { Check, CircleOff } from 'lucide-react';
 import { api, useResource, useSession, useToast } from '../lib';
-import {
-  Avatar,
-  Badge,
-  Card,
-  ErrorState,
-  Field,
-  Loading,
-  Modal,
-  PageHeader,
-} from '../components/ui';
+import { Avatar, Badge, Card, ErrorState, Field, Loading, PageHeader } from '../components/ui';
 import type { Doctor, User, Patient } from '../../shared/types';
 import { ClinicConfigurationPanel } from '../components/ClinicConfigurationPanel';
 import { DoctorProfileCreationControl } from '../components/DoctorProfileCreationModal';
-import { DoctorProfileForm, readDoctorProfile } from '../components/DoctorProfileForm';
+import { DoctorProfileEditControls } from '../components/DoctorProfileEditModal';
 import { DoctorBookingStatusControls } from '../components/DoctorBookingStatus';
 import { useAppointmentBookingData } from '../components/appointment-booking-helpers';
 import { StaffAccountCreationControl } from '../components/StaffAccountCreationModal';
@@ -53,9 +44,6 @@ export function SettingsPage() {
       throw new Error('The workspace accounts could not be loaded.');
     return value;
   });
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<Doctor | null>(null);
   const [params, setParams] = useSearchParams();
   const sections = [
     ['clinic', 'Clinic profile'],
@@ -69,22 +57,6 @@ export function SettingsPage() {
     const next = new URLSearchParams(params);
     next.set('tab', key);
     setParams(next);
-  }
-  async function saveDoctor(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!editing) return;
-    const body = readDoctorProfile(e.currentTarget);
-    setBusy(true);
-    try {
-      await api(`/api/doctors/${editing.id}`, { method: 'PATCH', body });
-      await doctors.reload();
-      setEditing(null);
-      toast('Doctor profile saved.');
-    } catch (e) {
-      toast((e as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
   }
   return (
     <>
@@ -165,12 +137,20 @@ export function SettingsPage() {
                       </small>
                     </div>
                     <div className="doctor-booking-team-tools">
-                      <button
-                        className="button button-secondary button-small"
-                        onClick={() => setEditing(d)}
-                      >
-                        Edit profile
-                      </button>
+                      {session.user?.role === 'admin' && !session.user.mustChangePassword && (
+                        <DoctorProfileEditControls
+                          key={JSON.stringify([
+                            location.key,
+                            session.user.id,
+                            session.csrfToken,
+                            d.id,
+                          ])}
+                          actorId={session.user.id}
+                          doctorId={d.id}
+                          name={d.name}
+                          onSaved={() => void doctors.reload()}
+                        />
+                      )}
                       <DoctorBookingStatusControls
                         doctor={d}
                         onSaved={() => void doctors.reload()}
@@ -302,15 +282,6 @@ export function SettingsPage() {
             </Card>
           ))}
         </div>
-      )}
-      {editing && (
-        <Modal title="Edit doctor profile" onClose={() => setEditing(null)}>
-          <DoctorProfileForm values={editing} onSubmit={saveDoctor}>
-            <button className="button button-primary" disabled={busy}>
-              {busy ? 'Saving…' : 'Save doctor'}
-            </button>
-          </DoctorProfileForm>
-        </Modal>
       )}
     </>
   );

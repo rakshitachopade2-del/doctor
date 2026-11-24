@@ -39,6 +39,17 @@ export function Card({ children, className = '' }: { children: ReactNode; classN
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: string }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
+function avatarForeground(color?: string) {
+  if (!color || !/^#[a-f0-9]{6}$/i.test(color)) return undefined;
+  const channels = [1, 3, 5].map((start) => {
+    const channel = parseInt(color.slice(start, start + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  // The default brown initials have sufficient contrast on the light profile colors.
+  if (luminance >= 0.55) return undefined;
+  return luminance < 0.18 ? '#ffffff' : '#000000';
+}
 export function Avatar({
   name,
   color,
@@ -53,6 +64,7 @@ export function Avatar({
       className={`avatar avatar-${size}`}
       style={{
         background: color,
+        color: avatarForeground(color),
         ...(typeof size === 'number' ? { width: size, height: size } : {}),
       }}
       aria-hidden="true"

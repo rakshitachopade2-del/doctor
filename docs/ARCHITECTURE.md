@@ -65,6 +65,7 @@ flowchart LR
 | `server/identity.ts`                           | Account lifecycle, session metadata migration/revocation, recovery grants                  |
 | `server/staff-account-creation.ts`             | Atomic staff creation and password-free recovery of the original account confirmation      |
 | `server/doctor-profile-creation.ts`            | Atomic public doctor profile creation and original profile receipts                        |
+| `server/doctor-profile-edit.ts`                | Doctor-profile revisions, attributed changes, private history and retained edit outcomes   |
 | `server/private-upload.ts`                     | Image and PDF validation, authorized saves, original attribution and upload receipts       |
 | `server/documents.ts`                          | Immutable PDF storage, patient-scoped report lists and attachment downloads                |
 | `server/procedure-catalogue.ts`                | Private versioned procedure templates, publication, availability and creation receipts     |
@@ -250,6 +251,10 @@ Patients see only their own requests. Staff receive operational contact informat
 ## Account lifecycle and recovery
 
 An administrator creates a doctor profile separately from creating an account. `server/doctor-profile-creation.ts` checks the current session and administrator role inside an immediate SQLite transaction. Both creation routes write the public profile and its audit together. The reviewed route also writes the request UUID, actor ID, doctor ID and original normalized profile to the immutable `doctorProfileCreationCommands` table. Exact retries compare the submitted fields with that stored snapshot. A public profile edit, a fee change or a booking pause can then proceed independently of creation recovery. Existing profiles acquire no retrospective receipt during upgrade.
+
+`server/doctor-profile-edit.ts` computes each doctor's edit revision from the normalized stored profile and the ID of its most recent change. A profile changed away and back gets a new revision. Within one SQLite transaction, a reviewed edit checks the administrator and source revision, updates the profile, appends the before/after snapshots and editor to `doctorProfileChanges`, writes the audit, and stores the outcome in `doctorProfileEditCommands`. The private command row binds the actor, doctor, reviewed source and proposed fields to the original change or a definitive refusal. A compatibility PATCH shares the change history. A no-op PATCH retains the update audit without advancing the revision.
+
+Settings compares the originally loaded profile, the administrator's draft and the latest profile before resubmission. It keeps edits to different fields and requires a choice for each field changed differently by both administrators. Specialty and language lists retain their order and entry boundaries. Unconfirmed submissions remain in memory for that doctor and signed-in tab. History reads are restricted to administrators and audited. Public directory and appointment responses omit the edit evidence.
 
 `server/staff-account-creation.ts` takes the SQLite write lock and rechecks the administrator's session, role, email availability and profile linkage before creating an account. Both creation routes commit the user, sign-in verifier and audit together. The reviewed route also writes an immutable entry in `staffAccountCreationCommands`. Its UUID and actor ID bind a digest of normalized account details to either the original safe account snapshot or a final refusal. The evidence contains no password or password-derived verifier. Opening an older database adds the table and preserves its existing users and audits.
 
