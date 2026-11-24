@@ -94,7 +94,11 @@ test('admin configures a doctor, provisions staff, and links a verified patient 
   await dialog.getByLabel('Qualifications').fill('Demo qualification');
   await dialog.getByLabel('Focus areas').fill('Skin care, Follow-ups');
   await dialog.getByLabel('About the doctor').fill('Synthetic profile for the browser test.');
-  await dialog.getByRole('button', { name: 'Save doctor' }).click();
+  await dialog.getByRole('button', { name: 'Review profile', exact: true }).click();
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button', { name: 'Create doctor profile', exact: true }).click();
+  await expect(dialog.getByRole('heading', { name: 'Doctor profile created' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('Dr. Browser Test', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Add team member' }).click();

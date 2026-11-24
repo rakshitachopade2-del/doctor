@@ -3146,7 +3146,8 @@ try {
     assert.equal(response.status, status, `Unexpected ordinary-booking response: ${path}`);
     return response.json();
   }
-  const ordinaryDoctor = await ordinaryWrite('/doctors', {
+  const doctorCreationPath = '/doctors/create';
+  const ordinaryProfile = {
     name: 'Synthetic ordinary booking doctor',
     title: 'Dermatologist',
     qualifications: 'Synthetic only',
@@ -3154,7 +3155,20 @@ try {
     experience: 1,
     fee: 350,
     bio: 'Disposable booking recovery verification.',
-    languages: ['English'],
+    languages: ['English', 'Hindi'],
+  };
+  const doctorProfileCommand = {
+    ...ordinaryProfile,
+    requestId: randomUUID(),
+    reviewedConfirmed: true,
+  };
+  const profileCreation = await ordinaryWrite(doctorCreationPath, doctorProfileCommand);
+  const ordinaryDoctor = profileCreation.receipt.doctor;
+  assert.match(ordinaryDoctor.id, /^[a-f0-9-]{36}$/);
+  assert.deepEqual(profileCreation.receipt, {
+    actorId: verified.user.id,
+    requestId: doctorProfileCommand.requestId,
+    doctor: { ...ordinaryProfile, id: ordinaryDoctor.id, color: '#b3c7aa' },
   });
   await ordinaryWrite(
     `/schedules/${ordinaryDoctor.id}`,
@@ -3238,6 +3252,33 @@ try {
     });
   }
   await ordinaryAcceptance(false);
+  assert.deepEqual(
+    await ordinaryWrite(doctorCreationPath, doctorProfileCommand, verifiedHeaders, 200),
+    profileCreation,
+  );
+  const publicProfiles = await (await fetch(`${base}/api/doctors`)).json();
+  const currentDoctor = publicProfiles.find((entry) => entry.id === ordinaryDoctor.id);
+  assert.deepEqual(currentDoctor, {
+    ...ordinaryDoctor,
+    name: 'Renamed synthetic booking doctor',
+    fee: 850,
+    appointmentDurationMinutes: 30,
+    acceptingNewBookings: false,
+  });
+  const profileCollision = await ordinaryWrite(
+    doctorCreationPath,
+    { ...doctorProfileCommand, languages: [...doctorProfileCommand.languages].reverse() },
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(profileCollision.receipt, undefined);
+  const deniedProfile = await ordinaryWrite(
+    doctorCreationPath,
+    doctorProfileCommand,
+    patientHeaders,
+    403,
+  );
+  assert.equal(deniedProfile.receipt, undefined);
   const movedReplay = await ordinaryWrite(ordinaryPath, ordinaryCommand, patientHeaders, 200);
   assert.deepEqual(movedReplay.booking, ordinaryBooked.booking);
   assert.deepEqual(movedReplay.receipt, ordinaryBooked.receipt);
@@ -4849,6 +4890,19 @@ try {
   );
   assert.equal(deniedRegistration.receipt, undefined);
   const teamCreatePath = '/users/create';
+  const accountsBeforeProfile = await reminderRead('/accounts');
+  const anotherProfile = await ordinaryWrite(doctorCreationPath, {
+    ...doctorProfileCommand,
+    requestId: randomUUID(),
+  });
+  const otherDoctorId = anotherProfile.receipt.doctor.id;
+  assert.notEqual(otherDoctorId, ordinaryDoctor.id);
+  assert.deepEqual(anotherProfile.receipt.doctor, { ...ordinaryDoctor, id: otherDoctorId });
+  for (const doctorId of [ordinaryDoctor.id, otherDoctorId]) {
+    const history = await reminderRead('/search/audit?entityType=doctor&entityId=' + doctorId);
+    assert.equal(history.items.filter((row) => row.action === 'created doctor profile').length, 1);
+  }
+  assert.deepEqual(await reminderRead('/accounts'), accountsBeforeProfile);
   const teamCheckPath = '/users/creation-outcome';
   const teamReview = {
     requestId: randomUUID(),
@@ -5079,7 +5133,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, original doctor profile recovery after a fee change and booking pause, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

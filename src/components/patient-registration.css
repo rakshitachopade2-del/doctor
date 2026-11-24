@@ -1,4 +1,4 @@
-:is(.patient-registration, .reviewed-account-form) {
+:is(.patient-registration, .reviewed-account-form, .doctor-profile-creation) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -16,12 +16,12 @@
   white-space: pre-wrap;
 }
 @media (max-width: 480px) {
-  :is(.patient-registration, .reviewed-account-form) .modal-actions {
+  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation) .modal-actions {
     flex-direction: column-reverse;
     align-items: stretch;
   }
-  :is(.patient-registration, .reviewed-account-form) input,
-  :is(.patient-registration, .reviewed-account-form) select {
+  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation) input,
+  :is(.patient-registration, .reviewed-account-form, .doctor-profile-creation) select {
     min-width: 0;
     max-width: 100%;
   }

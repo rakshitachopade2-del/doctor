@@ -1,6 +1,6 @@
 import { useLocation, useSearchParams, Link } from 'react-router-dom';
 import { useState, type FormEvent } from 'react';
-import { Check, CircleOff, Plus } from 'lucide-react';
+import { Check, CircleOff } from 'lucide-react';
 import { api, useResource, useSession, useToast } from '../lib';
 import {
   Avatar,
@@ -14,6 +14,8 @@ import {
 } from '../components/ui';
 import type { Doctor, User, Patient } from '../../shared/types';
 import { ClinicConfigurationPanel } from '../components/ClinicConfigurationPanel';
+import { DoctorProfileCreationControl } from '../components/DoctorProfileCreationModal';
+import { DoctorProfileForm, readDoctorProfile } from '../components/DoctorProfileForm';
 import { DoctorBookingStatusControls } from '../components/DoctorBookingStatus';
 import { useAppointmentBookingData } from '../components/appointment-booking-helpers';
 import { StaffAccountCreationControl } from '../components/StaffAccountCreationModal';
@@ -53,7 +55,6 @@ export function SettingsPage() {
   });
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const [doctorFormOpen, setDoctorFormOpen] = useState(false);
   const [editing, setEditing] = useState<Doctor | null>(null);
   const [params, setParams] = useSearchParams();
   const sections = [
@@ -71,29 +72,12 @@ export function SettingsPage() {
   }
   async function saveDoctor(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
+    if (!editing) return;
+    const body = readDoctorProfile(e.currentTarget);
     setBusy(true);
     try {
-      const body = {
-        ...form,
-        experience: Number(form.experience),
-        fee: Number(form.fee),
-        specialties: form.specialties
-          .split(',')
-          .map((x) => x.trim())
-          .filter(Boolean),
-        languages: form.languages
-          .split(',')
-          .map((x) => x.trim())
-          .filter(Boolean),
-        color: form.color || '#e0ede6',
-      };
-      await api(editing ? `/api/doctors/${editing.id}` : '/api/doctors', {
-        method: editing ? 'PATCH' : 'POST',
-        body,
-      });
+      await api(`/api/doctors/${editing.id}`, { method: 'PATCH', body });
       await doctors.reload();
-      setDoctorFormOpen(false);
       setEditing(null);
       toast('Doctor profile saved.');
     } catch (e) {
@@ -155,16 +139,13 @@ export function SettingsPage() {
                 <h2>Doctor profiles</h2>
                 <p className="muted">Public qualifications, focus areas, and consultation fees.</p>
               </div>
-              <button
-                className="button button-primary"
-                onClick={() => {
-                  setEditing(null);
-                  setDoctorFormOpen(true);
-                }}
-              >
-                <Plus size={16} />
-                Add doctor
-              </button>
+              {session.user?.role === 'admin' && !session.user.mustChangePassword && (
+                <DoctorProfileCreationControl
+                  key={JSON.stringify([location.key, session.user.id, session.csrfToken])}
+                  actorId={session.user.id}
+                  onSaved={() => void doctors.reload()}
+                />
+              )}
             </div>
             {doctors.error ? (
               <ErrorState message={doctors.error} retry={doctors.reload} />
@@ -186,10 +167,7 @@ export function SettingsPage() {
                     <div className="doctor-booking-team-tools">
                       <button
                         className="button button-secondary button-small"
-                        onClick={() => {
-                          setEditing(d);
-                          setDoctorFormOpen(true);
-                        }}
+                        onClick={() => setEditing(d)}
                       >
                         Edit profile
                       </button>
@@ -325,83 +303,13 @@ export function SettingsPage() {
           ))}
         </div>
       )}
-      {doctorFormOpen && (
-        <Modal
-          title={editing ? 'Edit doctor profile' : 'Add a doctor'}
-          onClose={() => {
-            setDoctorFormOpen(false);
-            setEditing(null);
-          }}
-        >
-          <form className="stack" onSubmit={saveDoctor}>
-            <Field label="Display name">
-              <input
-                name="name"
-                defaultValue={editing?.name}
-                placeholder="Dr. Full name"
-                required
-              />
-            </Field>
-            <Field label="Professional title">
-              <input
-                name="title"
-                defaultValue={editing?.title || 'Consultant Dermatologist'}
-                required
-              />
-            </Field>
-            <Field label="Qualifications">
-              <input
-                name="qualifications"
-                defaultValue={editing?.qualifications}
-                placeholder="MBBS, MD Dermatology"
-                required
-              />
-            </Field>
-            <div className="form-grid">
-              <Field label="Years of experience">
-                <input
-                  type="number"
-                  name="experience"
-                  min="0"
-                  max="70"
-                  defaultValue={editing?.experience || 0}
-                  required
-                />
-              </Field>
-              <Field label="Consultation fee (₹)">
-                <input
-                  type="number"
-                  name="fee"
-                  min="0"
-                  max="100000"
-                  defaultValue={editing?.fee || 800}
-                  required
-                />
-              </Field>
-            </div>
-            <Field label="Focus areas" hint="Separate each focus area with a comma.">
-              <input
-                name="specialties"
-                defaultValue={editing?.specialties.join(', ')}
-                placeholder="Acne, Hair and scalp, General dermatology"
-                required
-              />
-            </Field>
-            <Field label="Languages" hint="Separate with commas.">
-              <input
-                name="languages"
-                defaultValue={editing?.languages.join(', ') || 'English, Hindi'}
-                required
-              />
-            </Field>
-            <Field label="About the doctor">
-              <textarea name="bio" defaultValue={editing?.bio} required maxLength={2000} />
-            </Field>
-            <input name="color" type="hidden" value={editing?.color || '#e0ede6'} />
+      {editing && (
+        <Modal title="Edit doctor profile" onClose={() => setEditing(null)}>
+          <DoctorProfileForm values={editing} onSubmit={saveDoctor}>
             <button className="button button-primary" disabled={busy}>
               {busy ? 'Saving…' : 'Save doctor'}
             </button>
-          </form>
+          </DoctorProfileForm>
         </Modal>
       )}
     </>

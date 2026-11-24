@@ -16,6 +16,8 @@ import {
 } from './patient-profile.ts';
 import { date, email, required, short, text } from './validation.ts';
 import { registerStaffAccountCreation } from './staff-account-creation.ts';
+import { doctorProfileFields } from '../shared/doctor-profile-creation.ts';
+import { registerDoctorProfileCreation } from './doctor-profile-creation.ts';
 import { registerPatientRegistration } from './patient-registration.ts';
 import { registerCarePlanCreation } from './care-plan-creation.ts';
 import { registerCheckInSubmission } from './check-in-submission.ts';
@@ -132,21 +134,6 @@ const transitions: Record<AppointmentStatus, AppointmentStatus[]> = {
   cancelled: [],
   'no-show': [],
 };
-const doctorSchema = z.object({
-  name: required,
-  title: required,
-  qualifications: required,
-  specialties: z.array(required).min(1).max(20),
-  experience: z.number().int().min(0).max(80),
-  fee: z.number().min(0).max(100000),
-  bio: text,
-  languages: z.array(required).min(1).max(20),
-  color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
-    .default('#b3c7aa'),
-});
-
 export interface AppOptions extends PublicSiteOptions {
   databasePath?: string;
   demoMode?: boolean;
@@ -628,18 +615,18 @@ export function createApp(options: AppOptions = {}) {
         })),
     ),
   );
-  app.post('/api/doctors', (req: AuthRequest, res) => {
-    actor(req, ['admin']);
-    const doctor = { ...doctorSchema.parse(req.body), id: id() };
-    insert(db, 'doctors', doctor);
-    audit(req, 'created doctor profile', 'doctor', doctor.id);
-    res.status(201).json(doctor);
+  registerDoctorProfileCreation(app, {
+    db,
+    currentSessionUser,
+    transaction: scheduling.transaction,
+    audit,
+    fail,
   });
   app.patch('/api/doctors/:id', (req: AuthRequest, res) => {
     actor(req, ['admin']);
     const key = String(req.params.id);
     if (!get(db, 'doctors', key)) fail(404, 'Doctor not found.');
-    const doctor = { ...doctorSchema.parse(req.body), id: key };
+    const doctor = { ...doctorProfileFields.parse(req.body), id: key };
     db.prepare('UPDATE doctors SET data=? WHERE id=?').run(JSON.stringify(doctor), key);
     audit(req, 'updated doctor profile', 'doctor', key);
     res.json(doctor);

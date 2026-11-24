@@ -1,4 +1,5 @@
 import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } from 'react';
+import type { DoctorProfileCreationCommand } from '../../shared/doctor-profile-creation';
 import type { StaffAccountCreationReview } from '../../shared/staff-account-creation';
 import type { PatientRegistrationCommand } from '../../shared/patient-registration';
 import type { CareMessageCommand } from '../../shared/care-message';
@@ -15,6 +16,7 @@ import type { UploadAttempt } from './private-upload-helpers';
 import { useSession } from '../lib';
 
 interface PendingCareSubmissions {
+  doctorProfileCreation: { current: DoctorProfileCreationCommand | null };
   staffAccountCreation: { current: StaffAccountCreationReview | null };
   patientRegistration: { current: PatientRegistrationCommand | null };
   procedureDecisions: Map<string, DecisionAttempt>;
@@ -36,6 +38,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
   const pending = useMemo(
     () => ({
+      doctorProfileCreation: { current: null as DoctorProfileCreationCommand | null },
       staffAccountCreation: { current: null as StaffAccountCreationReview | null },
       patientRegistration: { current: null as PatientRegistrationCommand | null },
       procedureDecisions: new Map<string, DecisionAttempt>(),
@@ -60,6 +63,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
   );
   useLayoutEffect(() => {
     const clear = () => {
+      pending.doctorProfileCreation.current = null;
       pending.staffAccountCreation.current = null;
       pending.patientRegistration.current = null;
       pending.procedureDecisions.clear();
