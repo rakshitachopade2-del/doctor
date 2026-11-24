@@ -36,7 +36,7 @@ export function visitClock(time: string) {
 }
 export function visitInterval(time: string, duration: number) {
   const [hour, minute] = time.split(':').map(Number),
-    end = hour * 60 + minute + duration;
+    end = (hour * 60 + minute + duration) % (24 * 60);
   return `${visitClock(time)}–${visitClock(`${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`)} IST`;
 }
 const bad = () =>

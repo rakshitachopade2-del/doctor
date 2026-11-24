@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
   ClipboardCheck,
   CalendarDays,
@@ -19,22 +19,27 @@ import type { Appointment } from '../../shared/types';
 import type {
   EncounterAmendment,
   Investigation,
-  InvestigationResult,
   PatientClinicalWorkflows,
-  ProcedureRecord,
 } from '../../shared/clinical';
 import { api, formatDate, useSession, useToast } from '../lib';
-import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
+import { Badge, Card, EmptyState, ErrorState, Loading } from '../components/ui';
 import { useInvestigationCancellation } from '../components/InvestigationCancellationModal';
 import { useInvestigationOrder } from '../components/InvestigationOrderModal';
 import { useInvestigationResultSubmission } from '../components/InvestigationResultModal';
 import { usePatientDocuments } from '../components/private-upload-helpers';
-import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
-import { ProcedureAppointmentModal } from '../components/ProcedureAppointmentModal';
+import {
+  InvestigationReviewModal,
+  PendingInvestigationReviews,
+} from '../components/InvestigationReviewModal';
+import {
+  PendingProcedureAppointments,
+  ProcedureAppointmentModal,
+} from '../components/ProcedureAppointmentModal';
+import { useProcedureCancellation } from '../components/ProcedureCancellationModal';
 import { useProcedureCompletionRecording } from '../components/ProcedureCompletionModal';
 import { useProcedureDecisionRecording } from '../components/ProcedureDecisionModal';
 import { decisionMethods } from '../components/procedure-decision-helpers';
-import { ProcedurePlanModal } from '../components/ProcedurePlanModal';
+import { useProcedurePlan } from '../components/ProcedurePlanModal';
 import { ProcedureTemplateSource } from '../components/ProcedureTemplateSource';
 import './clinical-workflows.css';
 
@@ -44,13 +49,6 @@ type ClinicalResource = {
   error: string;
   reload: () => Promise<void>;
 };
-type WorkflowAction =
-  | { kind: 'procedure' }
-  | { kind: 'review'; investigation: Investigation; result: InvestigationResult }
-  | {
-      kind: 'cancel-procedure' | 'scheduling';
-      procedure: ProcedureRecord;
-    };
 const failure = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 const timestamp = (value: string) =>
@@ -75,27 +73,6 @@ function Detail({ label, value }: { label: string; value?: string | null }) {
     </div>
   ) : null;
 }
-function FormFooter({
-  busy,
-  label,
-  onClose,
-}: {
-  busy: boolean;
-  label: string;
-  onClose: () => void;
-}) {
-  return (
-    <div className="cw-form-footer">
-      <button type="button" className="button button-secondary" onClick={onClose}>
-        Cancel
-      </button>
-      <button className="button button-primary" disabled={busy}>
-        {busy ? 'Saving…' : label}
-      </button>
-    </div>
-  );
-}
-
 export function ClinicalWorkflowPanel({
   patientId,
   patientName,
@@ -112,11 +89,41 @@ export function ClinicalWorkflowPanel({
   selectedResultId?: string | null;
 }) {
   const { session } = useSession();
+  const location = useLocation();
+  const [scheduling, setScheduling] = useState<{
+    id: string;
+    locationKey: string;
+    patientId: string;
+  } | null>(null);
+  const selectedVisit =
+    scheduling?.patientId === patientId && scheduling.locationKey === location.key
+      ? scheduling.id
+      : null;
+  const schedulingControls = selectedVisit ? (
+    <ProcedureAppointmentModal
+      procedureId={selectedVisit}
+      patientId={patientId}
+      onClose={() => setScheduling(null)}
+      onSaved={resource.reload}
+    />
+  ) : (
+    <PendingProcedureAppointments
+      patientId={patientId}
+      onOpen={(id) => setScheduling({ id, locationKey: location.key, patientId })}
+    />
+  );
   const cancellations = useInvestigationCancellation(patientId, resource.reload);
   const order = useInvestigationOrder(
     patientId,
     patientName,
     resource.data?.investigations ?? [],
+    resource.reload,
+  );
+  const plan = useProcedurePlan(
+    patientId,
+    patientName,
+    appointments,
+    resource.data?.procedures ?? [],
     resource.reload,
   );
   const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
@@ -125,9 +132,16 @@ export function ClinicalWorkflowPanel({
     void resource.reload();
     void documents.reload();
   });
+  const procedureCancellations = useProcedureCancellation(patientId, patientName, resource.reload);
   const completions = useProcedureCompletionRecording(patientId, patientName, resource.reload);
   const decisions = useProcedureDecisionRecording(patientId, patientName, resource.reload);
-  const [action, setAction] = useState<WorkflowAction | null>(null);
+  const [review, setReview] = useState<{
+    id: string;
+    patientId: string;
+    locationKey: string;
+  } | null>(null);
+  const openReview = (id: string) => setReview({ id, patientId, locationKey: location.key });
+
   const [busy, setBusy] = useState('');
   const [filter, setFilter] = useState('active');
   const toast = useToast();
@@ -222,42 +236,68 @@ export function ClinicalWorkflowPanel({
   }
   const afterSave = async () => {
     if (!mounted.current) return;
-    setAction(null);
+    setReview(null);
     await Promise.all([resource.reload(), documents.reload()]);
   };
+  const reviewControls =
+    review?.patientId === patientId && review.locationKey === location.key ? (
+      <InvestigationReviewModal
+        investigationId={review.id}
+        patientId={patientId}
+        onClose={() => setReview(null)}
+        onSaved={afterSave}
+      />
+    ) : (
+      <PendingInvestigationReviews patientId={patientId} open={openReview} />
+    );
   if (resource.loading && !data)
     return (
       <div>
+        {plan.modal}
+        {plan.hasPending && plan.button}
         {order.modal}
         {order.hasPending && order.button}
         {cancellations.controls}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
+        {procedureCancellations.controls}
+        {schedulingControls}
+        {reviewControls}
         <Loading />
       </div>
     );
   if (resource.error)
     return (
       <div>
+        {plan.modal}
+        {plan.hasPending && plan.button}
         {order.modal}
         {order.hasPending && order.button}
         {cancellations.controls}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
+        {procedureCancellations.controls}
+        {schedulingControls}
+        {reviewControls}
         <ErrorState message={resource.error} retry={resource.reload} />
       </div>
     );
   if (!data)
     return (
       <>
+        {plan.modal}
+        {plan.hasPending && plan.button}
         {order.modal}
         {order.hasPending && order.button}
         {cancellations.controls}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
+        {procedureCancellations.controls}
+        {schedulingControls}
+        {reviewControls}
       </>
     );
   const investigations = data.investigations.filter(
@@ -266,11 +306,15 @@ export function ClinicalWorkflowPanel({
   const procedures = data.procedures.filter((p) => filter === 'all' || p.status !== 'cancelled');
   return (
     <div className="cw-workspace">
+      {plan.modal}
       {order.modal}
       {cancellations.controls}
       {resultSubmission.controls}
       {decisions.controls}
       {completions.controls}
+      {procedureCancellations.controls}
+      {schedulingControls}
+      {reviewControls}
       <div className="cw-intro">
         <span className="cw-intro-icon">
           <Stethoscope size={24} />
@@ -482,9 +526,7 @@ export function ClinicalWorkflowPanel({
                                 result.id === investigation.results.at(-1)?.id && (
                                   <button
                                     className="button button-ghost button-small"
-                                    onClick={() =>
-                                      setAction({ kind: 'review', investigation, result })
-                                    }
+                                    onClick={() => openReview(investigation.id)}
                                   >
                                     <ClipboardCheck size={14} />
                                     {reviews.length ? 'Add another review' : 'Review this result'}
@@ -538,14 +580,7 @@ export function ClinicalWorkflowPanel({
               <span className="cw-count">{procedures.length}</span>
             </h2>
           </div>
-          {canDocument && (
-            <button
-              className="button button-primary"
-              onClick={() => setAction({ kind: 'procedure' })}
-            >
-              <Plus size={16} /> Plan procedure
-            </button>
-          )}
+          {plan.button}
         </div>
         {procedures.length ? (
           <div className="cw-records">
@@ -624,7 +659,9 @@ export function ClinicalWorkflowPanel({
                   <div className="cw-record-actions">
                     <button
                       className="button button-secondary button-small"
-                      onClick={() => setAction({ kind: 'scheduling', procedure })}
+                      onClick={() =>
+                        setScheduling({ id: procedure.id, locationKey: location.key, patientId })
+                      }
                     >
                       <CalendarDays size={14} />
                       {procedure.status === 'planned' ? 'Manage appointment' : 'Scheduling history'}
@@ -724,12 +761,15 @@ export function ClinicalWorkflowPanel({
                             Document completion
                           </button>
                         )}
-                        <button
-                          className="button button-ghost button-small"
-                          onClick={() => setAction({ kind: 'cancel-procedure', procedure })}
-                        >
-                          Cancel procedure
-                        </button>
+                        {!procedureCancellations.hasPending(procedure.id) && (
+                          <button
+                            data-procedure-cancellation={procedure.id}
+                            className="button button-ghost button-small"
+                            onClick={() => procedureCancellations.open(procedure.id)}
+                          >
+                            Cancel procedure
+                          </button>
+                        )}
                       </div>
                       {latest?.decision !== 'agreed' && (
                         <p className="cw-explanation">
@@ -752,118 +792,11 @@ export function ClinicalWorkflowPanel({
           </Card>
         )}
       </section>
-      {action?.kind === 'review' && (
-        <InvestigationReviewModal
-          investigationId={action.investigation.id}
-          onClose={() => setAction(null)}
-          onSaved={afterSave}
-        />
-      )}
-      {action?.kind === 'procedure' && (
-        <ProcedurePlanModal
-          patientId={patientId}
-          appointments={appointments}
-          onClose={() => setAction(null)}
-          onSaved={afterSave}
-        />
-      )}
-      {action?.kind === 'scheduling' && (
-        <ProcedureAppointmentModal
-          key={action.procedure.id}
-          procedureId={action.procedure.id}
-          onClose={() => setAction(null)}
-          onSaved={resource.reload}
-        />
-      )}
-      {action?.kind === 'cancel-procedure' && (
-        <CancellationModal
-          title={action.procedure.title}
-          endpoint={`/api/procedures/${action.procedure.id}/cancel`}
-          onClose={() => setAction(null)}
-          onSaved={afterSave}
-        />
-      )}
     </div>
   );
 }
 function CheckIcon() {
   return <ClipboardCheck size={16} />;
-}
-
-function ClinicalForm({
-  title,
-  endpoint,
-  payload,
-  children,
-  label,
-  onClose,
-  onSaved,
-}: {
-  title: string;
-  endpoint: string;
-  payload: (form: FormData) => unknown;
-  children: ReactNode;
-  label: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const toast = useToast();
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    const form = new FormData(event.currentTarget);
-    try {
-      await api(endpoint, { method: 'POST', body: payload(form) });
-      toast('Clinical record saved.');
-      onSaved();
-    } catch (e) {
-      setError(failure(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal title={title} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        {children}
-        {error && (
-          <div className="notice notice-error" role="alert">
-            {error}
-          </div>
-        )}
-        <FormFooter busy={busy} label={label} onClose={onClose} />
-      </form>
-    </Modal>
-  );
-}
-type ModalCallbacks = { onClose: () => void; onSaved: () => void };
-function CancellationModal({
-  title,
-  endpoint,
-  ...callbacks
-}: ModalCallbacks & { title: string; endpoint: string }) {
-  return (
-    <ClinicalForm
-      title="Cancel this clinical record?"
-      endpoint={endpoint}
-      payload={(form) => ({ reason: form.get('reason') })}
-      label="Confirm cancellation"
-      {...callbacks}
-    >
-      <p>
-        <strong>{title}</strong>
-      </p>
-      <Field label="Reason for cancellation">
-        <textarea name="reason" required rows={3} maxLength={8000} />
-      </Field>
-      <p className="muted small">
-        The record and its history remain available. Cancellation cannot be undone.
-      </p>
-    </ClinicalForm>
-  );
 }
 
 export function EncounterAmendments({

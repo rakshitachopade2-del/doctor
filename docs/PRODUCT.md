@@ -4,7 +4,9 @@ The supplied concept is source material, not an instruction to make unsupported 
 
 ## Release scope
 
-Patients and linked clinicians can confirm which investigation, note and PDF reports they are submitting. Recovering an interrupted confirmation returns the original result with its author and attachments. A separate supplemental submission creates a new item for clinical review. The clinician controls when an interpretation is shared with the patient.
+Staff can recover a procedure plan, its appointment-link change or its cancellation after leaving the original screen during an interrupted save. The planning clinician's original discussion and template version, the scheduler's original visit change, and the cancelling clinician's reason each have a separate confirmation. Cancellation checks the latest patient decision and visit. The patient retains the decision history and can read the cancellation reason. The appointment, invoice and payments continue through their existing workflows.
+
+Patients and linked clinicians can confirm which investigation, note and PDF reports they are submitting. Recovering an interrupted confirmation returns the original result with its author and attachments. A separate supplemental submission creates a new item for clinical review. Clinicians can recover their original findings, follow-up and publication choice after navigating away. A later publication has its own timestamp. Staff can also resume a private handover and confirm who received it at the time, even after a subsequent reassignment. The patient sees only published interpretations.
 
 Clinicians can verify a follow-up review before sharing patient instructions and recover its original confirmation after an interrupted save. Subsequent reports stay available for a separate clinical review. When the clinic confirms the draft was based on an outdated revision, the clinician can compare it with the latest evidence before deciding what to share.
 

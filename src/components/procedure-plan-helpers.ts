@@ -1,5 +1,8 @@
+import { z } from 'zod';
+import { ApiError } from '../lib';
 import type {
   ProcedureCreateMutation,
+  ProcedurePlanCommand,
   ProcedureTemplateDetail,
   ProcedureTemplateFields,
   ProcedureTemplateSelection,
@@ -25,25 +28,20 @@ export type ProcedurePlanDraft = ProcedureTemplateFields & {
   indication: string;
   appointmentId: string;
 };
-export type ProcedurePlanBody = ProcedureTemplateFields & {
-  patientId: string;
-  indication: string;
-  appointmentId: string | null;
-  requestId: string;
-  templateSelection?: ProcedureTemplateSelection;
-  reviewedForPatient?: true;
-};
+export type ProcedurePlanBody = ProcedurePlanCommand;
 export type ProcedurePlanAttempt = {
   body: ProcedurePlanBody;
   source: ProcedureTemplateDetail | null;
   actorId: string;
-  doctorId: string;
+  patientName: string;
+  appointmentLabel: string;
+  priorIds: string[];
 };
 const object = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === 'string';
 const nonempty = (v: unknown): v is string => text(v) && !!v.trim();
-const time = (v: unknown) => text(v) && Number.isFinite(Date.parse(v));
+const time = (v: unknown) => z.iso.datetime().safeParse(v).success;
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const invalid = () =>
   new Error(
@@ -58,16 +56,27 @@ export function checkedProcedureCreation(
     r = value.receipt,
     body = attempt.body;
   if (
-    !nonempty(p.id) ||
+    !z.uuidv4().safeParse(p.id).success ||
+    !text(p.id) ||
+    attempt.priorIds.includes(p.id) ||
+    [attempt.actorId, body.patientId, body.doctorId, body.requestId].includes(p.id) ||
     p.patientId !== body.patientId ||
     p.appointmentId !== body.appointmentId ||
-    p.doctorId !== attempt.doctorId ||
+    p.doctorId !== body.doctorId ||
     !nonempty(p.doctorName) ||
     !time(p.createdAt) ||
     [...procedureFieldNames, 'indication'].some(
       (key) => p[key] !== body[key as keyof ProcedurePlanBody],
     ) ||
-    !['planned', 'completed', 'cancelled'].includes(p.status as string) ||
+    p.status !== 'planned' ||
+    p.cancellationReason !== null ||
+    p.completion !== null ||
+    !Array.isArray(p.agreements) ||
+    p.agreements.length !== 0 ||
+    p.effectiveAppointmentId !== undefined ||
+    p.scheduledAppointment !== undefined ||
+    r.plannedByRole !== body.plannedByRole ||
+    r.doctorId !== body.doctorId ||
     r.requestId !== body.requestId ||
     r.createdById !== attempt.actorId ||
     r.patientId !== body.patientId ||
@@ -126,3 +135,33 @@ export function templateSelection(source: ProcedureTemplateDetail): ProcedureTem
 }
 export const procedureFailure = (error: unknown) =>
   error instanceof Error ? error.message : 'The procedure could not be saved.';
+
+export function checkedPlanRefusal(error: unknown, sent: ProcedurePlanAttempt) {
+  if (!(error instanceof ApiError) || error.status !== 409 || !object(error.responseData))
+    return null;
+  const r = error.responseData;
+  if (
+    r.code !== 'PROCEDURE_PLAN_NOT_SAVED' ||
+    r.actorId !== sent.actorId ||
+    !object(r.command) ||
+    !nonempty(r.message) ||
+    (r.field !== 'appointment' && r.field !== 'template') ||
+    (r.field === 'template' && !sent.source) ||
+    (r.field === 'appointment' && !sent.body.appointmentId)
+  )
+    return null;
+  const received = r.command;
+  if (Object.keys(received).length !== Object.keys(sent.body).length) return null;
+  for (const [key, value] of Object.entries(sent.body)) {
+    if (key === 'templateSelection') {
+      const selection = received.templateSelection;
+      if (
+        !object(selection) ||
+        Object.keys(selection).length !== 3 ||
+        !Object.entries(sent.body.templateSelection!).every(([k, v]) => selection[k] === v)
+      )
+        return null;
+    } else if (received[key] !== value) return null;
+  }
+  return { field: r.field, message: r.message };
+}

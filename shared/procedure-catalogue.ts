@@ -118,8 +118,24 @@ export interface ProcedureTemplateSource {
   reviewedByDoctorName: string;
   customizedFields: Array<keyof ProcedureTemplateFields>;
 }
+export interface ProcedurePlanCommand extends ProcedureTemplateFields {
+  requestId: string;
+  patientId: string;
+  appointmentId: string | null;
+  indication: string;
+  doctorId: string;
+  plannedByRole: 'doctor' | 'admin';
+  templateSelection?: ProcedureTemplateSelection;
+  reviewedForPatient?: true;
+}
+export interface ProcedurePlanRefusal {
+  field: 'appointment' | 'template';
+  message: string;
+}
 export interface ProcedureCreateReceipt {
   requestId: string;
+  doctorId?: string;
+  plannedByRole?: 'doctor' | 'admin';
   createdById: string;
   patientId: string;
   procedureId: string;

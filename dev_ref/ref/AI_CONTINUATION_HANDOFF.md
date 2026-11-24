@@ -1,6 +1,6 @@
 # Dermatology platform: complete AI continuation handoff
 
-**Continuation checkpoint, 24 November 2026 (v1.56.0).** A clinician can now recover the original investigation cancellation and its patient-visible reason. A new report requires fresh review, and a review of the latest result protects the order from cancellation. On the next “continue,” take **clinician cancellation of a planned procedure** in section 7E. On a disposable v1.55 database, cancelling a procedure with a recorded patient agreement returned 200. Repeating the same request after a lost reply returned 409. Verify recovery against the actual agreement, completion and linked-visit flows. Preserve the documented decision history, existing visit and billing links, and the patient notice. [Verification](../../docs/VERIFICATION.md)
+**Continuation checkpoint, 24 November 2026 (v1.57.0).** The clinic can recover five interrupted workflows in the same signed-in tab. Procedure planning, appointment-link changes and cancellation retain their original confirmations alongside current visit, decision and billing history. Investigation reviews retain the original findings and publication choice. Staff handovers retain the intended owner and private reason across navigation and later reassignment. The named local reliability work in section 7 is complete. The next decisions belong to the clinic operator: provide real clinic details, staff roles, schedules and fees, arrange qualified review of clinical wording and record-handling policies, and decide whether and where to host. External providers are optional new scope. The repository remains a locally verified source release. [Verification](../../docs/VERIFICATION.md) · [Operator inputs](#8-manual-external-or-deliberately-deferred-work)
 
 Prepared on **20 November 2026**, Asia/Kolkata, for a new AI chat taking over this repository.
 
@@ -250,9 +250,9 @@ Latest full test progression: v1.35 **620/118**, v1.36 **638/123**, v1.37 **653/
 
 ## 7. What remains that an AI can finish without user involvement
 
-These are concrete, code-observed gaps in existing workflows, not a request to replace the architecture. They were rechecked or independently reviewed for this handoff. Reinspect before editing because line numbers move. The suggested order is a recommendation, not a hidden user requirement.
+Sections A–D record the original findings addressed in v1.40–v1.43. Section E records the subsequent finance and clinical work through v1.57. Section F records the administrative releases v1.51–v1.54. The descriptions of earlier behavior are retained as historical context.
 
-### A. Reliable private care-message sending — recommended next release
+### A. Reliable private care-message sending
 
 **Current source:** `server/app.ts` message GET/POST handlers around lines 1150–1198; `PatientMessages` in both `src/pages/PatientPages.tsx` (around 2391) and `src/pages/ClinicPages.tsx` (around 2993).
 
@@ -325,7 +325,8 @@ Lower-priority items deserve evidence-based review, not automatic blanket rewrit
 - Completed in v1.50. The reviewed procedure completion command checks the latest agreement and linked visit again at save, and can recover the exact outcome and aftercare after completion. The compatibility endpoint still returns the original record shape.
 - Completed in v1.55. Reviewed investigation ordering binds the UUID to the clinician, linked doctor, patient and exact order. An intentional new request may have identical clinical details. Existing order history and notices remain intact.
 - Completed in v1.56. Investigation cancellation checks the latest report and its review under the write lock. The signed-in clinician can recover an original cancellation or a definitive refusal without sending a second notice.
-- Planned-procedure cancellation still uses the generic `ClinicalForm`. A successful cancellation followed by the same request returns an error. Take this verified workflow next, then reassess the remaining items against the completion criteria below.
+- Completed in v1.57. Clinic staff can recover an original procedure plan, visit-link change or clinician cancellation. A newer patient decision or visit change requires fresh cancellation review. The appointment, decision history, invoice and payments retain their own records.
+- Completed in v1.57. A clinician can resume an investigation review after leaving the worklist or chart. An authorized staff member can resume a private investigation handover after leaving the directory and recover who received it even after a later reassignment. Both workflows preserve the original intent and protect private free text.
 - Look for any remaining independently reproducible draft-loss, duplicate-write, stale-authorization or private-response leak. Fix concrete material defects, then stop; do not invent endless hardening releases.
 - Large single-clinic list/storage limits and performance can be documented if no deployment scale is specified. Multi-clinic architecture is a separate product decision.
 
@@ -690,11 +691,11 @@ Formatting is Prettier. Format changed files deliberately; do not run an indiscr
 
 The project is already a substantial working application, not a mockup awaiting a backend. Its main local workflows, identity controls, clinical records, scheduling, operations, history, exports and recovery have been built and repeatedly exercised.
 
-The remaining autonomous work is concentrated in older write/composer flows that have not yet received the same uncertain-response, current-authorization and navigation treatment as recent features. The four primary candidates are messaging, intake, care-plan creation and uploads, followed by a bounded final audit of the identified older finance/clinical forms.
+The autonomous reliability backlog in section 7 was completed in v1.57. The next real-clinic inputs are listed in section 8.1. An observed defect or a separately selected provider integration can start a new engineering task.
 
 The broader original vision still includes unimplemented AI, voice, providers, native distribution, advanced professional identity, complete governance/retention and multi-clinic features. Their presence in the concept is not evidence that a key-only setup will activate them. Their absence also does not mean the working clinic platform must be rewritten before finishing the local scope.
 
-If asked for an updated completion percentage, anchor it to a stated scope, completed releases and remaining concrete tasks. The last number was **8–10% remaining on the AI's autonomous local side**. It should not change merely because another chat starts or a handoff document was written.
+The percentage in the original handoff predates these releases. Use the completed workflows, verification evidence and remaining operator decisions for current status.
 
 ## 15. Ready-to-paste continuation prompt
 

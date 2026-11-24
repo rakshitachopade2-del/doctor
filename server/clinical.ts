@@ -1,3 +1,4 @@
+import { registerInvestigationReviews } from './investigation-review-recording.ts';
 import { createHash } from 'node:crypto';
 import type { Express } from 'express';
 import { z } from 'zod';
@@ -8,6 +9,7 @@ import {
 } from './investigation-cancellation.ts';
 import { registerInvestigationOrders } from './investigation-order.ts';
 import { registerProcedureCompletion } from './procedure-completion.ts';
+import { closedProcedure, registerProcedureCancellation } from './procedure-cancellation.ts';
 import type { Appointment, Doctor, Encounter, Patient, User } from '../shared/types.ts';
 import type {
   EncounterAmendment,
@@ -31,11 +33,7 @@ import type {
 } from '../shared/procedure-decision.ts';
 import { get, id, insert, list, nowISO, type DB } from './db.ts';
 import { notifyPatient, notifyClinicians } from './activity.ts';
-import {
-  investigationRequestId,
-  investigationRevision,
-  registerInvestigationWorklist,
-} from './investigation-worklist.ts';
+import { registerInvestigationWorklist } from './investigation-worklist.ts';
 import {
   effectiveProcedureAppointment,
   registerProcedureScheduling,
@@ -48,6 +46,7 @@ import {
 
 interface ClinicalContext {
   db: DB;
+  currentSessionUser: (req: AuthRequest) => User;
   actor: (req: AuthRequest, roles?: User['role'][]) => User;
   patientAccess: (req: AuthRequest, patientId: string, allowReception?: boolean) => Patient;
   clinicianId: (req: AuthRequest) => string;
@@ -89,8 +88,6 @@ const resultCommand = resultFields
   .strict()
   .superRefine(validateResult);
 const noQuery = z.object({}).strict();
-const closedProcedure =
-  'This procedure is already completed or cancelled. Its documentation cannot be changed.';
 const decisionFields = z.object({
   decision: z.enum(['agreed', 'declined']),
   method: z.enum(['portal', 'in-person', 'phone']),
@@ -161,7 +158,12 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     db.exec(`CREATE TRIGGER IF NOT EXISTS immutable_${table}_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Clinical documentation is append-only'); END;
       CREATE TRIGGER IF NOT EXISTS immutable_${table}_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Clinical documentation is append-only'); END;`);
   }
-  registerProcedureScheduling(app, { db, actor, audit, fail });
+  registerProcedureScheduling(app, {
+    db,
+    currentSessionUser: context.currentSessionUser,
+    audit,
+    fail,
+  });
   const procedureCatalogue = registerProcedureCatalogue(app, { db, actor, audit, fail });
   function transaction<T>(operation: () => T): T {
     db.exec('BEGIN IMMEDIATE');
@@ -232,6 +234,7 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     return plan;
   }
   const investigationWorklist = registerInvestigationWorklist(app, {
+    currentCareUser: context.currentCareUser,
     db,
     actor,
     patientAccess,
@@ -255,9 +258,6 @@ export function registerClinical(app: Express, context: ClinicalContext) {
       agreements,
       completion,
     };
-  }
-  function requireOpenInvestigation(order: InvestigationOrder) {
-    if (get(db, 'investigationCancellations', order.id)) fail(409, cancelledInvestigation);
   }
   function requirePlannedProcedure(plan: ProcedurePlan) {
     if (procedureView(plan).status !== 'planned') fail(409, closedProcedure);
@@ -412,114 +412,19 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     });
     res.status(outcome.status).json(outcome.body);
   });
-  app.post('/api/investigations/:id/reviews', (req: AuthRequest, res) => {
-    const identity = doctorIdentity(req),
-      order = investigationAccess(req, String(req.params.id)),
-      user = actor(req);
-    const { expectedRevision, requestId, ...input } = z
-      .object({
-        resultId: required,
-        summary: text.min(1),
-        followUp: text.default(''),
-        publishToPatient: z.boolean().default(false),
-        expectedRevision: investigationRevision.optional(),
-        requestId: investigationRequestId.optional(),
-      })
-      .refine(
-        (value) => (value.expectedRevision === undefined) === (value.requestId === undefined),
-        'Provide both the current investigation revision and request ID, or omit both for legacy requests.',
-      )
-      .parse(req.body);
-    let duplicate = false;
-    transaction(() => {
-      if (
-        requestId &&
-        investigationWorklist.commandReplay(user, 'review', order.id, requestId, input)
-      ) {
-        duplicate = true;
-        return;
-      }
-      requireOpenInvestigation(order);
-      if (expectedRevision) investigationWorklist.assertRevision(order.id, expectedRevision);
-      const latest = events<InvestigationResult>(
-        'investigationResults',
-        'investigationId',
-        order.id,
-      ).at(-1);
-      if (!latest || latest.id !== input.resultId)
-        fail(
-          409,
-          'Review the latest submitted result. A newer report may have arrived; refresh the record.',
-        );
-      const review: InvestigationReview = {
-        id: id(),
-        investigationId: order.id,
-        resultId: latest!.id,
-        summary: input.summary,
-        followUp: input.followUp,
-        ...identity,
-        publishedAt: null,
-        createdAt: nowISO(),
-      };
-      db.prepare(
-        'INSERT INTO investigationReviews(id,investigationId,resultId,data) VALUES (?,?,?,?)',
-      ).run(review.id, order.id, latest!.id, JSON.stringify(review));
-      if (requestId)
-        investigationWorklist.rememberCommand(
-          user,
-          'review',
-          order.id,
-          requestId,
-          input,
-          review.id,
-        );
-      if (input.publishToPatient) {
-        db.prepare('INSERT INTO investigationPublications(id,publishedAt) VALUES (?,?)').run(
-          review.id,
-          nowISO(),
-        );
-        audit(req, 'published investigation review to patient', 'investigationReview', review.id);
-        notifyPatient(db, order.patientId, `investigation-review:${review.id}`, {
-          kind: 'investigation',
-          title: 'Your clinician shared a report review',
-          detail: order.title,
-          href: '/my-care/record?tab=workflows',
-        });
-      }
-      audit(req, 'reviewed investigation result', 'investigation', order.id);
-    });
-    res.status(duplicate ? 200 : 201).json(investigationView(order));
-  });
-  app.post('/api/investigations/:id/reviews/:reviewId/publish', (req: AuthRequest, res) => {
-    doctorIdentity(req);
-    const order = investigationAccess(req, String(req.params.id));
-    const review = get<InvestigationReview>(
-      db,
-      'investigationReviews',
-      String(req.params.reviewId),
-    );
-    if (!review || review.investigationId !== order.id)
-      return fail(404, 'Review not found for this investigation.');
-    transaction(() => {
-      const existing = db
-        .prepare('SELECT 1 FROM investigationPublications WHERE id=?')
-        .get(review.id);
-      if (!existing) {
-        requireOpenInvestigation(order);
-        db.prepare('INSERT INTO investigationPublications(id,publishedAt) VALUES (?,?)').run(
-          review.id,
-          nowISO(),
-        );
-        audit(req, 'published investigation review to patient', 'investigationReview', review.id);
-        notifyPatient(db, order.patientId, `investigation-review:${review.id}`, {
-          kind: 'investigation',
-          title: 'Your clinician shared a report review',
-          detail: order.title,
-          href: '/my-care/record?tab=workflows',
-        });
-      }
-    });
-    res.json(investigationView(order));
+  registerInvestigationReviews(app, {
+    db,
+    transaction,
+    audit,
+    fail,
+    view: investigationView,
+    worklist: investigationWorklist,
+    authorize(req) {
+      const user = context.currentCareUser(req);
+      const identity = doctorIdentity(req);
+      const order = investigationAccess(req, String(req.params.id));
+      return { user, ...identity, order };
+    },
   });
   registerInvestigationCancellations(app, {
     db,
@@ -544,10 +449,18 @@ export function registerClinical(app: Express, context: ClinicalContext) {
         aftercare: text.min(1),
         estimatedCost: z.string().trim().max(300).default(''),
         requestId: procedureCatalogueRequestId.optional(),
+        doctorId: required.optional(),
+        plannedByRole: z.enum(['doctor', 'admin']).optional(),
         templateSelection: procedureTemplateSelection.optional(),
         reviewedForPatient: z.literal(true).optional(),
       })
       .strict()
+      .refine(
+        (value) =>
+          (!value.doctorId && !value.plannedByRole) ||
+          !!(value.requestId && value.doctorId && value.plannedByRole),
+        'A clinician-bound plan requires a request ID, doctor and account role.',
+      )
       .refine(
         (value) =>
           value.templateSelection
@@ -559,20 +472,45 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     const result = transaction(() => {
       const { user, doctor } = procedureCatalogue.authorize(req, true);
       patientAccess(req, input.patientId);
+      if (input.doctorId && (input.doctorId !== doctor!.id || input.plannedByRole !== user.role))
+        return fail(403, 'The planning clinician must match the current account and role.');
+      const projection = (plan: ProcedurePlan) =>
+        input.doctorId ? { ...plan, agreements: [], completion: null } : procedureView(plan);
+      const refused = (refusal: { field: 'template' | 'appointment'; message: string }) => ({
+        status: 409,
+        body: { code: 'PROCEDURE_PLAN_NOT_SAVED', actorId: user.id, command: input, ...refusal },
+      });
+      const refuse = (field: 'template' | 'appointment', message: string, legacyStatus: number) => {
+        if (!input.doctorId || !input.requestId) return fail(legacyStatus, message);
+        const refusal = { field, message };
+        procedureCatalogue.refusePlan(user, { ...input, requestId: input.requestId }, refusal);
+        return refused(refusal);
+      };
       const prior = procedureCatalogue.replayPlan(user, input);
+      if (prior && 'field' in prior) return refused(prior);
       if (prior)
         return {
-          procedure: procedureView(get<ProcedurePlan>(db, 'procedures', prior.procedureId)!),
-          receipt: prior,
-          replayed: true,
+          status: 200,
+          body: {
+            procedure: projection(get<ProcedurePlan>(db, 'procedures', prior.procedureId)!),
+            receipt: prior,
+          },
         };
       const {
         requestId: _requestId,
+        doctorId: _doctor,
+        plannedByRole: _role,
         templateSelection,
         reviewedForPatient: _reviewed,
         ...fields
       } = input;
       const templateSource = procedureCatalogue.resolveSelection(templateSelection, fields);
+      if (templateSource === null)
+        return refuse(
+          'template',
+          'The selected procedure template changed or is no longer available. Refresh it and review the patient-specific explanation.',
+          409,
+        );
       const plan: ProcedurePlan = {
         ...fields,
         doctorId: doctor!.id,
@@ -586,28 +524,32 @@ export function registerClinical(app: Express, context: ClinicalContext) {
       if (plan.appointmentId) {
         const appointment = get<Appointment>(db, 'appointments', plan.appointmentId);
         if (!appointment || appointment.patientId !== plan.patientId)
-          fail(400, 'The linked appointment must belong to this patient.');
+          return refuse('appointment', 'The linked appointment must belong to this patient.', 400);
         if (['cancelled', 'no-show'].includes(appointment!.status))
-          fail(409, 'Choose an appointment that has not been cancelled or marked as a no-show.');
+          return refuse(
+            'appointment',
+            'Choose an appointment that has not been cancelled or marked as a no-show.',
+            409,
+          );
       }
       insert(db, 'procedures', plan);
+      if (Number(db.prepare('SELECT changes() AS n').get()!.n) !== 1)
+        throw new Error('Procedure plan could not be saved.');
       const receipt = procedureCatalogue.recordPlan(user, input, plan);
       audit(req, 'planned procedure and documented discussion information', 'procedure', plan.id);
-      notifyPatient(db, plan.patientId, `procedure-planned:${plan.id}`, {
+      if (Number(db.prepare('SELECT changes() AS n').get()!.n) !== 1)
+        throw new Error('Procedure plan audit could not be saved.');
+      const delivered = notifyPatient(db, plan.patientId, `procedure-planned:${plan.id}`, {
         kind: 'procedure',
         title: 'A procedure plan is ready to discuss',
         detail: plan.title,
         href: '/my-care/record?tab=workflows',
       });
-      return { procedure: procedureView(plan), receipt, replayed: false };
+      if (!delivered) throw new Error('Procedure plan notice could not be saved.');
+      const procedure = projection(plan);
+      return { status: 201, body: receipt ? { procedure, receipt } : procedure };
     });
-    res
-      .status(result.replayed ? 200 : 201)
-      .json(
-        result.receipt
-          ? { procedure: result.procedure, receipt: result.receipt }
-          : result.procedure,
-      );
+    res.status(result.status).json(result.body);
   });
   function decisionContext(req: AuthRequest) {
     const user = context.currentCareUser(req);
@@ -762,37 +704,14 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     });
     res.status(outcome.status).json(outcome.body);
   });
-  registerProcedureCompletion(app, {
-    db,
-    transaction,
-    audit,
-    fail,
-    authorize(req) {
-      const user = context.currentCareUser(req);
-      const identity = doctorIdentity(req);
-      const procedure = procedureView(procedureAccess(req, String(req.params.id)));
-      return { user, ...identity, procedure };
-    },
-  });
-  app.post('/api/procedures/:id/cancel', (req: AuthRequest, res) => {
-    doctorIdentity(req);
-    const plan = procedureAccess(req, String(req.params.id));
-    const input = z.object({ reason: text.min(1) }).parse(req.body);
-    transaction(() => {
-      requirePlannedProcedure(plan);
-      db.prepare('INSERT INTO procedureCancellations(id,data) VALUES (?,?)').run(
-        plan.id,
-        JSON.stringify({ ...input, createdAt: nowISO() }),
-      );
-      audit(req, 'cancelled procedure', 'procedure', plan.id);
-      notifyPatient(db, plan.patientId, `procedure-cancelled:${plan.id}`, {
-        kind: 'procedure',
-        title: 'A procedure plan was cancelled',
-        detail: plan.title,
-        href: '/my-care/record?tab=workflows',
-      });
-    });
-    res.json(procedureView(plan));
-  });
+  function authorizeProcedureClinician(req: AuthRequest) {
+    const user = context.currentCareUser(req);
+    const identity = doctorIdentity(req);
+    const procedure = procedureView(procedureAccess(req, String(req.params.id)));
+    return { user, ...identity, procedure };
+  }
+  const procedureWriting = { db, transaction, audit, fail, authorize: authorizeProcedureClinician };
+  registerProcedureCompletion(app, procedureWriting);
+  registerProcedureCancellation(app, procedureWriting);
   return { patientView: (patientId: string) => workflows(patientId, true) };
 }

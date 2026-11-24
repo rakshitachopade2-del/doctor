@@ -1,5 +1,21 @@
 # Release verification
 
+## 1.57.0 · Procedure planning, visit changes and cancellation, investigation reviews and handovers
+
+Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **830 API, backup and recovery tests** and **253 browser journeys across 55 projects** passed. The production build, local production smoke, backup and restore rehearsal, TypeScript, formatting, whitespace and Compose configuration checks passed. The browser suite is partitioned into 11 GitHub Actions groups, each running five projects with its own synthetic databases. On the previous release the single hosted job reached its 20-minute limit during browser testing. The production dependency audit reported zero vulnerabilities. A local Docker engine was unavailable for the container runtime check.
+
+On v1.56, a clinician who lost the cancellation reply received a conflict when trying again. Leaving an interrupted procedure plan could produce a second plan ID on re-entry. An injected failure to write the patient notice allowed an appointment link and its confirmation to commit without that notice. In Chrome, leaving the chart or worklist could also lose the scheduling request, the clinician’s interpretation and follow-up, or the intended handover and its private reason.
+
+- **Procedure planning.** A clinician can resume the same reviewed plan, including its visit and template wording. Retrying after later events recovers the original planned record. Two independently confirmed matching plans still receive distinct IDs.
+- **Visit changes.** Reception or clinical staff can resume a link, replacement or removal from the worklist or chart. Retrying after another staff change shows the original event alongside the current association. Failure to save an eligible patient’s notice rolls back the change.
+- **Procedure cancellation.** A changed patient decision or visit requires fresh review. The confirmed cancellation retains its original reason, clinician, time and visit. The appointment, resource reservations, decision history and linked billing remain independently accessible.
+- **Investigation reviews.** An interrupted submission retains its result, findings, follow-up and publication choice. The original confirmation for a private interpretation still shows it was private when written, even after a later publication. A supplemental report requires a fresh review.
+- **Investigation handovers.** Returning to the worklist restores the intended recipient and reason. After a later reassignment the confirmation identifies the original transfer, while the worklist identifies the current owner. The patient chart, summary and activity exclude private handover details.
+
+The five features add **24 API tests and 22 Chrome journeys**, including **12 automated accessibility checks at 320 pixels**. They cover undelivered requests, lost or mismatched replies, navigation, concurrent changes, authorization, rollback and recovery. The local production and backup rehearsals exercised the five workflows together. The restored procedure retained its appointment link, decision history and partially paid invoice. The restored investigation retained its report links, publication history and original private handover.
+
+Opening a v1.56 database preserved all 17 captured tables row for row, including 43 appointments, a linked invoice, a published review and a private handover. The four new evidence tables began empty. After restarting the upgraded app, all five workflows recovered both an original success and a retained refusal without additional records, notices or audits.
+
 ## 1.56.0 · Investigation cancellation
 
 Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **806 API, backup and recovery tests** and **231 browser journeys across 50 projects** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A local Docker engine was unavailable for the container runtime check.

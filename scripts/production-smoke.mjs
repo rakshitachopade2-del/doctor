@@ -4524,11 +4524,44 @@ try {
       createdAt: originalResult.createdAt,
     },
   });
-  const interpreted = await ordinaryWrite(investigationPath + '/reviews', {
+  const interpretationPath = investigationPath + '/reviews';
+  const interpretationCommand = {
+    requestId: randomUUID(),
+    patientId: resultPatient,
+    investigationId: order.id,
+    doctorId: planAuthor.id,
+    reviewedByRole: verified.user.role,
+    expectedRevision: (await reminderRead(investigationPath + '/review-context')).revision,
     resultId: originalResult.id,
     summary: 'Private synthetic interpretation.',
     followUp: 'Synthetic follow-up.',
     publishToPatient: false,
+  };
+  const interpreted = await ordinaryWrite(interpretationPath, interpretationCommand);
+  const originalInterpretation = interpreted.receipt.review;
+  assert.equal(
+    new Date(originalInterpretation.createdAt).toISOString(),
+    originalInterpretation.createdAt,
+  );
+  assert.match(originalInterpretation.id, /^[a-f0-9-]{36}$/);
+  assert.deepEqual(interpreted.receipt, {
+    actorId: verified.user.id,
+    requestId: interpretationCommand.requestId,
+    patientId: resultPatient,
+    investigationId: order.id,
+    expectedRevision: interpretationCommand.expectedRevision,
+    reviewedByRole: verified.user.role,
+    review: {
+      id: originalInterpretation.id,
+      investigationId: order.id,
+      resultId: originalResult.id,
+      summary: interpretationCommand.summary,
+      followUp: interpretationCommand.followUp,
+      doctorId: planAuthor.id,
+      doctorName: planAuthor.name,
+      createdAt: originalInterpretation.createdAt,
+      publishedAt: null,
+    },
   });
   const inWorklist = async () =>
     (await reminderRead('/investigation-worklist?scope=all')).find(
@@ -4543,8 +4576,27 @@ try {
       await reminderRead(`/patients/${resultPatient}/clinical-workflows`, patientHeaders)
     ).investigations.find((row) => row.id === order.id);
   assert.deepEqual((await ownInvestigation()).reviews, []);
-  const reviewId = interpreted.reviews[0].id;
+  const reviewId = originalInterpretation.id;
   await ordinaryWrite(`${investigationPath}/reviews/${reviewId}/publish`, {}, verifiedHeaders, 200);
+  assert.deepEqual(
+    (await ordinaryWrite(interpretationPath, interpretationCommand, verifiedHeaders, 200)).receipt,
+    interpreted.receipt,
+  );
+  const staleInterpretation = {
+    ...interpretationCommand,
+    requestId: randomUUID(),
+    summary: 'Unapplied synthetic interpretation.',
+    publishToPatient: true,
+  };
+  const refusedInterpretation = await ordinaryWrite(
+    interpretationPath,
+    staleInterpretation,
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(refusedInterpretation.code, 'INVESTIGATION_REVIEW_NOT_RECORDED');
+  assert.equal(refusedInterpretation.actorId, verified.user.id);
+  assert.deepEqual(refusedInterpretation.command, staleInterpretation);
   const investigationCancellationPath = investigationPath + '/cancellation';
   const initialCancellation = {
     requestId: randomUUID(),
@@ -4643,6 +4695,18 @@ try {
     supplement,
   );
   const visibleInvestigation = await ownInvestigation();
+  assert.deepEqual(
+    (await ordinaryWrite(interpretationPath, interpretationCommand, verifiedHeaders, 200)).receipt,
+    interpreted.receipt,
+  );
+  assert.deepEqual(
+    await ordinaryWrite(interpretationPath, staleInterpretation, verifiedHeaders, 409),
+    refusedInterpretation,
+  );
+  assert.equal(
+    (await ordinaryWrite(interpretationPath, interpretationCommand, patientHeaders, 403)).receipt,
+    undefined,
+  );
   assert.equal(visibleInvestigation.status, 'cancelled');
   assert.equal(visibleInvestigation.cancellationReason, investigationCancellation.reason);
   assert.deepEqual(await ordinaryWrite(orderPath, orderCommand, verifiedHeaders, 200), ordered);
@@ -4666,6 +4730,10 @@ try {
   ).investigations.filter((entry) => entry.title === order.title);
   assert.deepEqual(portalOrders.map((entry) => entry.id).sort(), [order.id, secondOrder.id].sort());
   const patientFeed = (await reminderRead('/activity?limit=100', patientHeaders)).items;
+  const interpretationNotices = patientFeed.filter(
+    (item) => item.title === 'Your clinician shared a report review' && item.detail === order.title,
+  );
+  assert.equal(interpretationNotices.length, 1);
   const cancellationNotices = patientFeed.filter(
     (entry) =>
       entry.title === 'An investigation request was cancelled' && entry.detail === order.title,
@@ -4682,12 +4750,33 @@ try {
     for (const cmd of [initialCancellation, staleCancellation, investigationCancellation])
       assert.equal(JSON.stringify(value).includes(cmd.requestId), false);
   }
+  for (const value of [visibleInvestigation, interpretationNotices]) {
+    for (const privateValue of [
+      interpretationCommand.requestId,
+      staleInterpretation.requestId,
+      staleInterpretation.summary,
+    ])
+      assert.equal(JSON.stringify(value).includes(privateValue), false);
+  }
   assert.deepEqual(visibleInvestigation.results, [originalResult, supplement.receipt.result]);
   assert.equal(visibleInvestigation.reviews.length, 1);
   assert.equal(visibleInvestigation.reviews[0].resultId, originalResult.id);
   assert.ok(visibleInvestigation.reviews[0].publishedAt);
   const resultAudit = await reminderRead(
     `/search/audit?entityType=investigation&entityId=${order.id}`,
+  );
+  assert.equal(
+    resultAudit.items.filter((item) => item.action === 'reviewed investigation result').length,
+    1,
+  );
+  const publicationAudit = await reminderRead(
+    '/search/audit?entityType=investigationReview&entityId=' + reviewId,
+  );
+  assert.equal(
+    publicationAudit.items.filter(
+      (item) => item.action === 'published investigation review to patient',
+    ).length,
+    1,
   );
   assert.equal(
     resultAudit.items.filter((entry) => entry.action === 'cancelled investigation').length,
@@ -4713,17 +4802,133 @@ try {
   for (const cmd of [resultCommand, supplementCommand, closedCommand])
     assert.equal(JSON.stringify(visibleInvestigation).includes(cmd.requestId), false);
 
-  const decisionPlan = await ordinaryWrite('/procedures', {
+  // Recover the first private handover after the order has returned to its original owner.
+  await ordinaryWrite('/users/create', {
+    requestId: randomUUID(),
+    name: 'Synthetic investigation recipient',
+    email: 'investigation-handover@example.test',
+    role: 'doctor',
+    doctorId: ordinaryDoctor.id,
+    reviewedConfirmed: true,
+    password: randomBytes(24).toString('base64url'),
+  });
+  const handoverPath = '/investigations/' + secondOrder.id + '/assignment';
+  const handoverStart = await reminderRead('/investigations/' + secondOrder.id + '/review-context');
+  const handover = {
+    requestId: randomUUID(),
+    expectedRevision: handoverStart.revision,
+    doctorId: ordinaryDoctor.id,
+    reason: 'Private first production rehearsal handover.',
+    recoverable: true,
+  };
+  const handedOver = await ordinaryWrite(handoverPath, handover);
+  assert.equal(handedOver.receipt.assignment.previousDoctorId, planAuthor.id);
+  assert.equal(handedOver.receipt.assignment.doctorId, ordinaryDoctor.id);
+  assert.equal(handedOver.receipt.assignment.reason, handover.reason);
+  const staleHandover = { ...handover, requestId: randomUUID(), doctorId: planAuthor.id };
+  const refusedHandover = await ordinaryWrite(handoverPath, staleHandover, verifiedHeaders, 409);
+  assert.equal(refusedHandover.code, 'INVESTIGATION_HANDOVER_NOT_RECORDED');
+  assert.deepEqual(refusedHandover.command, staleHandover);
+  const handBack = {
+    ...staleHandover,
+    requestId: randomUUID(),
+    expectedRevision: handedOver.revision,
+    reason: 'Private return to original clinician.',
+  };
+  await ordinaryWrite(handoverPath, handBack);
+  const recoveredHandover = await ordinaryWrite(handoverPath, handover, verifiedHeaders, 200);
+  assert.deepEqual(recoveredHandover.receipt, handedOver.receipt);
+  assert.equal(recoveredHandover.ownerDoctorId, planAuthor.id);
+  assert.equal(recoveredHandover.assignments.length, 2);
+  assert.deepEqual(
+    await ordinaryWrite(handoverPath, staleHandover, verifiedHeaders, 409),
+    refusedHandover,
+  );
+  const handoverAudits = await reminderRead(
+    '/search/audit?entityType=investigation&entityId=' + secondOrder.id,
+  );
+  assert.equal(
+    handoverAudits.items.filter((e) => e.action === 'assigned investigation responsibility').length,
+    2,
+  );
+  const patientAfterHandover = await reminderRead(
+    '/patients/' + resultPatient + '/clinical-workflows',
+    patientHeaders,
+  );
+  assert.deepEqual(
+    patientAfterHandover.investigations.filter((row) => row.title === order.title),
+    portalOrders,
+  );
+  assert.deepEqual((await reminderRead('/activity?limit=100', patientHeaders)).items, patientFeed);
+
+  const procedurePlanRequest = {
     patientId: resultPatient,
+    doctorId: planAuthor.id,
+    plannedByRole: verified.user.role,
+    requestId: randomUUID(),
     title: 'Synthetic decision confirmation rehearsal',
     indication: 'Synthetic indication',
     benefits: 'Synthetic benefits',
     risks: 'Synthetic risks',
     alternatives: 'Synthetic alternatives',
     aftercare: 'Synthetic aftercare',
-  });
+  };
+  const savedProcedurePlan = await ordinaryWrite('/procedures', procedurePlanRequest);
+  const decisionPlan = savedProcedurePlan.procedure;
   const procedurePath = '/procedures/' + decisionPlan.id;
   const decisionPath = procedurePath + '/agreements/record';
+  const schedulePath = procedurePath + '/scheduling';
+  const scheduling = await reminderRead(schedulePath);
+  const visitDayStart = Date.parse(`${attendanceDay}T12:00:00Z`) + 28 * 86400000;
+  let workflowVisit;
+  for (let i = 0; i < 7 && !workflowVisit; i++) {
+    const date = new Date(visitDayStart + i * 86400000).toISOString().slice(0, 10);
+    const [time] = await reminderRead(
+      `/slots?doctorId=${visitDoctor.id}&date=${date}&mode=in-person`,
+    );
+    if (time)
+      workflowVisit = (
+        await ordinaryWrite(
+          '/appointment-bookings',
+          {
+            requestId: randomUUID(),
+            patientId: resultPatient,
+            doctorId: visitDoctor.id,
+            date,
+            time,
+            mode: 'in-person',
+            reason: 'Synthetic procedure appointment.',
+          },
+          patientHeaders,
+        )
+      ).appointment;
+  }
+  assert.ok(workflowVisit, 'Expected an available procedure visit in the synthetic clinic.');
+  const visitChoice = (
+    await reminderRead(
+      schedulePath + '/candidates?from=' + workflowVisit.date + '&to=' + workflowVisit.date,
+    )
+  ).items.find((item) => item.appointment.id === workflowVisit.id);
+  assert.ok(visitChoice);
+  const visitLink = {
+    recoverable: true,
+    requestId: randomUUID(),
+    expectedRevision: scheduling.revision,
+    appointmentId: visitChoice.appointment.id,
+    expectedAppointmentRevision: visitChoice.revision,
+    reason: 'Synthetic appointment association',
+  };
+  const linkedVisit = await ordinaryWrite(schedulePath, visitLink, verifiedHeaders, 200);
+  const procedureInvoice = await ordinaryWrite('/invoices', {
+    requestId: randomUUID(),
+    patientId: resultPatient,
+    procedureId: decisionPlan.id,
+    items: [{ description: 'Synthetic agreed charge', quantity: 1, unitAmountPaise: 50000 }],
+  });
+  const invoiceBeforeCancellation = await reminderRead(
+    '/invoices/' + procedureInvoice.id,
+    patientHeaders,
+  );
   const portalDecision = {
     requestId: randomUUID(),
     patientId: resultPatient,
@@ -4737,6 +4942,18 @@ try {
     reviewedConfirmed: true,
   };
   const firstDecision = await ordinaryWrite(decisionPath, portalDecision, patientHeaders);
+  const beforeChange = await reminderRead(procedurePath + '/cancellation-context');
+  const staleClosure = {
+    requestId: randomUUID(),
+    patientId: resultPatient,
+    procedureId: decisionPlan.id,
+    doctorId: planAuthor.id,
+    cancelledByRole: verified.user.role,
+    expectedRevision: beforeChange.revision,
+    expectedDecisionId: firstDecision.receipt.agreement.id,
+    reason: 'Synthetic rehearsal complete',
+    reviewedConfirmed: true,
+  };
   const phoneDecision = {
     ...portalDecision,
     requestId: randomUUID(),
@@ -4791,11 +5008,36 @@ try {
     verifiedHeaders,
     409,
   );
-  await ordinaryWrite(
-    procedurePath + '/cancel',
-    { reason: 'Synthetic rehearsal complete' },
-    verifiedHeaders,
-    200,
+  const closePath = procedurePath + '/cancellation';
+  const closureRefusal = await ordinaryWrite(closePath, staleClosure, verifiedHeaders, 409);
+  assert.equal(closureRefusal.code, 'PROCEDURE_NOT_CANCELLED');
+  assert.deepEqual(closureRefusal.command, staleClosure);
+  const reviewedClosure = await reminderRead(procedurePath + '/cancellation-context');
+  const closure = {
+    ...staleClosure,
+    requestId: randomUUID(),
+    expectedRevision: reviewedClosure.revision,
+    expectedDecisionId: changedDecision.receipt.agreement.id,
+  };
+  const savedClosure = await ordinaryWrite(closePath, closure);
+  assert.equal(savedClosure.receipt.reason, closure.reason);
+  assert.deepEqual(savedClosure.receipt.appointment, visitChoice.appointment);
+  assert.deepEqual(await ordinaryWrite(closePath, closure, verifiedHeaders, 200), savedClosure);
+  assert.deepEqual(
+    await ordinaryWrite(closePath, staleClosure, verifiedHeaders, 409),
+    closureRefusal,
+  );
+  assert.deepEqual(
+    await ordinaryWrite('/procedures', procedurePlanRequest, verifiedHeaders, 200),
+    savedProcedurePlan,
+  );
+  const linkReplay = await ordinaryWrite(schedulePath, visitLink, verifiedHeaders, 200);
+  assert.deepEqual(linkReplay.event, linkedVisit.event);
+  assert.equal(linkReplay.context.procedure.status, 'cancelled');
+  assert.deepEqual(linkReplay.context.procedure.appointment, visitChoice.appointment);
+  assert.deepEqual(
+    await reminderRead('/invoices/' + procedureInvoice.id, patientHeaders),
+    invoiceBeforeCancellation,
   );
   assert.deepEqual(
     await ordinaryWrite(decisionPath, phoneDecision, verifiedHeaders, 200),
@@ -4814,8 +5056,18 @@ try {
       changedDecision.receipt.agreement,
     ]);
     assert.equal(history.status, 'cancelled');
+    assert.equal(history.cancellationReason, closure.reason);
+    assert.equal(history.effectiveAppointmentId, visitChoice.appointment.id);
     assert.equal(history.completion, null);
-    for (const cmd of [portalDecision, phoneDecision, staleDecision])
+    for (const cmd of [
+      portalDecision,
+      phoneDecision,
+      staleDecision,
+      procedurePlanRequest,
+      visitLink,
+      closure,
+      staleClosure,
+    ])
       assert.equal(JSON.stringify(history).includes(cmd.requestId), false);
   }
   const decisionAudits = await reminderRead(
@@ -5329,7 +5581,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation order recovery after results, reviewed cancellation receipts and retained refusals after supplemental reports, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, original doctor profile recovery after a fee change and booking pause, retained doctor edit confirmations and conflicting edits, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation order recovery after results, reviewed cancellation receipts and retained refusals after supplemental reports, original result and private interpretation confirmations after publication, private handover recovery after reassignment, recovered procedure plans and visit links, preserved cancellation reasons after changed patient decisions, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, original doctor profile recovery after a fee change and booking pause, retained doctor edit confirmations and conflicting edits, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

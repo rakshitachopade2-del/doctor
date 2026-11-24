@@ -12,7 +12,7 @@ export type ProcedureRecordingModalProps = {
 };
 
 export function useProcedureRecording(
-  kind: 'decision' | 'completion',
+  kind: 'decision' | 'completion' | 'cancellation',
   RecordingModal: ComponentType<ProcedureRecordingModalProps>,
   patientId: string,
   patientName: string,
@@ -22,8 +22,11 @@ export function useProcedureRecording(
     location = useLocation(),
     capture = useAppointmentBookingGuard();
   const submissions = usePendingCareSubmissions();
-  const pending =
-    kind === 'decision' ? submissions.procedureDecisions : submissions.procedureCompletions;
+  const pending = {
+    decision: submissions.procedureDecisions,
+    completion: submissions.procedureCompletions,
+    cancellation: submissions.procedureCancellations,
+  }[kind];
   const [selected, setSelected] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const user = session.user;
@@ -45,7 +48,10 @@ export function useProcedureRecording(
   );
   const attempts = [...pending.values()].filter(
     (a) =>
-      canRecord && a.command.patientId === patientId && a.command.recordedByRole === user?.role,
+      canRecord &&
+      a.command.patientId === patientId &&
+      ('cancelledByRole' in a.command ? a.command.cancelledByRole : a.command.recordedByRole) ===
+        user?.role,
   );
   function open(id: string) {
     if (!canRecord) return;
@@ -72,7 +78,11 @@ export function useProcedureRecording(
       }
     });
   }
-  const actionName = kind === 'decision' ? 'Decision' : 'Completion';
+  const actionName = {
+    decision: 'Decision',
+    completion: 'Completion',
+    cancellation: 'Cancellation',
+  }[kind];
   const triggerAttribute = 'data-procedure-' + kind;
   const controls = (
     <Fragment key={kind}>
@@ -80,7 +90,9 @@ export function useProcedureRecording(
         attempts.map((a) => (
           <div className="notice decision-resume" key={a.command.procedureId}>
             <p>
-              {a.procedureTitle} · {actionName} awaiting confirmation
+              {a.procedureTitle}
+              {kind === 'cancellation' && ' · ' + a.command.procedureId} · {actionName} awaiting
+              confirmation
             </p>
             <button
               className="button button-secondary"

@@ -7,6 +7,7 @@ import type { ProcedureRecord } from '../shared/clinical.ts';
 import type {
   ProcedureCataloguePage,
   ProcedureCreateReceipt,
+  ProcedurePlanRefusal,
   ProcedureTemplateDetail,
   ProcedureTemplateEvent,
   ProcedureTemplateFields,
@@ -259,19 +260,22 @@ export function registerProcedureCatalogue(app: Express, { db, actor, audit, fai
     templateId: string | null,
     input: { requestId: string },
     eventId: string | null,
-    planReceipt: ProcedureCreateReceipt | null = null,
+    planReceipt: ProcedureCreateReceipt | ProcedurePlanRefusal | null = null,
   ) {
-    db.prepare(
-      'INSERT INTO procedureCatalogueCommands(requestId,actorId,operation,templateId,payload,eventId,receipt) VALUES (?,?,?,?,?,?,?)',
-    ).run(
-      input.requestId,
-      user.id,
-      operation,
-      templateId,
-      JSON.stringify(input),
-      eventId,
-      planReceipt ? JSON.stringify(planReceipt) : null,
-    );
+    const written = db
+      .prepare(
+        'INSERT INTO procedureCatalogueCommands(requestId,actorId,operation,templateId,payload,eventId,receipt) VALUES (?,?,?,?,?,?,?)',
+      )
+      .run(
+        input.requestId,
+        user.id,
+        operation,
+        templateId,
+        JSON.stringify(input),
+        eventId,
+        planReceipt ? JSON.stringify(planReceipt) : null,
+      );
+    if (Number(written.changes) !== 1) throw new Error('Procedure command could not be saved.');
   }
   function mutation(event: ProcedureTemplateEvent): ProcedureTemplateMutation {
     return {
@@ -601,7 +605,7 @@ export function registerProcedureCatalogue(app: Express, { db, actor, audit, fai
   function resolveSelection(
     selection: ProcedureTemplateSelection | undefined,
     fields: ProcedureTemplateFields,
-  ): ProcedureTemplateSource | undefined {
+  ): ProcedureTemplateSource | undefined | null {
     if (!selection) return undefined;
     const row = source(selection.templateId);
     if (
@@ -610,10 +614,7 @@ export function registerProcedureCatalogue(app: Express, { db, actor, audit, fai
       row.publishedVersionId !== selection.versionId ||
       selectionRevision(row) !== selection.expectedSelectionRevision
     )
-      return fail(
-        409,
-        'The selected procedure template changed or is no longer available. Refresh it and review the patient-specific explanation.',
-      );
+      return null;
     const selected = version(row.publishedVersionId),
       publication = get<ProcedureTemplateEvent>(
         db,
@@ -631,20 +632,34 @@ export function registerProcedureCatalogue(app: Express, { db, actor, audit, fai
       customizedFields: fieldNames.filter((field) => fields[field] !== selected.fields[field]),
     };
   }
-  function replayPlan(user: User, input: { requestId?: string }): ProcedureCreateReceipt | null {
+  function replayPlan(
+    user: User,
+    input: { requestId?: string },
+  ): ProcedureCreateReceipt | ProcedurePlanRefusal | null {
     if (!input.requestId) return null;
     const prior = replay(user, 'plan-created', null, input as { requestId: string });
-    return prior ? (JSON.parse(prior.receipt!) as ProcedureCreateReceipt) : null;
+    return prior
+      ? (JSON.parse(prior.receipt!) as ProcedureCreateReceipt | ProcedurePlanRefusal)
+      : null;
+  }
+  function refusePlan(user: User, input: { requestId: string }, refusal: ProcedurePlanRefusal) {
+    receipt(user, 'plan-created', null, input, null, refusal);
   }
   function recordPlan(
     user: User,
-    input: { requestId?: string; templateSelection?: ProcedureTemplateSelection },
+    input: {
+      requestId?: string;
+      templateSelection?: ProcedureTemplateSelection;
+      doctorId?: string;
+      plannedByRole?: 'admin' | 'doctor';
+    },
     plan: Pick<ProcedureRecord, 'id' | 'patientId' | 'appointmentId' | 'createdAt'>,
   ): ProcedureCreateReceipt | null {
     if (!input.requestId) return null;
     const value: ProcedureCreateReceipt = {
       requestId: input.requestId,
       createdById: user.id,
+      ...(input.doctorId && { doctorId: input.doctorId, plannedByRole: input.plannedByRole }),
       patientId: plan.patientId,
       procedureId: plan.id,
       appointmentId: plan.appointmentId,
@@ -654,5 +669,5 @@ export function registerProcedureCatalogue(app: Express, { db, actor, audit, fai
     receipt(user, 'plan-created', null, input as { requestId: string }, null, value);
     return value;
   }
-  return { authorize, resolveSelection, replayPlan, recordPlan };
+  return { authorize, resolveSelection, replayPlan, recordPlan, refusePlan };
 }

@@ -18,6 +18,27 @@ export interface InvestigationAssignment {
   assignedByName: string;
   createdAt: string;
 }
+export interface InvestigationHandoverCommand {
+  requestId: string;
+  expectedRevision: string;
+  doctorId: string;
+  reason: string;
+  recoverable: true;
+}
+export interface InvestigationHandoverReceipt {
+  requestId: string;
+  actorId: string;
+  investigationId: string;
+  expectedRevision: string;
+  assignment: InvestigationAssignment;
+}
+export interface InvestigationHandoverNotRecorded {
+  code: 'INVESTIGATION_HANDOVER_NOT_RECORDED';
+  actorId: string;
+  investigationId: string;
+  command: InvestigationHandoverCommand;
+  message: string;
+}
 export interface InvestigationWorkItem {
   investigationId: string;
   patientId: string;

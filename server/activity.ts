@@ -116,9 +116,12 @@ export function notifyClinicians(
   const owner = options.doctorId
     ? clinicians.filter((user) => user.doctorId === options.doctorId)
     : clinicians;
-  for (const user of owner.length ? owner : clinicians)
-    if (user.id !== options.excludeActorId)
-      notify(db, user, patientId, 'clinical', eventKey, input);
+  let delivered = true;
+  for (const user of owner.length ? owner : clinicians) {
+    if (user.id === options.excludeActorId) continue;
+    if (!notify(db, user, patientId, 'clinical', eventKey, input)) delivered = false;
+  }
+  return delivered;
 }
 
 interface ActivityContext {

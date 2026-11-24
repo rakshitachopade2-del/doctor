@@ -1,5 +1,6 @@
-import { defineConfig, devices } from '@playwright/test';
-export default defineConfig({
+import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
+
+const config = {
   testDir: './tests/browser',
   fullyParallel: false,
   workers: 1,
@@ -266,6 +267,31 @@ export default defineConfig({
       name: 'investigation-cancellation',
       testMatch: /(?:^|\/)investigation-cancellation\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5232' },
+    },
+    {
+      name: 'procedure-cancellation',
+      testMatch: /(?:^|\/)procedure-cancellation\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5233' },
+    },
+    {
+      name: 'procedure-plan-recovery',
+      testMatch: /(?:^|\/)procedure-plan-recovery\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5234' },
+    },
+    {
+      name: 'procedure-scheduling-recovery',
+      testMatch: /(?:^|\/)procedure-scheduling-recovery\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5235' },
+    },
+    {
+      name: 'investigation-review-recovery',
+      testMatch: /(?:^|\/)investigation-review-recovery\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5236' },
+    },
+    {
+      name: 'investigation-handover-recovery',
+      testMatch: /(?:^|\/)investigation-handover-recovery\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5237' },
     },
   ],
   webServer: [
@@ -572,5 +598,53 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 60000,
     },
+    {
+      command:
+        'E2E_APPOINTMENT_STATE_FIXTURES=1 E2E_API_PORT=3061 E2E_VITE_PORT=5233 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5233/api/health',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3062 E2E_VITE_PORT=5234 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5234/api/health',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command:
+        'E2E_APPOINTMENT_STATE_FIXTURES=1 E2E_API_PORT=3063 E2E_VITE_PORT=5235 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5235/api/health',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3064 E2E_VITE_PORT=5236 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5236/api/health',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3065 E2E_VITE_PORT=5237 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5237/api/health',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
   ],
-});
+} satisfies PlaywrightTestConfig;
+
+const group = process.env.E2E_PROJECT_GROUP;
+if (group !== undefined) {
+  const [number, total] = group.split('/').map(Number);
+  if (!/^[1-9]\d*\/[1-9]\d*$/.test(group) || number > total || total > config.projects.length)
+    throw new Error(
+      `E2E_PROJECT_GROUP must be a group number and count such as 2/11 (up to ${config.projects.length} groups).`,
+    );
+
+  config.projects = config.projects.filter((_, index) => index % total === number - 1);
+  const origins = new Set(
+    config.projects.map((project) => new URL(project.use?.baseURL ?? config.use.baseURL).origin),
+  );
+  config.webServer = config.webServer.filter((server) => origins.has(new URL(server.url).origin));
+}
+export default defineConfig(config);

@@ -8,9 +8,13 @@ import type {
 import { formatDate } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, PageHeader } from '../components/ui';
 import { Pagination } from '../components/Pagination';
-import { ProcedureAppointmentModal } from '../components/ProcedureAppointmentModal';
+import {
+  PendingProcedureAppointments,
+  ProcedureAppointmentModal,
+} from '../components/ProcedureAppointmentModal';
 import { checkedProcedureScheduleRow } from '../components/procedure-scheduling-helpers';
-import { useVisitData, visitInterval } from '../components/visit-duration-helpers';
+import { useAppointmentBookingData } from '../components/appointment-booking-helpers';
+import { visitInterval } from '../components/visit-duration-helpers';
 import './procedure-scheduling-page.css';
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -77,7 +81,7 @@ export function ProcedureSchedulingPage() {
     : 25;
   const filters = { search, status, booking };
   const query = new URLSearchParams({ ...filters, page: String(page), pageSize: String(pageSize) });
-  const resource = useVisitData(`/api/procedure-scheduling?${query}`, (value) =>
+  const resource = useAppointmentBookingData(`/api/procedure-scheduling?${query}`, (value) =>
     checkedPage(value, filters, page, pageSize),
   );
   const [draft, setDraft] = useState(search);
@@ -131,6 +135,7 @@ export function ProcedureSchedulingPage() {
           </Link>
         }
       />
+      {!params.get('procedure') && <PendingProcedureAppointments onOpen={openProcedure} />}
       <div className="notice procedure-schedule-intro">
         <p>
           Book the visit first, then link it here. Check that its length and assigned rooms or

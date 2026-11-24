@@ -246,11 +246,15 @@ Staff can replace or explicitly remove an eligible link. The previous appointmen
 
 The original plan and original appointment ID remain preserved alongside attributed link history. Patients see current visit details and status in their procedure record and care summary; internal scheduling reasons remain private. Completion checks the effective appointment and retains its visit details at completion. Linking does not record agreement, change invoices or reserve additional time.
 
+If a link, replacement or removal is interrupted, use **Resume appointment change** in the same signed-in tab from the procedure appointments worklist or the patient's clinical record. **Retry same request** shows the original change alongside the current association, including when another staff member has since changed it. A confirmed refusal lets you review the latest visit and select again. After a reload or new sign-in, check the scheduling history.
+
 ## Reuse reviewed procedure information
 
 Open **Procedure catalogue** as a doctor or administrator. A linked clinician can create a draft with the procedure name, benefits, risks, alternatives, aftercare and a descriptive cost estimate. Review the wording and explicitly publish the latest version before it can be selected for a patient. A newer draft leaves the previous published version available. Administrators can archive a template to stop new use, or reactivate its retained publication.
 
-In a patient's **Tests & procedures** record, choose **Plan procedure** and select a published template, or start with a blank form. Review and adapt the copied wording, enter the patient-specific indication, and confirm the information has been reviewed for this patient before saving. The template never supplies an indication, appointment, patient decision or outcome. Estimates do not create charges.
+In the patient's **Clinical workup**, choose **Plan procedure** and select a published template, or start with a blank form. Review and adapt the copied wording, enter the patient-specific indication, and confirm the information has been reviewed for this patient before saving. The template never supplies an indication, appointment, patient decision or outcome. Estimates do not create charges.
+
+If the save is interrupted, open **Resume procedure plan** on the same chart in the same signed-in tab and choose **Retry same request**. Recovery shows the original plan ID, clinician, wording and original appointment reference. If the selected template or appointment became unavailable, review the affected selection before saving again. After a reload or new sign-in, check **All records** for the plan.
 
 The saved plan keeps its own final wording and source version. Later publication or archival cannot change what the patient was shown or their recorded decision. Catalogue reasons, unpublished drafts and internal history stay private to clinical staff; the patient sees only concise source attribution alongside their plan. The catalogue starts empty and needs no external provider configuration.
 
@@ -304,7 +308,15 @@ From the procedure in the clinic’s patient record, choose **Document completio
 
 If the reply is interrupted, choose **Retry exact completion**. After leaving the record, choose **Resume procedure completion** in the same signed-in tab. The confirmation shows the original outcome, aftercare, clinician, time and visit. If the decision or visit changed before the save, refresh the procedure and review the draft again. Reloading or signing out clears an unresolved request from the tab. Check the procedure history before re-entering it.
 
+## Cancel a planned procedure
+
+In **Clinical workup**, choose **Cancel procedure**. Check the latest recorded patient decision and the linked visit, enter the reason the patient will see, then review and confirm. If the decision or visit changes before the save, refresh the procedure and review again. Cancellation closes the clinical plan. The appointment stays booked and any existing invoice keeps its charges and payments.
+
+If the confirmation is interrupted, resume the cancellation from the same patient's chart and use **Retry exact cancellation**. The confirmation shows the clinician, reason, time and visit as they were recorded at cancellation. After reloading or signing out, check the procedure under **All records**.
+
 ## Coordinate investigation reviews
+
+If a review submission is interrupted, resume the clinical review in the same signed-in tab from **Investigation reviews** or the patient's **Clinical workup**. Retrying recovers the original findings, follow-up and publication choice. If a different result has arrived, check that result before submitting another review. After reloading or signing out, inspect the investigation history before re-entering the findings.
 
 Open **Investigation reviews** to see the clinic worklist. Doctors start with their assigned investigations; administrators start with all clinic investigations. Filter results awaiting review, requests awaiting results, past requested dates, reviewed or cancelled records, and search by patient or investigation. Requested dates describe when a result was requested, not clinical urgency or a deadline for reviewing it. The dashboard shows counts from the same records.
 
@@ -312,7 +324,7 @@ Open an investigation or a specific received-result link to inspect its original
 
 The current responsible clinician or an administrator can transfer responsibility to a clinician with an active linked account. Handover reasons and history stay in the clinic workspace and preserve the original ordering doctor. Ownership organizes work; other authorized clinicians can still review. New-result activity follows the current owner, with a clinic-team fallback when no linked owner account is active. The queue also identifies unavailable owners so an administrator can arrange a handover. Reading an activity update does not complete a review.
 
-After an uncertain save response, retry the exact submitted request instead of entering another review or handover. These drafts are held in memory while their page remains open. Investigations and existing records remain available when optional intake, image or follow-up modules are paused. No laboratory connection, external message or automatic result interpretation is involved.
+After leaving a handover, return to **Investigation reviews** in the same signed-in tab and choose **Resume pending assignment**. If you already submitted it, **Retry same request** recovers the original assignee, reason and time, even if someone has since handed the investigation back. The worklist shows who owns it now. After a reload or sign-out, check the private assignment history before re-entering a handover. Investigations and existing records remain available when optional intake, image or follow-up modules are paused. No laboratory connection, external message or automatic result interpretation is involved.
 
 ## Record a completed external refund
 
@@ -478,7 +490,9 @@ npm run test:production
 npm run test:recovery
 ```
 
-API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5232** and API ports **3011–3060**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+API tests use isolated databases. The ZIP interoperability check uses Python 3’s standard-library `zipfile` module (no Python packages required); the application runtime remains Node.js. Browser workflow projects use frontend ports **5183–5237** and API ports **3011–3065**, each with a temporary synthetic database that is removed on exit. Automatic escalation checks are disabled in browser fixtures so explicit preview/run interactions remain deterministic; API and production checks cover the runner. The local browser suite uses installed Google Chrome. To use Playwright Chromium instead, run with `CI=true` after `npx playwright install chromium`. CI installs its own Chromium.
+
+CI runs the browser suite in 11 groups. Run one locally with `E2E_PROJECT_GROUP=3/11 npm run test:e2e`. Each group starts only the servers its projects use.
 
 The test suite covers role and ownership isolation, CSRF/origin checks, configurable schedules and closures, overlapping appointments with different durations, simultaneous booking conflicts, invalid appointment transitions, record privacy, care plans/check-ins, image/PDF validation, module continuity, persistence, invoice/payment retries and concurrent payments, knowledge publication, and complete browser workflows. Identity tests cover forced password changes, suspension, role changes, last-administrator protection, session ownership/revocation, recovery expiry/replay/rate limits, and migration of existing accounts and sessions. Clinical tests verify investigation transitions, unpublished-review privacy, cross-patient attachment rejection, immutable originals and amendments, procedure decision history, and completion guards. Follow-up and activity tests cover stale-review rejection, preserved check-in versions, same-day corrections, private assessment redaction, module pauses, recipient isolation, stable pagination, and read-state changes that leave clinical review work unchanged.
 

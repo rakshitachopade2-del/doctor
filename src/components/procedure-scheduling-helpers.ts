@@ -7,6 +7,7 @@ import type {
   ProcedureScheduleMutation,
   ProcedureScheduleRow,
 } from '../../shared/procedure-scheduling';
+import { ApiError } from '../lib';
 import { visitDate, visitTime } from './visit-duration-helpers';
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -265,12 +266,14 @@ export type ProcedureLinkPayload = {
   requestId: string;
   reason: string;
   removeConfirmed?: true;
+  recoverable: true;
 };
 export type ProcedureLinkAttempt = {
   body: ProcedureLinkPayload;
   source: ProcedureScheduleContext;
   target: ProcedureAppointmentCandidate | null;
   actorId: string;
+  actorRole: ProcedureScheduleEvent['createdByRole'];
 };
 export function checkedProcedureScheduleMutation(
   value: unknown,
@@ -298,6 +301,7 @@ export function checkedProcedureScheduleMutation(
     event.expectedRevision !== body.expectedRevision ||
     event.expectedAppointmentRevision !== body.expectedAppointmentRevision ||
     event.createdById !== attempt.actorId ||
+    event.createdByRole !== attempt.actorRole ||
     event.reason !== body.reason.trim() ||
     event.beforeAppointmentId !== attempt.source.procedure.effectiveAppointmentId ||
     event.afterAppointmentId !== body.appointmentId ||
@@ -307,4 +311,23 @@ export function checkedProcedureScheduleMutation(
   )
     throw bad();
   return { context, event };
+}
+
+export function procedureVisitRefusal(error: unknown, attempt: ProcedureLinkAttempt) {
+  if (
+    !(error instanceof ApiError) ||
+    ![400, 409].includes(error.status) ||
+    !object(error.responseData)
+  )
+    return null;
+  const { code, actorId, procedureId, command, message } = error.responseData;
+  return code === 'PROCEDURE_VISIT_NOT_CHANGED' &&
+    actorId === attempt.actorId &&
+    procedureId === attempt.source.procedure.id &&
+    text(message) &&
+    object(command) &&
+    Object.keys(command).length === Object.keys(attempt.body).length &&
+    Object.entries(attempt.body).every(([key, value]) => command[key] === value)
+    ? message
+    : null;
 }

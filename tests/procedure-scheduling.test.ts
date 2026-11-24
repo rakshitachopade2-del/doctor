@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.ts';
+import { beforeTransaction } from './fixtures/care-api.ts';
 import {
   addDays,
   clinicToday,
@@ -862,6 +863,117 @@ test('audit or patient notification failures roll back link events, receipts and
       200,
     );
   }
+});
+
+test('a skipped scheduling write leaves the visit, history and patient notice available to an exact retry', async () => {
+  const procedure = await plan(),
+    visit = await book(),
+    path = `/procedures/${procedure.id}/scheduling`;
+  const body = await command(procedure.id, visit),
+    before = counts();
+  for (const [table, condition] of [
+    ['procedureScheduleEvents', '1'],
+    ['procedureScheduleCommands', '1'],
+    ['audit', "json_extract(NEW.data,'$.action')='procedure appointment attach'"],
+    ['activity', "NEW.eventKey LIKE 'procedure-scheduling:%'"],
+  ]) {
+    app.locals.db.exec(
+      `CREATE TEMP TRIGGER skip_schedule_write BEFORE INSERT ON ${table} WHEN ${condition} BEGIN SELECT RAISE(IGNORE); END;`,
+    );
+    try {
+      assert.equal((await call(path, reception, 'POST', body)).status, 500);
+      assert.deepEqual(counts(), before);
+    } finally {
+      app.locals.db.exec('DROP TRIGGER skip_schedule_write');
+    }
+  }
+  const result = await call(path, reception, 'POST', body);
+  assert.equal(result.status, 200);
+  assert.equal(result.data.context.procedure.effectiveAppointmentId, visit.id);
+  assert.deepEqual((await call(path, reception, 'POST', body)).data.event, result.data.event);
+  assert.equal(counts().activity, before.activity + 1);
+  assert.deepEqual(get(app.locals.db, 'appointments', visit.id), visit);
+});
+
+test('staff access is current when scheduling lists, history, candidates, new changes and retries are processed', async () => {
+  const procedure = await plan(),
+    visit = await book(),
+    path = `/procedures/${procedure.id}/scheduling`;
+  const attached = await link(procedure.id, visit);
+  const replay = {
+    appointmentId: visit.id,
+    expectedAppointmentRevision: attached.event.expectedAppointmentRevision,
+    expectedRevision: attached.event.expectedRevision,
+    requestId: attached.event.requestId,
+    reason: attached.event.reason,
+  };
+  const remove = await command(procedure.id, null),
+    before = counts(),
+    db: DB = app.locals.db;
+  const account = db.prepare('SELECT data FROM users WHERE id=?').get(reception.id!)!;
+  for (const request of [
+    () => call('/procedure-scheduling', reception),
+    () => call(path, reception),
+    () => call(path + '/candidates', reception),
+    () => call(path, reception, 'POST', remove),
+    () => call(path, reception, 'POST', replay),
+  ]) {
+    try {
+      const reply = await beforeTransaction(
+        db,
+        'BEGIN IMMEDIATE',
+        () =>
+          db
+            .prepare(
+              "UPDATE users SET data=json_set(data,'$.mustChangePassword',json('true')) WHERE id=?",
+            )
+            .run(reception.id!),
+        request,
+      );
+      assert.equal(reply.status, 403);
+      assert.deepEqual(Object.keys(reply.data), ['error']);
+    } finally {
+      db.prepare('UPDATE users SET data=? WHERE id=?').run(account.data, reception.id!);
+    }
+  }
+  assert.deepEqual(counts(), before);
+  assert.deepEqual((await call(path, reception, 'POST', replay)).data.event, attached.event);
+});
+
+test('a verified appointment refusal survives the visit returning to its original time and a fresh request succeeds', async () => {
+  const procedure = await plan(),
+    visit = await book(),
+    path = `/procedures/${procedure.id}/scheduling`;
+  const reviewed = { ...(await command(procedure.id, visit)), recoverable: true };
+  updateAppointment(visit, { time: '16:45' });
+  const first = await call(path, reception, 'POST', reviewed);
+  assert.equal(first.status, 409);
+  assert.deepEqual(first.data, {
+    code: 'PROCEDURE_VISIT_NOT_CHANGED',
+    actorId: reception.id,
+    procedureId: procedure.id,
+    command: reviewed,
+    message: 'The selected visit changed. Refresh the candidates and review it again.',
+  });
+  updateAppointment(visit, { time: visit.time });
+  assert.deepEqual((await call(path, reception, 'POST', reviewed)).data, first.data);
+  assert.deepEqual((await context(procedure.id)).history, []);
+  const legacy = { ...reviewed } as Record<string, unknown>;
+  delete legacy.recoverable;
+  for (const [who, body] of [
+    [reception, legacy],
+    [doctor, reviewed],
+    [reception, { ...reviewed, reason: 'Different proposal' }],
+  ] as const) {
+    const collision = await call(path, who, 'POST', body);
+    assert.equal(collision.status, 409);
+    assert.deepEqual(Object.keys(collision.data), ['error']);
+  }
+  const fresh = { ...reviewed, requestId: randomUUID() };
+  const saved = await call(path, reception, 'POST', fresh);
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await call(path, reception, 'POST', fresh)).data, saved.data);
+  assert.deepEqual((await call(path, reception, 'POST', reviewed)).data, first.data);
 });
 
 test('worklist classification, literal search and ordering do not search private notes and clamp empty/filter-shrunk pages', async () => {

@@ -437,6 +437,8 @@ test('investigation responsibility preserves private handovers, survives stale a
     );
     await form.getByRole('button', { name: 'Retry same request', exact: true }).click();
     expect((await retried).postDataJSON()).toEqual(submitted);
+    await expect(dialog.getByRole('region', { name: 'Confirmed handover' })).toContainText(reason);
+    await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
     await expect(dialog).toBeHidden();
     expect((await context(page.request, order.id)).assignments).toEqual(committed.assignments);
     await expect(row.getByText(newDoctor.name, { exact: true })).toBeVisible();
@@ -497,6 +499,8 @@ test('investigation responsibility preserves private handovers, survives stale a
       fullPage: true,
     });
     await form.getByRole('button', { name: 'Save assignment', exact: true }).click();
+    await expect(dialog.getByRole('heading', { name: 'Handover recorded' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
     await expect(dialog).toBeHidden();
     const final = await context(page.request, order.id);
     expect(final.assignments).toHaveLength(2);
@@ -727,6 +731,8 @@ test('wrong-account handover and empty publication confirmations remain unconfir
     await form.getByRole('button', { name: 'Retry same request', exact: true }).click();
     expect((await assignmentRetry).postDataJSON()).toEqual(submitted);
     expect((await assignmentConfirmation).status()).toBe(200);
+    await expect(dialog.getByRole('region', { name: 'Confirmed handover' })).toContainText(reason);
+    await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
     await expect(dialog).toBeHidden();
     expect((await context(page.request, order.id)).assignments).toEqual(
       savedAssignment!.assignments,

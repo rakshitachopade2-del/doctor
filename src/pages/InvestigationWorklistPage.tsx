@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   ArrowUpRight,
   ClipboardCheck,
@@ -11,11 +11,12 @@ import {
 } from 'lucide-react';
 import type {
   InvestigationAssignment,
+  InvestigationHandoverCommand,
   InvestigationOwner,
   InvestigationReviewContext,
   InvestigationWorkItem,
 } from '../../shared/investigation-worklist';
-import { api, ApiError, formatDate, useResource, useSession, useToast } from '../lib';
+import { api, ApiError, formatDate, useSession } from '../lib';
 import {
   Badge,
   Card,
@@ -26,7 +27,15 @@ import {
   Modal,
   PageHeader,
 } from '../components/ui';
-import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
+import {
+  InvestigationReviewModal,
+  PendingInvestigationReviews,
+} from '../components/InvestigationReviewModal';
+import { usePendingCareSubmissions } from '../components/pending-care-submissions';
+import {
+  useAppointmentBookingData,
+  useAppointmentBookingGuard,
+} from '../components/appointment-booking-helpers';
 import './investigation-worklist.css';
 
 const statusLabels: Record<InvestigationWorkItem['status'], string> = {
@@ -136,11 +145,18 @@ function checkedOwners(value: unknown): InvestigationOwner[] {
     throw new Error('Eligible clinician accounts could not be confirmed. Refresh to try again.');
   return value as InvestigationOwner[];
 }
-function checkedContext(value: unknown, investigationId: string): InvestigationReviewContext {
+function checkedContext(
+  value: unknown,
+  investigationId: string,
+  original?: InvestigationReviewContext,
+): InvestigationReviewContext {
   const item = checkedItem(value);
   const context = value as InvestigationReviewContext;
   if (
     item.investigationId !== investigationId ||
+    (original !== undefined &&
+      (item.patientId !== original.patientId ||
+        item.orderedByDoctorId !== original.orderedByDoctorId)) ||
     !isRecord(context.investigation) ||
     context.investigation.id !== investigationId ||
     context.investigation.patientId !== item.patientId ||
@@ -164,7 +180,8 @@ function checkedContext(value: unknown, investigationId: string): InvestigationR
         ].every((key) => isText(entry[key])) &&
         isDate(entry.createdAt),
     ) ||
-    new Set(context.assignments.map((entry) => entry.id)).size !== context.assignments.length
+    new Set(context.assignments.map((entry) => entry.id)).size !== context.assignments.length ||
+    item.ownerDoctorId !== (context.assignments[0]?.doctorId ?? item.orderedByDoctorId)
   )
     throw new Error(
       'The response did not confirm this investigation and its ownership history. Refresh or retry the same submitted request.',
@@ -199,19 +216,14 @@ function Sharing({ item }: { item: InvestigationWorkItem }) {
     </span>
   );
 }
-type AssignmentPayload = {
-  doctorId: string;
-  reason: string;
-  expectedRevision: string;
-  requestId: string;
-};
-type AssignmentDraft = {
+export type AssignmentDraft = {
   investigationId: string;
   source: InvestigationReviewContext;
   doctorId: string;
   reason: string;
   requestId: string;
-  attempt: AssignmentPayload | null;
+  doctorName: string;
+  attempt: InvestigationHandoverCommand | null;
   phase: 'editing' | 'uncertain' | 'conflict';
   error: string;
   reviewed: InvestigationReviewContext | null;
@@ -221,6 +233,7 @@ function newAssignment(source: InvestigationReviewContext): AssignmentDraft {
     investigationId: source.investigationId,
     source,
     doctorId: '',
+    doctorName: '',
     reason: '',
     requestId: crypto.randomUUID(),
     attempt: null,
@@ -232,6 +245,21 @@ function newAssignment(source: InvestigationReviewContext): AssignmentDraft {
 
 export function InvestigationWorklistPage() {
   const { session } = useSession();
+  return (
+    <Worklist
+      key={JSON.stringify([
+        session.user?.id,
+        session.user?.role,
+        session.user?.doctorId,
+        session.csrfToken,
+      ])}
+    />
+  );
+}
+
+function Worklist() {
+  const { session } = useSession();
+  const { investigationHandover } = usePendingCareSubmissions();
   const [params, setParams] = useSearchParams();
   const defaultScope = session.user?.role === 'doctor' && session.user.doctorId ? 'mine' : 'all';
   const scope =
@@ -247,11 +275,21 @@ export function InvestigationWorklistPage() {
   const search = params.get('q') ?? '';
   const unavailableOnly = params.get('owner') === 'unavailable';
   const selectedId = params.get('investigation');
-  const resource = useResource<InvestigationWorkItem[]>(
+  const resource = useAppointmentBookingData(
     `/api/investigation-worklist?scope=${scope}`,
+    checkedWorklist,
   );
-  const [draft, setDraft] = useState<AssignmentDraft | null>(null);
-  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [, renderDraft] = useState(0);
+  const draft = investigationHandover.current;
+  function setDraft(next: AssignmentDraft | null) {
+    investigationHandover.current = next;
+    renderDraft((version) => version + 1);
+  }
+  const location = useLocation();
+  const [review, setReview] = useState<{ id: string; locationKey: string } | null>(null);
+  const reviewId = review?.locationKey === location.key ? review.id : null;
+  const setReviewId = (id: string | null) =>
+    setReview(id ? { id, locationKey: location.key } : null);
   const canReview = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
   function setQuery(key: string, value: string | null) {
     setParams(
@@ -271,15 +309,8 @@ export function InvestigationWorklistPage() {
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [resource.reload]);
-  let items: InvestigationWorkItem[] = [],
+  const items = resource.data ?? [],
     loadError = resource.error;
-  if (!resource.loading && !loadError) {
-    try {
-      items = checkedWorklist(resource.data);
-    } catch (problem) {
-      loadError = errorText(problem);
-    }
-  }
   const visible = items
     .filter((item) => {
       const matchesFilter =
@@ -334,6 +365,7 @@ export function InvestigationWorklistPage() {
           </button>
         }
       />
+      {!reviewId && <PendingInvestigationReviews open={setReviewId} />}
       <div className="iwq-metrics">
         {[
           {
@@ -375,8 +407,8 @@ export function InvestigationWorklistPage() {
           <div>
             <strong>An investigation handover is unfinished.</strong>
             <p>
-              {draft.source.patientName} · {draft.source.title}. The draft is retained while this
-              page stays open.
+              {draft.source.patientName} · {draft.source.title}. You can resume this handover in
+              this signed-in tab.
             </p>
           </div>
           <button
@@ -551,18 +583,13 @@ export function InvestigationWorklistPage() {
       </div>
       {selectedId && (
         <InvestigationAssignmentModal
-          key={selectedId}
+          key={JSON.stringify([selectedId, location.key])}
           investigationId={selectedId}
           draft={draft}
           onDraftChange={setDraft}
           onClose={() => setQuery('investigation', null)}
           onResume={() => {
             if (draft) setQuery('investigation', draft.investigationId);
-          }}
-          onSaved={async () => {
-            setDraft(null);
-            setQuery('investigation', null);
-            await resource.reload();
           }}
         />
       )}
@@ -615,9 +642,11 @@ function AssignmentHistory({ context }: { context: InvestigationReviewContext })
 function ContextSummary({
   context,
   latest = false,
+  submitted = false,
 }: {
   context: InvestigationReviewContext;
   latest?: boolean;
+  submitted?: boolean;
 }) {
   return (
     <section className="iwq-assignment-context">
@@ -626,7 +655,7 @@ function ContextSummary({
       <Status item={context} />
       <dl>
         <div>
-          <dt>Current investigation owner</dt>
+          <dt>{submitted ? 'Owner at submission' : 'Current investigation owner'}</dt>
           <dd>{context.ownerDoctorName}</dd>
         </div>
         <div>
@@ -665,54 +694,49 @@ function InvestigationAssignmentModal({
   onDraftChange,
   onClose,
   onResume,
-  onSaved,
 }: {
   investigationId: string;
   draft: AssignmentDraft | null;
   onDraftChange: (draft: AssignmentDraft | null) => void;
   onClose: () => void;
   onResume: () => void;
-  onSaved: () => Promise<void>;
 }) {
   const { session } = useSession();
-  const toast = useToast();
-  const resource = useResource<InvestigationReviewContext>(
-    `/api/investigations/${encodeURIComponent(investigationId)}/review-context`,
-  );
-  const ownerResource = useResource<InvestigationOwner[]>('/api/investigation-owners');
+  const capture = useAppointmentBookingGuard();
+  const dismissed = useRef(false);
+  const close = () => {
+    dismissed.current = true;
+    onClose();
+  };
+  function captureOpen() {
+    const here = capture();
+    return () => here() && !dismissed.current;
+  }
   const [busy, setBusy] = useState(false);
   const [refreshed, setRefreshed] = useState<InvestigationReviewContext | null>(null);
   const [refreshedOwners, setRefreshedOwners] = useState<InvestigationOwner[] | null>(null);
-  const mounted = useRef(false);
+  const [saved, setSaved] = useState<InvestigationAssignment | null>(null);
   const saving = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  let context: InvestigationReviewContext | null = null,
-    owners: InvestigationOwner[] = [];
-  let loadError = resource.error,
-    ownersError = ownerResource.error;
-  if (!resource.loading && !loadError) {
-    try {
-      context = checkedContext(refreshed ?? resource.data, investigationId);
-    } catch (problem) {
-      loadError = errorText(problem);
-    }
-  }
-  if (!ownerResource.loading && !ownersError) {
-    try {
-      owners = checkedOwners(refreshedOwners ?? ownerResource.data);
-    } catch (problem) {
-      ownersError = errorText(problem);
-    }
-  }
   const currentDraft = draft?.investigationId === investigationId ? draft : null;
   const blocked = !!draft && !currentDraft;
-  const source = currentDraft?.source ?? context;
   const phase = currentDraft?.phase ?? 'editing';
+  const contextPath = `/api/investigations/${encodeURIComponent(investigationId)}/review-context`;
+  const resource = useAppointmentBookingData(
+    refreshed || currentDraft?.attempt ? null : contextPath,
+    (value) => checkedContext(value, investigationId, currentDraft?.source),
+  );
+  const ownerResource = useAppointmentBookingData(
+    phase === 'editing' && !saved && !blocked ? '/api/investigation-owners' : null,
+    checkedOwners,
+  );
+  const context =
+      phase === 'uncertain'
+        ? currentDraft!.source
+        : (refreshed ?? resource.data ?? currentDraft?.source ?? null),
+    source = currentDraft?.source ?? context,
+    owners = refreshedOwners ?? ownerResource.data ?? [],
+    loadError = resource.error,
+    ownersError = ownerResource.error;
   const canAssign =
     !!source &&
     source.status !== 'cancelled' &&
@@ -736,7 +760,7 @@ function InvestigationAssignmentModal({
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (saving.current || blocked || !source || phase === 'conflict') return;
+    if (saving.current || blocked || !source || phase === 'conflict' || !session.user) return;
     const entry = currentDraft ?? newAssignment(source);
     if (
       !entry.attempt &&
@@ -747,7 +771,8 @@ function InvestigationAssignmentModal({
       });
       return;
     }
-    const body: AssignmentPayload = entry.attempt ?? {
+    const body: InvestigationHandoverCommand = entry.attempt ?? {
+      recoverable: true,
       doctorId,
       reason: reason.trim(),
       expectedRevision: source.revision,
@@ -755,90 +780,112 @@ function InvestigationAssignmentModal({
     };
     saving.current = true;
     setBusy(true);
-    onDraftChange({ ...entry, attempt: body, error: '' });
+    const current = captureOpen();
+    const pending = { ...entry, phase: 'uncertain' as const, attempt: body, error: '' };
+    onDraftChange(pending);
     try {
-      const response = checkedContext(
-        await api<unknown>(
-          `/api/investigations/${encodeURIComponent(investigationId)}/assignment`,
-          { method: 'POST', body },
-        ),
-        investigationId,
+      const value = await api<unknown>(
+        `/api/investigations/${encodeURIComponent(investigationId)}/assignment`,
+        {
+          method: 'POST',
+          body,
+          isCurrent: current,
+        },
       );
+      if (!current()) return;
+      const response = checkedContext(value, investigationId, entry.source);
+      const receipt = isRecord(value) && isRecord(value.receipt) ? value.receipt : null;
+      const event = receipt && isRecord(receipt.assignment) ? receipt.assignment : null;
+      const assignment = response.assignments.find((row) => row.id === event?.id);
       if (
-        response.patientId !== entry.source.patientId ||
-        response.orderedByDoctorId !== entry.source.orderedByDoctorId ||
+        !receipt ||
+        !event ||
+        !assignment ||
+        receipt.requestId !== body.requestId ||
+        receipt.investigationId !== investigationId ||
+        receipt.expectedRevision !== body.expectedRevision ||
+        receipt.actorId !== session.user.id ||
+        entry.source.assignments.some((row) => row.id === assignment.id) ||
         response.revision === entry.source.revision ||
-        !response.assignments.some(
-          (assignment) =>
-            !entry.source.assignments.some((original) => original.id === assignment.id) &&
-            assignment.assignedById === session.user?.id &&
-            assignment.doctorId === body.doctorId &&
-            assignment.previousDoctorId === entry.source.ownerDoctorId &&
-            assignment.reason === body.reason,
+        assignment.assignedById !== session.user.id ||
+        assignment.doctorId !== body.doctorId ||
+        assignment.previousDoctorId !== entry.source.ownerDoctorId ||
+        assignment.reason !== body.reason ||
+        (Object.keys(assignment) as (keyof InvestigationAssignment)[]).some(
+          (key) => assignment[key] !== event[key],
         )
       )
         throw new Error(
           'The response did not confirm the submitted handover. Retry the same request to check its outcome.',
         );
-      if (!mounted.current) return;
-      toast(
-        'Investigation responsibility assigned. The original order and clinical history are preserved.',
-      );
-      await onSaved();
+      setSaved(assignment);
+      setRefreshed(response);
+      onDraftChange(null);
     } catch (problem) {
-      if (!mounted.current) return;
-      const error = errorText(problem);
+      if (!current()) return;
+      const reply =
+        problem instanceof ApiError && [400, 409].includes(problem.status)
+          ? problem.responseData
+          : null;
+      const command = isRecord(reply) && isRecord(reply.command) ? reply.command : null;
       if (
-        problem instanceof ApiError &&
-        [400, 403].includes(problem.status) &&
-        /current investigation owner|active linked account/i.test(error)
-      )
-        onDraftChange({ ...entry, phase: 'conflict', attempt: body, reviewed: null, error });
-      else if (problem instanceof ApiError && [400, 403, 404, 422].includes(problem.status))
-        onDraftChange({ ...entry, phase: 'editing', attempt: null, error });
-      else if (
-        problem instanceof ApiError &&
-        problem.status === 409 &&
-        !/request.*(?:already|different|used)|idempot/i.test(error)
-      )
-        onDraftChange({ ...entry, phase: 'conflict', attempt: body, reviewed: null, error });
-      else onDraftChange({ ...entry, phase: 'uncertain', attempt: body, error });
+        isRecord(reply) &&
+        reply.code === 'INVESTIGATION_HANDOVER_NOT_RECORDED' &&
+        reply.actorId === session.user.id &&
+        reply.investigationId === investigationId &&
+        command &&
+        Object.keys(command).length === Object.keys(body).length &&
+        (Object.keys(body) as (keyof InvestigationHandoverCommand)[]).every(
+          (key) => command[key] === body[key],
+        ) &&
+        isText(reply.message)
+      ) {
+        onDraftChange({ ...pending, phase: 'conflict', reviewed: null, error: reply.message });
+      } else onDraftChange({ ...pending, error: errorText(problem) });
     } finally {
       saving.current = false;
-      if (mounted.current) setBusy(false);
+      if (current()) setBusy(false);
     }
   }
   async function refreshContext() {
     if (saving.current || !currentDraft) return;
+    const current = captureOpen();
     saving.current = true;
     setBusy(true);
     try {
       const [fresh, available] = await Promise.all([
-        api<unknown>(`/api/investigations/${encodeURIComponent(investigationId)}/review-context`),
-        api<unknown>('/api/investigation-owners'),
+        api<unknown>(contextPath, { isCurrent: current }),
+        api<unknown>('/api/investigation-owners', { isCurrent: current }),
       ]);
-      const reviewed = checkedContext(fresh, investigationId),
+      const reviewed = checkedContext(fresh, investigationId, currentDraft.source),
         nextOwners = checkedOwners(available);
-      if (!mounted.current) return;
+      if (!current()) return;
       setRefreshed(reviewed);
       setRefreshedOwners(nextOwners);
       update({ reviewed, error: '' });
     } catch (problem) {
-      if (mounted.current) update({ error: errorText(problem) });
+      if (current()) update({ error: errorText(problem) });
     } finally {
       saving.current = false;
-      if (mounted.current) setBusy(false);
+      if (current()) setBusy(false);
     }
   }
-  const showForm = canAssign || !!currentDraft;
+  const showForm = !saved && (canAssign || !!currentDraft);
   return (
-    <Modal
-      title="Investigation ownership"
-      onClose={() => {
-        if (!saving.current) onClose();
-      }}
-    >
+    <Modal title="Investigation ownership" onClose={close}>
       <div className="stack iwq-ownership-modal">
+        {saved && (
+          <section className="iwq-handover" aria-label="Confirmed handover">
+            <h3>Handover recorded</h3>
+            <p>
+              {saved.previousDoctorName} → {saved.doctorName}
+            </p>
+            <p className="iwq-prose">{saved.reason}</p>
+            <small>
+              Recorded by {saved.assignedByName} · {stamp(saved.createdAt)} IST
+            </small>
+          </section>
+        )}
         {resource.loading ? (
           <Loading />
         ) : loadError ? (
@@ -852,7 +899,10 @@ function InvestigationAssignmentModal({
         ) : (
           context && (
             <>
-              <ContextSummary context={context} />
+              <ContextSummary
+                context={context}
+                submitted={phase === 'uncertain' || (!refreshed && !!currentDraft?.attempt)}
+              />
               <Link
                 className="text-link"
                 to={recordLink(context)}
@@ -882,7 +932,7 @@ function InvestigationAssignmentModal({
             further handovers are closed.
           </p>
         )}
-        {context && !canAssign && !currentDraft && context.status !== 'cancelled' && (
+        {context && !saved && !canAssign && !currentDraft && context.status !== 'cancelled' && (
           <p className="notice">
             Only the current investigation owner or an administrator can transfer responsibility.
             Authorized clinicians can still read the record and review results.
@@ -921,12 +971,21 @@ function InvestigationAssignmentModal({
                 required
                 value={doctorId}
                 disabled={locked}
-                onChange={(event) => update({ doctorId: event.target.value, error: '' })}
+                onChange={(event) =>
+                  update({
+                    doctorId: event.target.value,
+                    doctorName:
+                      eligible.find((owner) => owner.doctorId === event.target.value)?.doctorName ??
+                      '',
+                    error: '',
+                  })
+                }
               >
                 <option value="">Select a clinician</option>
                 {doctorId && !validOwner && (
                   <option value={doctorId} disabled>
-                    Previously selected clinician is unavailable or already owns this investigation
+                    {currentDraft?.doctorName || 'Previously selected clinician'}
+                    {phase === 'editing' ? ' (unavailable or already owns this investigation)' : ''}
                   </option>
                 )}
                 {eligible.map((owner) => (
@@ -936,7 +995,7 @@ function InvestigationAssignmentModal({
                 ))}
               </select>
             </Field>
-            {!ownerResource.loading && !ownersError && !eligible.length && (
+            {!ownerResource.loading && !ownersError && phase === 'editing' && !eligible.length && (
               <p className="iwq-help">
                 No other eligible clinician is available. An administrator can link an active
                 clinical account in Accounts & access.
@@ -1012,12 +1071,7 @@ function InvestigationAssignmentModal({
               </div>
             )}
             <div className="iwq-form-actions">
-              <button
-                type="button"
-                className="button button-secondary"
-                disabled={busy}
-                onClick={onClose}
-              >
+              <button type="button" className="button button-secondary" onClick={close}>
                 Close for now
               </button>
               {phase === 'editing' && !currentDraft?.attempt && currentDraft && (
@@ -1049,7 +1103,7 @@ function InvestigationAssignmentModal({
         )}
         {!showForm && (
           <div className="iwq-form-actions">
-            <button className="button button-secondary" onClick={onClose}>
+            <button className="button button-secondary" onClick={close}>
               Close
             </button>
           </div>

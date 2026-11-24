@@ -553,6 +553,44 @@ async function rehearseRecovery() {
     assert.equal(orderRefusal.code, 'INVESTIGATION_NOT_ORDERED');
     assert.deepEqual(orderRefusal.command, expiredOrder);
     const investigationPath = `/investigations/${order.id}`;
+    const recipient = (
+      await call(
+        source,
+        doctorCreationPath,
+        admin,
+        'POST',
+        {
+          ...doctorCommand,
+          requestId: randomUUID(),
+          name: 'Synthetic investigation handover recipient',
+        },
+        201,
+      )
+    ).receipt.doctor;
+    await call(source, '/accounts/recovery-mfa', admin, 'PATCH', { doctorId: recipient.id });
+    const handoverPath = investigationPath + '/assignment';
+    const handover = {
+      requestId: randomUUID(),
+      expectedRevision: (await call(source, investigationPath + '/review-context', admin)).revision,
+      doctorId: recipient.id,
+      reason: 'Private recovery rehearsal handover.',
+      recoverable: true,
+    };
+    const handedOver = await call(source, handoverPath, admin, 'POST', handover, 201);
+    assert.equal(handedOver.receipt.assignment.previousDoctorId, doctor.id);
+    assert.equal(handedOver.receipt.assignment.doctorId, recipient.id);
+    assert.equal(handedOver.receipt.assignment.reason, handover.reason);
+    const staleHandover = { ...handover, requestId: randomUUID(), doctorId: doctor.id };
+    const refusedHandover = await call(source, handoverPath, admin, 'POST', staleHandover, 409);
+    assert.equal(refusedHandover.code, 'INVESTIGATION_HANDOVER_NOT_RECORDED');
+    assert.deepEqual(refusedHandover.command, staleHandover);
+    const handBack = {
+      ...staleHandover,
+      requestId: randomUUID(),
+      expectedRevision: handedOver.revision,
+      reason: 'Private return for follow-up.',
+    };
+    await call(source, handoverPath, admin, 'POST', handBack, 201);
     const resultPath = investigationPath + '/results/submit';
     const resultCommand = {
       requestId: randomUUID(),
@@ -566,7 +604,7 @@ async function rehearseRecovery() {
     const originalSubmission = await call(source, resultPath, patient, 'POST', resultCommand, 201);
     const originalInvestigationResult = originalSubmission.receipt.result;
     const privateInterpretation = 'Unpublished synthetic investigation interpretation.';
-    const reviewedOrder = await call(
+    await call(
       source,
       investigationPath + '/reviews',
       admin,
@@ -579,6 +617,62 @@ async function rehearseRecovery() {
       },
       201,
     );
+    const interpretationPath = investigationPath + '/reviews';
+    const interpretationCommand = {
+      requestId: randomUUID(),
+      patientId,
+      investigationId: order.id,
+      doctorId: doctor.id,
+      reviewedByRole: 'admin',
+      expectedRevision: (await call(source, investigationPath + '/review-context', admin)).revision,
+      resultId: originalInvestigationResult.id,
+      summary: 'Synthetic findings shared deliberately after saving.',
+      followUp: 'Synthetic follow-up instructions.',
+      publishToPatient: false,
+    };
+    const interpretationSaved = await call(
+      source,
+      interpretationPath,
+      admin,
+      'POST',
+      interpretationCommand,
+      201,
+    );
+    const originalInterpretation = interpretationSaved.receipt;
+    assert.equal(originalInterpretation.review.publishedAt, null);
+    assert.equal(originalInterpretation.review.summary, interpretationCommand.summary);
+    assert.equal(originalInterpretation.review.resultId, originalInvestigationResult.id);
+    assert.equal(originalInterpretation.review.doctorId, doctor.id);
+    assert.equal(originalInterpretation.actorId, 'recovery-admin');
+    const reviewedOrder = await call(
+      source,
+      interpretationPath + '/' + originalInterpretation.review.id + '/publish',
+      admin,
+      'POST',
+      {},
+    );
+    assert.equal(reviewedOrder.reviews.length, 2);
+    const publishedInterpretation = reviewedOrder.reviews.find(
+      (row) => row.id === originalInterpretation.review.id,
+    );
+    assert.ok(publishedInterpretation.publishedAt);
+    const staleInterpretation = {
+      ...interpretationCommand,
+      requestId: randomUUID(),
+      summary: 'Synthetic refused private draft.',
+      publishToPatient: true,
+    };
+    const refusedInterpretation = await call(
+      source,
+      interpretationPath,
+      admin,
+      'POST',
+      staleInterpretation,
+      409,
+    );
+    assert.equal(refusedInterpretation.code, 'INVESTIGATION_REVIEW_NOT_RECORDED');
+    assert.equal(refusedInterpretation.actorId, 'recovery-admin');
+    assert.deepEqual(refusedInterpretation.command, staleInterpretation);
     const investigationCancellationPath = investigationPath + '/cancellation';
     const protectedCancellation = {
       requestId: randomUUID(),
@@ -839,9 +933,77 @@ async function rehearseRecovery() {
     const rejectedPlan = await call(source, planPath, admin, 'POST', rejectedPlanCommand, 409);
     assert.equal(rejectedPlan.code, 'CARE_PLAN_NOT_CREATED');
     const issuancePath = '/invoices/issue';
+    const procedureCreation = {
+      patientId,
+      doctorId: doctor.id,
+      plannedByRole: 'admin',
+      requestId: randomUUID(),
+      title: 'Retained procedure with a linked visit',
+      indication: 'Synthetic discussion',
+      benefits: 'Synthetic benefits',
+      risks: 'Synthetic risks',
+      alternatives: 'Synthetic alternatives',
+      aftercare: 'Synthetic aftercare',
+    };
+    const createdProcedure = await call(
+      source,
+      '/procedures',
+      admin,
+      'POST',
+      procedureCreation,
+      201,
+    );
+    const retainedProcedureId = createdProcedure.procedure.id;
+    const procPath = '/procedures/' + retainedProcedureId;
+    const procSchedule = procPath + '/scheduling';
+    const beforeLink = await call(source, procSchedule, admin);
+    const candidate = (await call(source, procSchedule + '/candidates', admin)).items.find(
+      (item) => item.appointment.id === ordinary.appointment.id,
+    );
+    assert.ok(candidate);
+    const scheduleRequest = {
+      requestId: randomUUID(),
+      appointmentId: candidate.appointment.id,
+      expectedRevision: beforeLink.revision,
+      expectedAppointmentRevision: candidate.revision,
+      reason: 'Private scheduling reason.',
+      recoverable: true,
+    };
+    const badSchedule = {
+      ...scheduleRequest,
+      requestId: randomUUID(),
+      expectedRevision: '0'.repeat(64),
+    };
+    const scheduleRefusal = await call(source, procSchedule, admin, 'POST', badSchedule, 409);
+    assert.equal(scheduleRefusal.code, 'PROCEDURE_VISIT_NOT_CHANGED');
+    const procCancel = procPath + '/cancellation';
+    const beforeLinkCancellation = await call(source, procPath + '/cancellation-context', admin);
+    const staleClosure = {
+      requestId: randomUUID(),
+      patientId,
+      procedureId: retainedProcedureId,
+      doctorId: doctor.id,
+      cancelledByRole: 'admin',
+      expectedDecisionId: null,
+      expectedRevision: beforeLinkCancellation.revision,
+      reason: 'Updated clinic plan.',
+      reviewedConfirmed: true,
+    };
+    const linkedProcedure = await call(source, procSchedule, admin, 'POST', scheduleRequest);
+    const closureRefusal = await call(source, procCancel, admin, 'POST', staleClosure, 409);
+    assert.equal(closureRefusal.code, 'PROCEDURE_NOT_CANCELLED');
+    const procedureChoice = await call(
+      source,
+      procPath + '/agreements',
+      patient,
+      'POST',
+      { decision: 'agreed', method: 'portal' },
+      201,
+    );
     const issuanceCommand = {
       requestId: randomUUID(),
       patientId,
+      procedureId: retainedProcedureId,
       reviewedConfirmed: true,
       items: [
         { description: 'Synthetic visit', quantity: 1, unitAmountPaise: 3000 },
@@ -893,6 +1055,15 @@ async function rehearseRecovery() {
       400,
     );
     assert.equal(rejectedIssuance.code, 'INVOICE_NOT_ISSUED');
+    const reviewedClosure = await call(source, procPath + '/cancellation-context', admin);
+    const closure = {
+      ...staleClosure,
+      requestId: randomUUID(),
+      expectedDecisionId: procedureChoice.agreements.at(-1).id,
+      expectedRevision: reviewedClosure.revision,
+    };
+    const procClosed = await call(source, procCancel, admin, 'POST', closure, 201);
+    assert.deepEqual(procClosed.receipt.appointment, candidate.appointment);
     const summaryPath = `/patients/${patientId}/care-summary`;
     const summary = await call(source, summaryPath, patient);
     const copyInput = { expectedRevision: summary.revision, requestId: randomUUID() };
@@ -1206,6 +1377,7 @@ async function rehearseRecovery() {
     );
     assert.deepEqual(await call(target, '/doctors'), [
       { ...updatedDoctor, appointmentDurationMinutes: 30, acceptingNewBookings: false },
+      { ...recipient, appointmentDurationMinutes: 30, acceptingNewBookings: true },
     ]);
     assert.deepEqual(
       await call(target, doctorCreationPath, newAdmin, 'POST', doctorCommand),
@@ -1325,6 +1497,30 @@ async function rehearseRecovery() {
       stalePayment,
     );
     const patientInvoice = await call(target, invoicePath, newPatient);
+    assert.equal(patientInvoice.invoice.procedureId, retainedProcedureId);
+    assert.deepEqual(
+      await call(target, '/procedures', newAdmin, 'POST', procedureCreation),
+      createdProcedure,
+    );
+    assert.deepEqual(await call(target, procCancel, newAdmin, 'POST', closure), procClosed);
+    assert.deepEqual(
+      await call(target, procCancel, newAdmin, 'POST', staleClosure, 409),
+      closureRefusal,
+    );
+    assert.deepEqual(
+      await call(target, procSchedule, newAdmin, 'POST', badSchedule, 409),
+      scheduleRefusal,
+    );
+    const restoredLink = await call(target, procSchedule, newAdmin, 'POST', scheduleRequest);
+    assert.deepEqual(restoredLink.event, linkedProcedure.event);
+    assert.equal(restoredLink.context.procedure.status, 'cancelled');
+    assert.deepEqual(restoredLink.context.procedure.appointment, candidate.appointment);
+    const sharedProcedure = (
+      await call(target, '/patients/' + patientId + '/clinical-workflows', newPatient)
+    ).procedures.find((item) => item.id === retainedProcedureId);
+    assert.equal(sharedProcedure.cancellationReason, closure.reason);
+    assert.deepEqual(sharedProcedure.agreements, procedureChoice.agreements);
+    assert.ok(!JSON.stringify(sharedProcedure).includes(scheduleRequest.reason));
     assert.deepEqual(patientInvoice.invoice, partialPayment.invoice);
     assert.deepEqual(patientInvoice.payments, partialPayment.payments);
     const restoredInvoices = await call(target, '/invoices', newPatient);
@@ -1336,6 +1532,14 @@ async function rehearseRecovery() {
     );
     assert.equal(issueAudit.items.filter((row) => row.action === 'created invoice').length, 1);
     const invoiceActivity = await call(target, '/activity?limit=100', newPatient);
+    assert.equal(
+      invoiceActivity.items.filter(
+        (item) =>
+          item.title === 'A procedure plan was cancelled' &&
+          item.detail === createdProcedure.procedure.title,
+      ).length,
+      1,
+    );
     assert.equal(
       invoiceActivity.items.filter(
         (row) =>
@@ -1658,6 +1862,23 @@ async function rehearseRecovery() {
       orderRefusal,
     );
     const patientActivity = (await call(target, '/activity?limit=100', newPatient)).items;
+    const restoredHandover = await call(target, handoverPath, newAdmin, 'POST', handover);
+    assert.deepEqual(restoredHandover.receipt, handedOver.receipt);
+    assert.equal(restoredHandover.ownerDoctorId, doctor.id);
+    assert.equal(restoredHandover.assignments.length, 2);
+    assert.deepEqual(
+      await call(target, handoverPath, newAdmin, 'POST', staleHandover, 409),
+      refusedHandover,
+    );
+    for (const projection of [patientActivity, restoredSummary, restoredPatientWorkflows]) {
+      for (const secret of [
+        handover.reason,
+        handBack.reason,
+        handover.requestId,
+        staleHandover.requestId,
+      ])
+        assert.equal(JSON.stringify(projection).includes(secret), false);
+    }
     const cancellationNotices = patientActivity.filter(
       (entry) =>
         entry.title === 'An investigation request was cancelled' && entry.detail === order.title,
@@ -1672,18 +1893,36 @@ async function rehearseRecovery() {
       originalInvestigationResult,
       supplementalSubmission.receipt.result,
     ]);
+    assert.deepEqual(
+      (await call(target, interpretationPath, newAdmin, 'POST', interpretationCommand)).receipt,
+      originalInterpretation,
+    );
+    assert.deepEqual(
+      await call(target, interpretationPath, newAdmin, 'POST', staleInterpretation, 409),
+      refusedInterpretation,
+    );
+    assert.equal(
+      patientActivity.filter(
+        (row) =>
+          row.title === 'Your clinician shared a report review' && row.detail === order.title,
+      ).length,
+      1,
+    );
     assert.deepEqual(restoredOrder.reviews, reviewedOrder.reviews);
     assert.equal(restoredOrder.status, 'cancelled');
     const restoredPatientOrder = restoredPatientWorkflows.investigations.find(
       (row) => row.id === order.id,
     );
-    assert.deepEqual(restoredPatientOrder.reviews, []);
+    assert.deepEqual(restoredPatientOrder.reviews, [publishedInterpretation]);
     assert.equal(restoredPatientOrder.cancellationReason, investigationCancellation.reason);
     assert.deepEqual(restoredPatientOrder.results, restoredOrder.results);
     for (const data of [restoredSummary, restoredPatientOrder, cancellationNotices]) {
       const json = JSON.stringify(data);
       for (const hidden of [
         privateInterpretation,
+        interpretationCommand.requestId,
+        staleInterpretation.requestId,
+        staleInterpretation.summary,
         orderCommand.requestId,
         expiredOrder.requestId,
         investigationCancellation.requestId,
@@ -1698,6 +1937,21 @@ async function rehearseRecovery() {
       target,
       `/search/audit?entityType=investigation&entityId=${order.id}`,
       newAdmin,
+    );
+    assert.equal(
+      resultAudit.items.filter((item) => item.action === 'reviewed investigation result').length,
+      2,
+    );
+    const publicationAudit = await call(
+      target,
+      '/search/audit?entityType=investigationReview&entityId=' + originalInterpretation.review.id,
+      newAdmin,
+    );
+    assert.equal(
+      publicationAudit.items.filter(
+        (item) => item.action === 'published investigation review to patient',
+      ).length,
+      1,
     );
     assert.equal(
       resultAudit.items.filter((entry) => entry.action === 'cancelled investigation').length,
@@ -1790,7 +2044,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, original investigation order and cancellation confirmations, preserved cancellation reasons and refusals for reviewed investigations, retained expired-order refusals, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, role-safe walk-in registration receipts after later corrections, staff account creation outcomes after a mandatory credential change, doctor profile creation and edit confirmations, edit history and a superseded edit after a public correction and booking pause, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, original investigation order and cancellation confirmations, preserved cancellation reasons and refusals for reviewed investigations, retained expired-order refusals, investigation result receipts and linked PDFs, original interpretation and private handover receipts after publication and reassignment, procedure planning, visit-link changes, cancellation, decision and completion receipts with stale refusals and linked billing, role-safe walk-in registration receipts after later corrections, staff account creation outcomes after a mandatory credential change, doctor profile creation and edit confirmations, edit history and a superseded edit after a public correction and booking pause, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

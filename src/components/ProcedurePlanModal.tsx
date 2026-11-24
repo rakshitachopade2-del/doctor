@@ -1,14 +1,24 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Plus } from 'lucide-react';
+import type { ProcedureRecord } from '../../shared/clinical';
 import type { Appointment } from '../../shared/types';
-import type { ProcedureTemplateDetail } from '../../shared/procedure-catalogue';
-import { api, ApiError, formatDate, useSession, useToast } from '../lib';
+import type {
+  ProcedureCreateMutation,
+  ProcedureTemplateDetail,
+} from '../../shared/procedure-catalogue';
+import { api, formatDate, useSession, useToast } from '../lib';
 import { EmptyState, ErrorState, Field, Loading, Modal } from './ui';
 import { Pagination } from './Pagination';
-import { useVisitData } from './visit-duration-helpers';
+import {
+  useAppointmentBookingData,
+  useAppointmentBookingGuard,
+} from './appointment-booking-helpers';
+import { usePendingCareSubmissions } from './pending-care-submissions';
 import { checkedTemplateDetail, checkedTemplatePage } from './procedure-catalogue-helpers';
 import {
   checkedProcedureCreation,
+  checkedPlanRefusal,
   procedureFailure,
   procedureFieldLabels,
   procedureFieldNames,
@@ -18,6 +28,7 @@ import {
   type ProcedurePlanDraft,
 } from './procedure-plan-helpers';
 import './procedure-plan.css';
+import './patient-registration.css';
 
 const emptyDraft: ProcedurePlanDraft = {
   title: '',
@@ -53,60 +64,148 @@ function TemplateContent({ source }: { source: ProcedureTemplateDetail }) {
     </>
   );
 }
-export function ProcedurePlanModal({
+const appointmentLabel = (visit: Appointment) =>
+  formatDate(visit.date) +
+  ' · ' +
+  visit.time +
+  ' IST · ' +
+  (visit.durationMinutes ?? 30) +
+  ' minutes · ' +
+  visit.doctorName +
+  ' · ' +
+  visit.reason;
+
+export function useProcedurePlan(
+  patientId: string,
+  patientName: string,
+  appointments: Appointment[],
+  procedures: ProcedureRecord[],
+  reload: () => void,
+) {
+  const { session } = useSession(),
+    user = session.user,
+    { key } = useLocation();
+  const { procedurePlans } = usePendingCareSubmissions();
+  const scope = JSON.stringify([
+    key,
+    patientId,
+    user?.id,
+    user?.role,
+    user?.doctorId,
+    session.csrfToken,
+  ]);
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => setOpen(false), [scope]);
+  if (
+    !user?.doctorId ||
+    user.mustChangePassword ||
+    (user.role !== 'doctor' && user.role !== 'admin')
+  )
+    return { button: null, modal: null, hasPending: false };
+  const hasPending = procedurePlans.has(patientId);
+  return {
+    hasPending,
+    button: (
+      <button className="button button-primary" onClick={() => setOpen(true)}>
+        <Plus size={16} />
+        {hasPending ? 'Resume procedure plan' : 'Plan procedure'}
+      </button>
+    ),
+    modal: open && (
+      <ProcedurePlanModal
+        key={scope}
+        patientId={patientId}
+        patientName={patientName}
+        appointments={appointments}
+        procedures={procedures}
+        actorId={user.id}
+        doctorId={user.doctorId}
+        role={user.role}
+        onClose={() => setOpen(false)}
+        onSaved={() => {
+          setOpen(false);
+          reload();
+        }}
+      />
+    ),
+  };
+}
+
+function ProcedurePlanModal({
   patientId,
+  patientName,
+  actorId,
+  doctorId,
+  role,
+  procedures,
   appointments,
   onClose,
   onSaved,
 }: {
   patientId: string;
+  patientName: string;
+  doctorId: string;
+  actorId: string;
+  role: ProcedurePlanBody['plannedByRole'];
+  procedures: ProcedureRecord[];
   appointments: Appointment[];
   onClose: () => void;
-  onSaved: () => Promise<void> | void;
+  onSaved: () => void;
 }) {
-  const { session } = useSession(),
-    toast = useToast(),
-    location = useLocation();
-  const [draft, setDraft] = useState<ProcedurePlanDraft>(emptyDraft);
+  const toast = useToast(),
+    capture = useAppointmentBookingGuard();
+  const { procedurePlans } = usePendingCareSubmissions();
+  const [attempt, setAttempt] = useState<ProcedurePlanAttempt | null>(
+    () => procedurePlans.get(patientId) ?? null,
+  );
+  const [draft, setDraft] = useState<ProcedurePlanDraft>(() =>
+    attempt
+      ? {
+          title: attempt.body.title,
+          benefits: attempt.body.benefits,
+          risks: attempt.body.risks,
+          alternatives: attempt.body.alternatives,
+          aftercare: attempt.body.aftercare,
+          estimatedCost: attempt.body.estimatedCost,
+          indication: attempt.body.indication,
+          appointmentId: attempt.body.appointmentId ?? '',
+        }
+      : emptyDraft,
+  );
   const [picker, setPicker] = useState(false),
     [search, setSearch] = useState('');
   const [query, setQuery] = useState(''),
     [page, setPage] = useState(1),
     [selectedId, setSelectedId] = useState('');
-  const [source, setSource] = useState<ProcedureTemplateDetail | null>(null);
+  const [source, setSource] = useState<ProcedureTemplateDetail | null>(attempt?.source ?? null);
   const [replacementConfirmed, setReplacementConfirmed] = useState(false),
-    [patientReviewed, setPatientReviewed] = useState(false);
-  const [phase, setPhase] = useState<'editing' | 'saving' | 'uncertain' | 'conflict'>('editing');
-  const [attempt, setAttempt] = useState<ProcedurePlanAttempt | null>(null),
-    [error, setError] = useState('');
+    [patientReviewed, setPatientReviewed] = useState(!!attempt?.source);
+  const [phase, setPhase] = useState<'editing' | 'saving' | 'uncertain' | 'conflict'>(
+    attempt ? 'uncertain' : 'editing',
+  );
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState<ProcedureCreateMutation | null>(null);
   const [refreshed, setRefreshed] = useState<ProcedureTemplateDetail | null>(null),
     [refreshing, setRefreshing] = useState(false);
-  const alive = useRef(false),
+  const dismissed = useRef(false),
     pending = useRef(false),
     refreshId = useRef(0);
   const filters = { search: query, active: 'true' as const, publication: 'published' as const };
-  const list = useVisitData(
+  const list = useAppointmentBookingData(
     picker
       ? `/api/procedure-catalogue?${new URLSearchParams({ ...filters, page: String(page), pageSize: '10' })}`
       : null,
     (value) => checkedTemplatePage(value, filters, page, 10),
   );
-  const preview = useVisitData(
+  const preview = useAppointmentBookingData(
     picker && selectedId ? `/api/procedure-catalogue/${encodeURIComponent(selectedId)}` : null,
     (value) => checkedTemplateDetail(value, selectedId),
   );
   const locked = phase !== 'editing' || refreshing;
-  const canClose = phase !== 'saving' && phase !== 'uncertain';
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-      refreshId.current++;
-    };
-  }, [location.key]);
-  const current = () => alive.current && (window.history.state?.key ?? 'default') === location.key;
   function close() {
-    if (!pending.current && canClose) onClose();
+    dismissed.current = true;
+    if (saved) onSaved();
+    else onClose();
   }
   function edit(key: keyof ProcedurePlanDraft, value: string) {
     setDraft((old) => ({ ...old, [key]: value }));
@@ -135,19 +234,23 @@ export function ProcedurePlanModal({
   async function refreshSource() {
     if (!source || refreshing || pending.current) return;
     const request = ++refreshId.current;
+    const origin = capture();
+    const current = () => origin() && !dismissed.current && request === refreshId.current;
     setRefreshing(true);
     setRefreshed(null);
     setError('');
     try {
       const value = checkedTemplateDetail(
-        await api(`/api/procedure-catalogue/${encodeURIComponent(source.template.id)}`),
+        await api(`/api/procedure-catalogue/${encodeURIComponent(source.template.id)}`, {
+          isCurrent: current,
+        }),
         source.template.id,
       );
-      if (current() && request === refreshId.current) setRefreshed(value);
+      if (current()) setRefreshed(value);
     } catch (problem) {
-      if (current() && request === refreshId.current) setError(procedureFailure(problem));
+      if (current()) setError(procedureFailure(problem));
     } finally {
-      if (current() && request === refreshId.current) setRefreshing(false);
+      if (current()) setRefreshing(false);
     }
   }
   function acceptRefreshed() {
@@ -161,8 +264,23 @@ export function ProcedurePlanModal({
   }
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (pending.current || refreshing || phase === 'conflict' || !session.user?.doctorId) return;
-    if (!attempt && source && !patientReviewed) return;
+    if (pending.current || refreshing || dismissed.current || phase === 'conflict') return;
+    const recovering =
+      phase === 'uncertain' && attempt !== null && procedurePlans.get(patientId) === attempt;
+    if (
+      !recovering &&
+      (phase !== 'editing' || procedurePlans.has(patientId) || (source && !patientReviewed))
+    )
+      return;
+    if (
+      !recovering &&
+      ['indication', ...procedureFieldNames.filter((k) => k !== 'estimatedCost')].some(
+        (k) => !draft[k as keyof ProcedurePlanDraft].trim(),
+      )
+    ) {
+      setError('Enter the procedure name, indication and each discussion field before saving.');
+      return;
+    }
     const body: ProcedurePlanBody = {
       title: draft.title.trim(),
       benefits: draft.benefits.trim(),
@@ -174,57 +292,126 @@ export function ProcedurePlanModal({
       patientId,
       appointmentId: draft.appointmentId || null,
       requestId: crypto.randomUUID(),
+      doctorId,
+      plannedByRole: role,
       ...(source
         ? { templateSelection: templateSelection(source), reviewedForPatient: true as const }
         : {}),
     };
+    const visit = appointments.find((a) => a.id === body.appointmentId);
     const sent = attempt ?? {
       body,
       source,
-      actorId: session.user.id,
-      doctorId: session.user.doctorId,
+      actorId,
+      patientName,
+      priorIds: procedures.map((p) => p.id),
+      appointmentLabel: visit
+        ? appointmentLabel(visit)
+        : (body.appointmentId ?? 'No linked appointment'),
     };
-    const previouslyUncertain = phase === 'uncertain';
     pending.current = true;
+    procedurePlans.set(patientId, sent);
+    const origin = capture();
+    const current = () => origin() && !dismissed.current && procedurePlans.get(patientId) === sent;
     setAttempt(sent);
     setPhase('saving');
     setError('');
     try {
-      checkedProcedureCreation(
-        await api('/api/procedures', { method: 'POST', body: sent.body }),
-        sent,
-      );
+      const response = await api('/api/procedures', {
+        method: 'POST',
+        body: sent.body,
+        isCurrent: current,
+      });
       if (!current()) return;
-      toast('Procedure plan saved.');
-      await onSaved();
+      const confirmed = checkedProcedureCreation(response, sent);
+      procedurePlans.delete(patientId);
+      if (recovering) setSaved(confirmed);
+      else {
+        toast('Procedure plan saved. Plan ID · ' + confirmed.procedure.id);
+        onSaved();
+      }
     } catch (problem) {
       if (!current()) return;
-      const message = procedureFailure(problem);
-      const collision =
-        problem instanceof ApiError &&
-        problem.status === 409 &&
-        /request.*(used|different)|different.*request/i.test(message);
-      if (
-        previouslyUncertain ||
-        collision ||
-        !(problem instanceof ApiError) ||
-        problem.status >= 500
-      ) {
-        setPhase('uncertain');
-        setError(`The save outcome could not be confirmed. ${message}`);
-      } else {
+      const refusal = checkedPlanRefusal(problem, sent);
+      if (refusal) {
+        procedurePlans.delete(patientId);
         setAttempt(null);
         setPatientReviewed(false);
         setRefreshed(null);
-        setPhase(problem.status === 409 && sent.source ? 'conflict' : 'editing');
-        setError(message);
+        if (refusal.field === 'appointment') setDraft((old) => ({ ...old, appointmentId: '' }));
+        setPhase(refusal.field === 'template' ? 'conflict' : 'editing');
+        setError(refusal.message);
+      } else {
+        setPhase('uncertain');
+        setError(
+          'The save outcome could not be confirmed. Retry the same request to recover the original plan or submit it if the first request never arrived.',
+        );
       }
     } finally {
       pending.current = false;
     }
   }
+  if (saved && attempt) {
+    const plan = saved.procedure;
+    return (
+      <Modal title="Procedure plan confirmed" onClose={close}>
+        <div className="stack patient-registration">
+          <dl className="registration-details">
+            <div>
+              <dt>Plan ID</dt>
+              <dd>{plan.id}</dd>
+            </div>
+            <div>
+              <dt>Patient</dt>
+              <dd>
+                {attempt.patientName} · {patientId}
+              </dd>
+            </div>
+            <div>
+              <dt>Planning clinician</dt>
+              <dd>
+                {plan.doctorName} · {plan.doctorId}
+              </dd>
+            </div>
+            <div>
+              <dt>Originally linked appointment</dt>
+              <dd>{plan.appointmentId ?? 'No linked appointment'}</dd>
+            </div>
+            <div>
+              <dt>Indication / reason</dt>
+              <dd>{plan.indication}</dd>
+            </div>
+            {procedureFieldNames.map((key) => (
+              <div key={key}>
+                <dt>{procedureFieldLabels[key]}</dt>
+                <dd>{plan[key] || 'No estimate recorded.'}</dd>
+              </div>
+            ))}
+            {plan.templateSource && (
+              <div>
+                <dt>Template at creation</dt>
+                <dd>
+                  {plan.templateSource.templateTitle} · Version {plan.templateSource.version}
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt>Status at creation</dt>
+              <dd>Planned</dd>
+            </div>
+          </dl>
+          <button className="button button-primary" onClick={close}>
+            Done
+          </button>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal title="Plan a procedure" onClose={close}>
+      <p>
+        For <strong>{attempt?.patientName ?? patientName}</strong> · {patientId}
+      </p>
       <p className="muted">
         Write a patient-specific plan, or start from a published clinic template. Review every field
         before saving.
@@ -392,12 +579,18 @@ export function ProcedurePlanModal({
             onChange={(event) => edit('appointmentId', event.target.value)}
           >
             <option value="">No linked appointment</option>
+            {locked && attempt?.body.appointmentId && (
+              <option value={attempt.body.appointmentId}>{attempt.appointmentLabel}</option>
+            )}
             {appointments
-              .filter((a) => !['cancelled', 'no-show'].includes(a.status))
+              .filter(
+                (a) =>
+                  !['cancelled', 'no-show'].includes(a.status) &&
+                  !(locked && a.id === attempt?.body.appointmentId),
+              )
               .map((a) => (
                 <option value={a.id} key={a.id}>
-                  {formatDate(a.date)} · {a.time} IST · {a.durationMinutes ?? 30} minutes ·{' '}
-                  {a.doctorName} · {a.reason}
+                  {appointmentLabel(a)}
                 </option>
               ))}
           </select>
@@ -498,18 +691,13 @@ export function ProcedurePlanModal({
         )}
         {phase === 'uncertain' && (
           <p className="muted small">
-            Keep this page open. The exact request is retained here until its outcome is confirmed;
-            leaving the page discards this pending draft.
+            Resume this plan from the patient's chart in this signed-in tab. After a reload or
+            sign-out, check All records before starting a new plan.
           </p>
         )}
         <div className="procedure-plan-actions">
-          <button
-            className="button button-secondary"
-            type="button"
-            disabled={!canClose}
-            onClick={close}
-          >
-            Cancel
+          <button className="button button-secondary" type="button" onClick={close}>
+            {phase === 'uncertain' || phase === 'saving' ? 'Close for now' : 'Cancel'}
           </button>
           <button
             className="button button-primary"

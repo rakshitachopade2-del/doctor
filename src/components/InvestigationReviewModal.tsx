@@ -1,22 +1,27 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Download, FileText } from 'lucide-react';
 import type { Investigation, InvestigationResult } from '../../shared/clinical';
 import type { InvestigationReviewContext } from '../../shared/investigation-worklist';
+import type { InvestigationReviewCommand } from '../../shared/investigation-review-recording';
 import type { PatientDocument } from '../../shared/documents';
-import { api, ApiError, formatDate, useResource, useSession, useToast } from '../lib';
+import { api, ApiError, formatDate, useSession, useToast } from '../lib';
 import { Badge, ErrorState, Field, Loading, Modal } from './ui';
+import {
+  useAppointmentBookingData,
+  useAppointmentBookingGuard,
+} from './appointment-booking-helpers';
+import { usePendingCareSubmissions } from './pending-care-submissions';
 import './investigation-review.css';
 
-type ReviewBody = {
-  resultId: string;
-  summary: string;
-  followUp: string;
-  publishToPatient: boolean;
-  expectedRevision: string;
-  requestId: string;
+export type InvestigationReviewAttempt = {
+  actorId: string;
+  source: InvestigationReviewContext;
+  command: InvestigationReviewCommand;
 };
 type Props = {
   investigationId: string;
+  patientId?: string;
   onClose: () => void;
   onSaved: () => Promise<void>;
 };
@@ -184,34 +189,150 @@ function ResultSource({
   );
 }
 
+function reviewConfirmed(value: unknown, attempt: InvestigationReviewAttempt) {
+  const { command, source, actorId } = attempt;
+  const current = checkedInvestigation(value, command.investigationId);
+  const receipt = record(value) && record(value.receipt) ? value.receipt : null;
+  const original = receipt?.review;
+  if (!receipt || !record(original)) return false;
+  const live = current.reviews.find((review) => review.id === original.id);
+  return (
+    current.patientId === command.patientId &&
+    current.doctorId === source.investigation.doctorId &&
+    receipt.actorId === actorId &&
+    receipt.requestId === command.requestId &&
+    receipt.investigationId === command.investigationId &&
+    receipt.patientId === command.patientId &&
+    receipt.expectedRevision === command.expectedRevision &&
+    receipt.reviewedByRole === command.reviewedByRole &&
+    live !== undefined &&
+    !source.investigation.reviews.some((previous) => previous.id === live.id) &&
+    live.investigationId === original.investigationId &&
+    live.resultId === original.resultId &&
+    live.resultId === command.resultId &&
+    live.summary === original.summary &&
+    live.summary === command.summary &&
+    live.followUp === original.followUp &&
+    live.followUp === command.followUp &&
+    live.doctorId === original.doctorId &&
+    live.doctorId === command.doctorId &&
+    live.doctorName === original.doctorName &&
+    live.createdAt === original.createdAt &&
+    (command.publishToPatient
+      ? date(original.publishedAt) && original.publishedAt === live.publishedAt
+      : original.publishedAt === null)
+  );
+}
+function refusalMessage(problem: unknown, attempt: InvestigationReviewAttempt) {
+  if (!(problem instanceof ApiError) || problem.status !== 409) return null;
+  const report = problem.responseData;
+  if (
+    !record(report) ||
+    report.code !== 'INVESTIGATION_REVIEW_NOT_RECORDED' ||
+    report.actorId !== attempt.actorId ||
+    !nonempty(report.message) ||
+    !record(report.command)
+  )
+    return null;
+  const received = report.command;
+  return Object.keys(received).length === Object.keys(attempt.command).length &&
+    Object.entries(attempt.command).every(([key, value]) => received[key] === value)
+    ? report.message
+    : null;
+}
+export function PendingInvestigationReviews({
+  patientId,
+  open,
+}: {
+  patientId?: string;
+  open: (id: string) => void;
+}) {
+  const {
+    session: { user },
+  } = useSession();
+  const { investigationReviews } = usePendingCareSubmissions();
+  if (!user?.doctorId || user.mustChangePassword) return null;
+  return (
+    <>
+      {Array.from(investigationReviews.values())
+        .filter(
+          ({ actorId, command }) =>
+            actorId === user.id &&
+            command.reviewedByRole === user.role &&
+            command.doctorId === user.doctorId &&
+            (!patientId || command.patientId === patientId),
+        )
+        .map(({ command, source }) => (
+          <button
+            key={command.investigationId}
+            type="button"
+            className="button button-secondary"
+            onClick={() => open(command.investigationId)}
+          >
+            Resume clinical review: {source.investigation.title}
+          </button>
+        ))}
+    </>
+  );
+}
 export function InvestigationReviewModal(props: Props) {
   const { session } = useSession();
-  return <ReviewDialog key={`${session.user?.id}:${props.investigationId}`} {...props} />;
+  const location = useLocation();
+  return (
+    <ReviewDialog
+      key={JSON.stringify([
+        session.user?.id,
+        session.user?.role,
+        session.user?.doctorId,
+        session.csrfToken,
+        location.key,
+        props.investigationId,
+        props.patientId,
+      ])}
+      {...props}
+    />
+  );
 }
-
-function ReviewDialog({ investigationId, onClose, onSaved }: Props) {
-  const { session } = useSession();
+function ReviewDialog({ investigationId, patientId, onClose, onSaved }: Props) {
+  const {
+    session: { user },
+  } = useSession();
   const toast = useToast();
-  const canReview = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
-  const [source, setSource] = useState<InvestigationReviewContext | null>(null);
-  const [loading, setLoading] = useState(true);
+  const capture = useAppointmentBookingGuard();
+  const { investigationReviews } = usePendingCareSubmissions();
+  const [stored] = useState(() => {
+    const entry = investigationReviews.get(investigationId);
+    return entry &&
+      entry.actorId === user?.id &&
+      entry.command.doctorId === user.doctorId &&
+      entry.command.reviewedByRole === user.role &&
+      (!patientId || entry.command.patientId === patientId)
+      ? entry
+      : null;
+  });
+  const role = user?.role === 'doctor' || user?.role === 'admin' ? user.role : null;
+  const canReview = !user?.mustChangePassword && !!user?.doctorId && !!role;
+  const [source, setSource] = useState<InvestigationReviewContext | null>(stored?.source ?? null);
+  const [loading, setLoading] = useState(!stored);
   const [loadError, setLoadError] = useState('');
-  const [summary, setSummary] = useState('');
-  const [followUp, setFollowUp] = useState('');
-  const [publish, setPublish] = useState(false);
-  const [phase, setPhase] = useState<'editing' | 'conflict' | 'uncertain' | 'saved'>('editing');
-  const [attempt, setAttempt] = useState<ReviewBody | null>(null);
+  const [summary, setSummary] = useState(stored?.command.summary ?? '');
+  const [followUp, setFollowUp] = useState(stored?.command.followUp ?? '');
+  const [publish, setPublish] = useState(stored?.command.publishToPatient ?? false);
+  const [phase, setPhase] = useState<'editing' | 'conflict' | 'uncertain' | 'saved'>(
+    stored ? 'uncertain' : 'editing',
+  );
   const [reviewed, setReviewed] = useState<InvestigationReviewContext | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [closeBlocked, setCloseBlocked] = useState(false);
-  const mounted = useRef(false);
+  const dismissed = useRef(false);
   const pending = useRef(false);
   const loadSequence = useRef(0);
   const path = `/api/investigations/${encodeURIComponent(investigationId)}/review-context`;
-  const documentsResource = useResource<unknown>(
+  const documentsResource = useAppointmentBookingData<unknown>(
     source ? `/api/documents?patientId=${encodeURIComponent(source.patientId)}` : null,
+    (value) => value,
   );
   let documents: PatientDocument[] = [];
   let documentsError = documentsResource.error;
@@ -230,55 +351,85 @@ function ReviewDialog({ investigationId, onClose, onSaved }: Props) {
     } else
       documentsError = 'Attached report metadata could not be read. Retry loading the reports.';
   }
+  function origin() {
+    const isCurrent = capture();
+    return () => isCurrent() && !dismissed.current;
+  }
+  async function readContext(isCurrent: () => boolean) {
+    const result = checkedInvestigationContext(
+      await api<unknown>(path, { isCurrent }),
+      investigationId,
+    );
+    if (
+      (patientId && result.patientId !== patientId) ||
+      (source &&
+        (result.patientId !== source.patientId ||
+          result.investigation.doctorId !== source.investigation.doctorId))
+    )
+      throw new Error('The response did not confirm the reviewed patient and investigation.');
+    return result;
+  }
   async function loadInitial() {
-    const sequence = ++loadSequence.current;
+    const sequence = ++loadSequence.current,
+      isOrigin = origin();
+    const current = () => isOrigin() && sequence === loadSequence.current;
     setLoading(true);
     setLoadError('');
     try {
-      const next = checkedInvestigationContext(await api<unknown>(path), investigationId);
-      if (mounted.current && sequence === loadSequence.current) setSource(next);
+      const next = await readContext(current);
+      if (current()) setSource(next);
     } catch (problem) {
-      if (mounted.current && sequence === loadSequence.current) setLoadError(errorText(problem));
+      if (current()) setLoadError(errorText(problem));
     } finally {
-      if (mounted.current && sequence === loadSequence.current) setLoading(false);
+      if (current()) setLoading(false);
     }
   }
   useEffect(() => {
-    mounted.current = true;
-    void loadInitial();
+    if (!stored) void loadInitial();
     return () => {
-      mounted.current = false;
       loadSequence.current++;
     };
   }, []);
+  function dismiss() {
+    dismissed.current = true;
+    onClose();
+  }
   function close() {
     if (pending.current || phase === 'uncertain') {
       setCloseBlocked(true);
       return;
     }
-    onClose();
+    dismiss();
   }
   async function refreshContext() {
     if (pending.current || refreshing) return;
+    const current = origin();
     setRefreshing(true);
     setError('');
     try {
-      const current = checkedInvestigationContext(await api<unknown>(path), investigationId);
-      if (mounted.current) {
-        setReviewed(current);
+      const next = await readContext(current);
+      if (
+        next.revision === source?.revision &&
+        next.latestResultId === source.latestResultId &&
+        next.status !== 'cancelled'
+      )
+        throw new Error(
+          'The response did not confirm the changed investigation. Refresh the latest record again.',
+        );
+      if (current()) {
+        setReviewed(next);
         setPublish(false);
       }
     } catch (problem) {
-      if (mounted.current) setError(errorText(problem));
+      if (current()) setError(errorText(problem));
     } finally {
-      if (mounted.current) setRefreshing(false);
+      if (current()) setRefreshing(false);
     }
   }
   function acceptContext() {
     if (!reviewed) return;
     setSource(reviewed);
     setReviewed(null);
-    setAttempt(null);
     setPublish(false);
     setError('');
     setPhase('editing');
@@ -288,89 +439,93 @@ function ReviewDialog({ investigationId, onClose, onSaved }: Props) {
     event.preventDefault();
     if (
       !canReview ||
+      !role ||
+      !user?.doctorId ||
       !source?.latestResultId ||
       pending.current ||
       phase === 'conflict' ||
       phase === 'saved'
     )
       return;
-    if (!attempt && (!summary.trim() || !followUp.trim())) {
+    const existing = investigationReviews.get(investigationId);
+    if (!existing && (!summary.trim() || !followUp.trim())) {
       setError('Enter your reviewed findings and next steps before saving.');
       return;
     }
-    const submitted = attempt ?? {
-      resultId: source.latestResultId,
-      summary: summary.trim(),
-      followUp: followUp.trim(),
-      publishToPatient: publish,
-      expectedRevision: source.revision,
-      requestId: crypto.randomUUID(),
+    if (
+      existing &&
+      (existing.actorId !== user.id ||
+        existing.command.reviewedByRole !== user.role ||
+        existing.command.doctorId !== user.doctorId ||
+        existing.command.patientId !== source.patientId)
+    )
+      return;
+    const attempt: InvestigationReviewAttempt = existing ?? {
+      source,
+      actorId: user.id,
+      command: {
+        resultId: source.latestResultId,
+        summary: summary.trim(),
+        followUp: followUp.trim(),
+        publishToPatient: publish,
+        expectedRevision: source.revision,
+        requestId: crypto.randomUUID(),
+        doctorId: user.doctorId,
+        reviewedByRole: role,
+        patientId: source.patientId,
+        investigationId,
+      },
     };
-    setAttempt(submitted);
+    investigationReviews.set(investigationId, attempt);
+    const isOrigin = origin();
+    const current = () => isOrigin() && investigationReviews.get(investigationId) === attempt;
     pending.current = true;
     setBusy(true);
     setError('');
     try {
-      const response = checkedInvestigation(
-        await api<unknown>(`/api/investigations/${encodeURIComponent(investigationId)}/reviews`, {
+      const response = await api<unknown>(
+        `/api/investigations/${encodeURIComponent(investigationId)}/reviews`,
+        {
           method: 'POST',
-          body: submitted,
-        }),
-        investigationId,
+          body: attempt.command,
+          isCurrent: current,
+        },
       );
-      if (
-        response.patientId !== source.patientId ||
-        response.doctorId !== source.investigation.doctorId ||
-        !response.reviews.some(
-          (review) =>
-            !source.investigation.reviews.some((previous) => previous.id === review.id) &&
-            review.resultId === submitted.resultId &&
-            review.summary === submitted.summary &&
-            review.followUp === submitted.followUp &&
-            review.doctorId === session.user?.doctorId &&
-            (!submitted.publishToPatient || review.publishedAt !== null),
-        )
-      )
+      if (!current()) return;
+      if (!reviewConfirmed(response, attempt))
         throw new Error(
           'The response did not confirm this new review. Retry the same request to check its outcome.',
         );
     } catch (problem) {
-      if (mounted.current) {
-        setError(errorText(problem));
-        if (
-          problem instanceof ApiError &&
-          problem.status === 409 &&
-          !/request.*(?:already|different|used)|idempot/i.test(errorText(problem))
-        ) {
+      if (current()) {
+        const refused = refusalMessage(problem, attempt);
+        setError(refused ?? errorText(problem));
+        if (refused) {
+          investigationReviews.delete(investigationId);
           setPhase('conflict');
           setReviewed(null);
           setPublish(false);
-        } else if (
-          problem instanceof ApiError &&
-          [400, 403, 404, 422, 429].includes(problem.status)
-        ) {
-          setPhase('editing');
-          setAttempt(null);
+          setCloseBlocked(false);
         } else setPhase('uncertain');
       }
       return;
     } finally {
       pending.current = false;
-      if (mounted.current) setBusy(false);
+      if (isOrigin()) setBusy(false);
     }
-    if (!mounted.current) return;
-    setAttempt(null);
+    if (!current()) return;
+    investigationReviews.delete(investigationId);
     setPhase('saved');
     setCloseBlocked(false);
     toast(
-      submitted.publishToPatient
+      attempt.command.publishToPatient
         ? 'Clinical review saved and shared with the patient.'
         : 'Clinical review saved in the clinic workspace.',
     );
     try {
       await onSaved();
     } catch {
-      if (mounted.current)
+      if (isOrigin())
         setError('The review was saved. Close this dialog and refresh the record to see it.');
     }
   }
@@ -552,8 +707,8 @@ function ReviewDialog({ investigationId, onClose, onSaved }: Props) {
                     <strong>The save outcome could not be confirmed.</strong>
                     <p>
                       Your exact request is locked. Retry it to confirm whether the review was saved
-                      without creating it twice. This draft is held only while this page remains
-                      open; keep the page open until the outcome is confirmed.
+                      without creating it twice. You can resume it from the investigation worklist
+                      or this patient's chart during this signed-in session.
                     </p>
                   </div>
                 )}
@@ -576,14 +731,15 @@ function ReviewDialog({ investigationId, onClose, onSaved }: Props) {
                         ? 'Retry same request'
                         : 'Save clinical review'}
                   </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={close}
-                    disabled={busy || phase === 'uncertain'}
-                  >
-                    Cancel review
-                  </button>
+                  {busy || phase === 'uncertain' ? (
+                    <button type="button" className="button button-secondary" onClick={dismiss}>
+                      Close for now
+                    </button>
+                  ) : (
+                    <button type="button" className="button button-secondary" onClick={close}>
+                      Cancel review
+                    </button>
+                  )}
                 </div>
               </form>
             ) : null}

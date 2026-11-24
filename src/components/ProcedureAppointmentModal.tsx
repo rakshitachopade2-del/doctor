@@ -5,21 +5,22 @@ import type {
   ProcedureAppointmentCandidate,
   ProcedureAppointmentSnapshot,
   ProcedureScheduleContext,
+  ProcedureScheduleEvent,
 } from '../../shared/procedure-scheduling';
-import { api, ApiError, formatDate, today, useSession, useToast } from '../lib';
+import { api, formatDate, today, useSession, useToast } from '../lib';
 import { Badge, EmptyState, ErrorState, Field, Loading, Modal } from './ui';
-import { Pagination } from './Pagination';
 import {
-  isVisitRequestCollision,
-  useVisitData,
-  visitDate,
-  visitFailure,
-  visitInterval,
-} from './visit-duration-helpers';
+  useAppointmentBookingData,
+  useAppointmentBookingGuard,
+} from './appointment-booking-helpers';
+import { usePendingCareSubmissions } from './pending-care-submissions';
+import { Pagination } from './Pagination';
+import { visitDate, visitFailure, visitInterval } from './visit-duration-helpers';
 import {
   checkedProcedureCandidates,
   checkedProcedureScheduleContext,
   checkedProcedureScheduleMutation,
+  procedureVisitRefusal,
   type ProcedureLinkAttempt,
 } from './procedure-scheduling-helpers';
 import './procedure-appointments.css';
@@ -162,51 +163,121 @@ function SchedulingHistory({ source }: { source: ProcedureScheduleContext }) {
   );
 }
 
-export function ProcedureAppointmentModal({
-  procedureId,
-  onClose,
-  onSaved,
+export function PendingProcedureAppointments({
+  patientId,
+  onOpen,
 }: {
+  patientId?: string;
+  onOpen: (id: string) => void;
+}) {
+  const { procedureVisitChanges } = usePendingCareSubmissions();
+  return (
+    <>
+      {[...procedureVisitChanges.values()]
+        .filter((a) => !patientId || a.source.procedure.patientId === patientId)
+        .map((a) => (
+          <div key={a.source.procedure.id} className="notice decision-resume">
+            <p>
+              {a.source.procedure.patientName} · {a.source.procedure.title} ·{' '}
+              {a.source.procedure.id}
+            </p>
+            <button
+              className="button button-secondary"
+              onClick={() => onOpen(a.source.procedure.id)}
+            >
+              Resume appointment change
+            </button>
+          </div>
+        ))}
+    </>
+  );
+}
+interface AppointmentModalProps {
   procedureId: string;
+  patientId?: string;
   onClose: () => void;
   onSaved: () => Promise<void>;
-}) {
+}
+export function ProcedureAppointmentModal(props: AppointmentModalProps) {
+  const { session } = useSession();
+  const { key } = useLocation();
+  return (
+    <AppointmentEditor
+      key={JSON.stringify([
+        props.procedureId,
+        props.patientId,
+        key,
+        session.user?.id,
+        session.user?.role,
+        session.csrfToken,
+      ])}
+      {...props}
+    />
+  );
+}
+function AppointmentEditor({ procedureId, patientId, onClose, onSaved }: AppointmentModalProps) {
   const { session } = useSession(),
-    toast = useToast(),
-    location = useLocation();
-  const [source, setSource] = useState<ProcedureScheduleContext | null>(null),
+    toast = useToast();
+  const { procedureVisitChanges } = usePendingCareSubmissions();
+  const capture = useAppointmentBookingGuard();
+  const dismissed = useRef(false),
+    changed = useRef(false);
+  const held = procedureVisitChanges.get(procedureId);
+  const initial =
+    held &&
+    held.actorId === session.user?.id &&
+    held.actorRole === session.user?.role &&
+    (!patientId || held.source.procedure.patientId === patientId)
+      ? held
+      : null;
+  const [source, setSource] = useState<ProcedureScheduleContext | null>(initial?.source ?? null),
     [reviewed, setReviewed] = useState<ProcedureScheduleContext | null>(null);
-  const [mode, setMode] = useState<'link' | 'remove'>('link'),
-    [selected, setSelected] = useState<ProcedureAppointmentCandidate | null>(null),
+  const [mode, setMode] = useState<'link' | 'remove'>(
+      initial && !initial.target ? 'remove' : 'link',
+    ),
+    [selected, setSelected] = useState<ProcedureAppointmentCandidate | null>(
+      initial?.target ?? null,
+    ),
     [previousChoice, setPreviousChoice] = useState<ProcedureAppointmentCandidate | null>(null),
-    [reason, setReason] = useState(''),
-    [confirmed, setConfirmed] = useState(false);
+    [reason, setReason] = useState(initial?.body.reason ?? ''),
+    [confirmed, setConfirmed] = useState(initial?.body.removeConfirmed === true);
   const [period, setPeriod] = useState({ from: today(), to: addDays(today(), 180) }),
     [dates, setDates] = useState({ from: today(), to: addDays(today(), 180) }),
     [page, setPage] = useState(1),
     [dateError, setDateError] = useState('');
-  const [phase, setPhase] = useState<'editing' | 'conflict' | 'uncertain'>('editing'),
-    [attempt, setAttempt] = useState<ProcedureLinkAttempt | null>(null),
+  const [phase, setPhase] = useState<'editing' | 'conflict' | 'uncertain'>(
+      initial ? 'uncertain' : 'editing',
+    ),
+    [attempt, setAttempt] = useState<ProcedureLinkAttempt | null>(initial),
     [busy, setBusy] = useState(false),
     [refreshing, setRefreshing] = useState(false),
     [error, setError] = useState(''),
     [success, setSuccess] = useState('');
-  const mounted = useRef(false),
-    pending = useRef(false),
-    currentLocation = useRef(location.key),
+  const [savedEvent, setSavedEvent] = useState<ProcedureScheduleEvent | null>(null);
+  const pending = useRef(false),
     candidatesHeading = useRef<HTMLHeadingElement>(null),
     focusPage = useRef(false);
-  currentLocation.current = location.key;
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  const resource = useVisitData(
-    `/api/procedures/${encodeURIComponent(procedureId)}/scheduling`,
-    (value) => checkedProcedureScheduleContext(value, procedureId),
-  );
+  const url = '/api/procedures/' + encodeURIComponent(procedureId) + '/scheduling';
+  function checkedSource(value: unknown) {
+    const checked = checkedProcedureScheduleContext(value, procedureId);
+    if (
+      (patientId && checked.procedure.patientId !== patientId) ||
+      (source && checked.procedure.patientId !== source.procedure.patientId)
+    )
+      throw new Error('The procedure and patient could not be verified.');
+    return checked;
+  }
+  function close() {
+    dismissed.current = true;
+    if (changed.current) {
+      const here = capture();
+      void onSaved().catch(() => {
+        if (here()) toast('Refresh the procedure list to see the saved appointment change.');
+      });
+    }
+    onClose();
+  }
+  const resource = useAppointmentBookingData(source ? null : url, checkedSource);
   useEffect(() => {
     if (!source && resource.data) setSource(resource.data);
   }, [source, resource.data]);
@@ -216,8 +287,8 @@ export function ProcedureAppointmentModal({
     page: String(page),
     pageSize: '25',
   });
-  const candidates = useVisitData(
-    source?.procedure.canChange
+  const candidates = useAppointmentBookingData(
+    source?.procedure.canChange && phase === 'editing' && !busy
       ? `/api/procedures/${encodeURIComponent(procedureId)}/scheduling/candidates?${query}`
       : null,
     (value) => checkedProcedureCandidates(value, source!, { ...period, page }),
@@ -262,19 +333,17 @@ export function ProcedureAppointmentModal({
   }
   async function refreshLatest() {
     if (pending.current || refreshing) return;
-    const key = location.key;
+    const origin = capture(),
+      current = () => origin() && !dismissed.current;
     setRefreshing(true);
     setError('');
     try {
-      const value = checkedProcedureScheduleContext(
-        await api<unknown>(`/api/procedures/${encodeURIComponent(procedureId)}/scheduling`),
-        procedureId,
-      );
-      if (mounted.current && currentLocation.current === key) setReviewed(value);
+      const value = checkedSource(await api<unknown>(url, { isCurrent: current }));
+      if (current()) setReviewed(value);
     } catch (problem) {
-      if (mounted.current) setError(visitFailure(problem));
+      if (current()) setError(visitFailure(problem));
     } finally {
-      if (mounted.current) setRefreshing(false);
+      if (current()) setRefreshing(false);
     }
   }
   function acceptLatest() {
@@ -292,7 +361,22 @@ export function ProcedureAppointmentModal({
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (pending.current || refreshing || phase === 'conflict' || !source || !session.user) return;
+    if (
+      pending.current ||
+      dismissed.current ||
+      refreshing ||
+      phase === 'conflict' ||
+      !source ||
+      !session.user ||
+      session.user.role === 'patient'
+    )
+      return;
+    if (
+      attempt
+        ? procedureVisitChanges.get(procedureId) !== attempt
+        : procedureVisitChanges.has(procedureId)
+    )
+      return;
     if (
       !attempt &&
       (!source.procedure.canChange ||
@@ -307,9 +391,11 @@ export function ProcedureAppointmentModal({
     }
     const sent: ProcedureLinkAttempt = attempt ?? {
       actorId: session.user.id,
+      actorRole: session.user.role,
       source,
       target: mode === 'link' ? selected : null,
       body: {
+        recoverable: true,
         appointmentId: mode === 'link' ? selected!.appointment.id : null,
         expectedAppointmentRevision: mode === 'link' ? selected!.revision : null,
         expectedRevision: source.revision,
@@ -318,28 +404,29 @@ export function ProcedureAppointmentModal({
         ...(mode === 'remove' ? { removeConfirmed: true } : {}),
       },
     };
-    const key = location.key;
+    const origin = capture();
+    const isHere = () => origin() && !dismissed.current;
+    const current = () => isHere() && procedureVisitChanges.get(procedureId) === sent;
+    procedureVisitChanges.set(procedureId, sent);
     pending.current = true;
     setBusy(true);
     setAttempt(sent);
     setError('');
     setSuccess('');
+    setSavedEvent(null);
     try {
       const result = checkedProcedureScheduleMutation(
         await api<unknown>(`/api/procedures/${encodeURIComponent(procedureId)}/scheduling`, {
           method: 'POST',
           body: sent.body,
+          isCurrent: current,
         }),
         sent,
       );
-      if (!mounted.current) return;
-      if (currentLocation.current !== key) {
-        setPhase('uncertain');
-        setError(
-          'The page changed before confirmation was displayed. Retry the same request to confirm its outcome.',
-        );
-        return;
-      }
+      if (!current()) return;
+      procedureVisitChanges.delete(procedureId);
+      changed.current = true;
+      if (phase === 'uncertain') setSavedEvent(result.event);
       setSource(result.context);
       setAttempt(null);
       setPhase('editing');
@@ -354,37 +441,79 @@ export function ProcedureAppointmentModal({
       );
       toast('Procedure appointment updated.');
       void candidates.reload();
-      void onSaved().catch(() => {
-        if (mounted.current)
-          setSuccess(
-            'Appointment association change confirmed. Refresh the page to update the surrounding list.',
-          );
-      });
     } catch (problem) {
-      if (!mounted.current) return;
-      setError(visitFailure(problem));
-      const known =
-        phase !== 'uncertain' &&
-        !isVisitRequestCollision(problem) &&
-        problem instanceof ApiError &&
-        [400, 401, 403, 404, 409].includes(problem.status);
-      if (known) {
+      if (!current()) return;
+      const refusal = procedureVisitRefusal(problem, sent);
+      if (refusal) {
+        procedureVisitChanges.delete(procedureId);
         setAttempt(null);
-        setPhase(problem.status === 409 ? 'conflict' : 'editing');
+        setPhase('conflict');
         setReviewed(null);
-      } else setPhase('uncertain');
+        setError(refusal);
+      } else {
+        setPhase('uncertain');
+        setError(visitFailure(problem));
+      }
     } finally {
       pending.current = false;
-      if (mounted.current) setBusy(false);
+      if (isHere()) setBusy(false);
     }
   }
+  if (attempt && (busy || phase === 'uncertain'))
+    return (
+      <Modal title="Appointment change awaiting confirmation" onClose={close}>
+        <form className="stack procedure-link-editor" onSubmit={submit}>
+          <p>
+            <strong>{attempt.source.procedure.title}</strong> · {procedureId}
+          </p>
+          <p>
+            {attempt.source.procedure.patientName} · {attempt.source.procedure.patientId}
+          </p>
+          <section>
+            <h3>Previously linked visit</h3>
+            {attempt.source.procedure.appointment ? (
+              <VisitSnapshot appointment={attempt.source.procedure.appointment} />
+            ) : (
+              <p>
+                {attempt.source.procedure.effectiveAppointmentId
+                  ? 'Linked visit details unavailable.'
+                  : 'No linked appointment.'}
+              </p>
+            )}
+          </section>
+          <section>
+            <h3>Requested association</h3>
+            {attempt.target ? (
+              <VisitSnapshot appointment={attempt.target.appointment} />
+            ) : (
+              <p>Remove the appointment link.</p>
+            )}
+          </section>
+          <Field label="Reason for appointment link">
+            <textarea rows={3} disabled value={attempt.body.reason} />
+          </Field>
+          <p className="notice" role="status">
+            {busy
+              ? 'Confirming the appointment change…'
+              : 'The save outcome could not be confirmed. Retry the same request to recover the original change or submit it if it never arrived.'}
+          </p>
+          <p className="muted small">
+            Resume from this chart or Procedure appointments in the same signed-in tab. After
+            reloading or signing out, check scheduling history.
+          </p>
+          <div className="modal-actions">
+            <button type="button" className="button button-secondary" onClick={close}>
+              Close for now
+            </button>
+            <button className="button button-primary" disabled={busy}>
+              {busy ? 'Confirming…' : 'Retry same request'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    );
   return (
-    <Modal
-      title="Procedure appointment"
-      onClose={() => {
-        if (!busy && !refreshing && phase !== 'uncertain') onClose();
-      }}
-    >
+    <Modal title="Procedure appointment" onClose={close}>
       <div className="stack procedure-link-editor">
         {resource.loading && !source ? (
           <Loading />
@@ -395,6 +524,31 @@ export function ProcedureAppointmentModal({
           <div className="notice" role="status">
             {success}
           </div>
+        )}
+        {savedEvent && (
+          <section aria-label="Original appointment change">
+            <h3>Original appointment change</h3>
+            <p>
+              {savedEvent.createdByName} · {stamp(savedEvent.createdAt)} IST
+            </p>
+            <p className="pre-line">{savedEvent.reason}</p>
+            <h4>Previous association</h4>
+            {savedEvent.beforeAppointment ? (
+              <VisitSnapshot appointment={savedEvent.beforeAppointment} />
+            ) : (
+              <p>
+                {savedEvent.beforeAppointmentId
+                  ? 'Previously linked visit unavailable.'
+                  : 'No previous appointment link.'}
+              </p>
+            )}
+            <h4>Saved association</h4>
+            {savedEvent.afterAppointment ? (
+              <VisitSnapshot appointment={savedEvent.afterAppointment} />
+            ) : (
+              <p>Appointment link removed.</p>
+            )}
+          </section>
         )}
         {source && p && (
           <>
@@ -437,15 +591,6 @@ export function ProcedureAppointmentModal({
             {(p.canChange || phase !== 'editing') && (
               <form className="stack" onSubmit={submit}>
                 {error && <ErrorState message={error} />}
-                {phase === 'uncertain' && (
-                  <div className="notice notice-warning">
-                    <strong>The save outcome could not be confirmed.</strong>
-                    <p>
-                      The exact request and appointment snapshots are retained. Retry the same
-                      request before changing or closing this editor.
-                    </p>
-                  </div>
-                )}
                 <div
                   className="procedure-link-actions"
                   role="group"
@@ -719,33 +864,26 @@ export function ProcedureAppointmentModal({
                   <button
                     className="button button-secondary"
                     type="button"
-                    disabled={busy || refreshing || phase === 'uncertain'}
-                    onClick={onClose}
+                    disabled={refreshing}
+                    onClick={close}
                   >
                     Close
                   </button>
                   <button
                     className="button button-primary"
                     disabled={
-                      busy ||
-                      refreshing ||
-                      phase === 'conflict' ||
-                      (phase !== 'uncertain' &&
-                        (!p.canChange ||
-                          (mode === 'link'
-                            ? !selected
-                            : !confirmed || p.effectiveAppointmentId === null)))
+                      locked ||
+                      !p.canChange ||
+                      (mode === 'link'
+                        ? !selected
+                        : !confirmed || p.effectiveAppointmentId === null)
                     }
                   >
-                    {busy
-                      ? 'Saving…'
-                      : phase === 'uncertain'
-                        ? 'Retry same request'
-                        : mode === 'remove'
-                          ? 'Remove link'
-                          : p.effectiveAppointmentId
-                            ? 'Replace appointment'
-                            : 'Link appointment'}
+                    {mode === 'remove'
+                      ? 'Remove link'
+                      : p.effectiveAppointmentId
+                        ? 'Replace appointment'
+                        : 'Link appointment'}
                   </button>
                 </div>
               </form>

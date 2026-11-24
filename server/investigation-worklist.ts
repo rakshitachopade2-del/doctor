@@ -6,6 +6,9 @@ import type { Investigation } from '../shared/clinical.ts';
 import type { Doctor, Patient, User } from '../shared/types.ts';
 import type {
   InvestigationAssignment,
+  InvestigationHandoverCommand,
+  InvestigationHandoverReceipt,
+  InvestigationHandoverNotRecorded,
   InvestigationOwner,
   InvestigationReviewContext,
   InvestigationWorkItem,
@@ -14,6 +17,7 @@ import { clinicToday, get, id, list, nowISO, type DB } from './db.ts';
 import { notifyClinicians } from './activity.ts';
 
 interface WorklistContext {
+  currentCareUser: (req: AuthRequest) => User;
   db: DB;
   actor: (req: AuthRequest, roles?: User['role'][]) => User;
   patientAccess: (req: AuthRequest, patientId: string) => Patient;
@@ -37,6 +41,14 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
     CREATE TABLE IF NOT EXISTS investigationAssignments (
       id TEXT PRIMARY KEY, investigationId TEXT NOT NULL REFERENCES investigations(id), data TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS investigationHandoverRefusals (
+      requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id), investigationId TEXT NOT NULL REFERENCES investigations(id),
+      commandHash TEXT NOT NULL, status INTEGER NOT NULL CHECK(status IN (400,409)), message TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS investigationReviewRefusals (
+      requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id), investigationId TEXT NOT NULL REFERENCES investigations(id),
+      commandHash TEXT NOT NULL, message TEXT NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS investigation_assignments_order ON investigationAssignments(investigationId);
     CREATE TABLE IF NOT EXISTS investigationCommands (
       requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id),
@@ -44,7 +56,12 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
       investigationId TEXT NOT NULL REFERENCES investigations(id), payload TEXT NOT NULL, eventId TEXT NOT NULL
     );
   `);
-  for (const table of ['investigationAssignments', 'investigationCommands']) {
+  for (const table of [
+    'investigationAssignments',
+    'investigationCommands',
+    'investigationReviewRefusals',
+    'investigationHandoverRefusals',
+  ]) {
     db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_update BEFORE UPDATE ON ${table}
       BEGIN SELECT RAISE(ABORT,'Investigation handovers and command records are immutable'); END;
       CREATE TRIGGER IF NOT EXISTS ${table}_no_delete BEFORE DELETE ON ${table}
@@ -151,7 +168,6 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
     };
   }
   function access(req: AuthRequest, investigationId: string) {
-    actor(req, ['admin', 'doctor']);
     const order = get<Investigation>(db, 'investigations', investigationId);
     if (!order) return fail(404, 'Investigation not found.');
     patientAccess(req, order.patientId);
@@ -166,10 +182,20 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
   ) {
     const prior = db
       .prepare(
-        'SELECT actorId,operation,investigationId,payload FROM investigationCommands WHERE requestId=?',
+        'SELECT actorId,operation,investigationId,payload,eventId FROM investigationCommands WHERE requestId=?',
       )
       .get(requestId);
-    if (!prior) return false;
+    if (!prior) {
+      if (
+        db
+          .prepare(
+            'SELECT 1 FROM investigationReviewRefusals WHERE requestId=? UNION ALL SELECT 1 FROM investigationHandoverRefusals WHERE requestId=?',
+          )
+          .get(requestId, requestId)
+      )
+        return fail(409, 'This investigation request was already used with different details.');
+      return null;
+    }
     if (
       prior.actorId !== user.id ||
       prior.operation !== operation ||
@@ -177,7 +203,7 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
       prior.payload !== JSON.stringify(payload)
     )
       fail(409, 'This investigation request was already used with different details.');
-    return true;
+    return String(prior.eventId);
   }
   function rememberCommand(
     user: User,
@@ -187,29 +213,39 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
     payload: unknown,
     eventId: string,
   ) {
-    db.prepare(
-      'INSERT INTO investigationCommands(requestId,actorId,operation,investigationId,payload,eventId) VALUES (?,?,?,?,?,?)',
-    ).run(requestId, user.id, operation, investigationId, JSON.stringify(payload), eventId);
+    const stored = db
+      .prepare(
+        'INSERT INTO investigationCommands(requestId,actorId,operation,investigationId,payload,eventId) VALUES (?,?,?,?,?,?)',
+      )
+      .run(requestId, user.id, operation, investigationId, JSON.stringify(payload), eventId);
+    if (Number(stored.changes) !== 1)
+      throw new Error('The investigation command could not be recorded.');
   }
-  function assertRevision(investigationId: string, expectedRevision: string) {
-    if (reviewContext(investigationId).revision !== expectedRevision)
-      fail(
-        409,
-        'The investigation, results, reviews or responsibility changed. Refresh and review the latest context before saving.',
-      );
+  function audited(req: AuthRequest, action: string, investigationId: string) {
+    audit(req, action, 'investigation', investigationId);
+    if (Number(db.prepare('SELECT changes() AS n').get()!.n) !== 1)
+      throw new Error('The investigation audit could not be recorded.');
+  }
+  function staff(req: AuthRequest) {
+    context.currentCareUser(req);
+    return actor(req, ['admin', 'doctor']);
   }
   app.get('/api/investigation-owners', (req: AuthRequest, res) => {
-    actor(req, ['admin', 'doctor']);
-    res.json(eligibleOwners());
+    res.json(
+      transaction(() => {
+        staff(req);
+        return eligibleOwners();
+      }),
+    );
   });
   app.get('/api/investigation-worklist', (req: AuthRequest, res) => {
-    const user = actor(req, ['admin', 'doctor']);
-    const input = z
-      .object({ scope: z.enum(['mine', 'all']).optional() })
-      .strict()
-      .parse(req.query);
-    const scope = input.scope ?? (user.role === 'admin' ? 'all' : 'mine');
     const result = transaction(() => {
+      const user = staff(req);
+      const input = z
+        .object({ scope: z.enum(['mine', 'all']).optional() })
+        .strict()
+        .parse(req.query);
+      const scope = input.scope ?? (user.role === 'admin' ? 'all' : 'mine');
       const available = new Set(eligibleOwners().map((entry) => entry.doctorId));
       const rows: InvestigationWorkItem[] = list<Investigation>(db, 'investigations')
         .map((investigation) => reviewContext(investigation.id, available))
@@ -243,56 +279,123 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
           a.createdAt.localeCompare(b.createdAt) ||
           a.investigationId.localeCompare(b.investigationId),
       );
-      audit(req, 'viewed investigation worklist', 'investigation', scope);
+      audited(req, 'viewed investigation worklist', scope);
       return rows;
     });
     res.json(result);
   });
   app.get('/api/investigations/:id/review-context', (req: AuthRequest, res) => {
     const investigationId = String(req.params.id);
-    access(req, investigationId);
     res.json(
       transaction(() => {
+        staff(req);
+        access(req, investigationId);
         const result = reviewContext(investigationId);
-        audit(req, 'viewed investigation review context', 'investigation', investigationId);
+        audited(req, 'viewed investigation review context', investigationId);
         return result;
       }),
     );
   });
   app.post('/api/investigations/:id/assignment', (req: AuthRequest, res) => {
-    const user = actor(req, ['admin', 'doctor']),
-      investigationId = String(req.params.id);
-    access(req, investigationId);
-    const { expectedRevision, requestId, ...input } = z
-      .object({
-        doctorId: z.string().trim().min(1).max(300),
-        reason: z.string().trim().min(1).max(1000),
-        expectedRevision: investigationRevision,
-        requestId: investigationRequestId,
-      })
-      .strict()
-      .parse(req.body);
-    let duplicate = false;
     const result = transaction(() => {
-      // The original owner may already have handed this task over. An exact retry is
-      // still authorized for its original actor, before checking ownership for a new action.
-      if (commandReplay(user, 'assignment', investigationId, requestId, input)) {
-        duplicate = true;
-        return reviewContext(investigationId);
-      }
-      const current = reviewContext(investigationId);
-      if (user.role === 'doctor' && user.doctorId !== current.ownerDoctorId)
-        fail(
+      const user = staff(req),
+        investigationId = String(req.params.id);
+      access(req, investigationId);
+      const command = z
+        .object({
+          doctorId: z.string().trim().min(1).max(300),
+          reason: z.string().trim().min(1).max(1000),
+          expectedRevision: investigationRevision,
+          requestId: investigationRequestId,
+          recoverable: z.literal(true).optional(),
+        })
+        .strict()
+        .parse(req.body);
+      const { requestId, expectedRevision, recoverable, ...input } = command;
+      const checked: InvestigationHandoverCommand | null = recoverable
+        ? { ...command, recoverable }
+        : null;
+      if (checked) z.strictObject({}).parse(req.query);
+      if (user.role === 'doctor' && (!user.doctorId || !get<Doctor>(db, 'doctors', user.doctorId)))
+        return fail(
           403,
           'Only the current investigation owner or an administrator can reassign responsibility.',
         );
-      assertRevision(investigationId, expectedRevision);
+      const evidence = checked
+        ? { command: checked, issuerRole: user.role, issuerDoctorId: user.doctorId ?? null }
+        : input;
+      const fingerprint = checked ? hash(evidence) : null;
+      const refused = (
+        body: InvestigationHandoverCommand,
+        message: string,
+      ): InvestigationHandoverNotRecorded => ({
+        code: 'INVESTIGATION_HANDOVER_NOT_RECORDED',
+        actorId: user.id,
+        investigationId,
+        command: body,
+        message,
+      });
+      if (checked) {
+        const prior = db
+          .prepare(
+            'SELECT actorId,investigationId,commandHash,status,message FROM investigationHandoverRefusals WHERE requestId=?',
+          )
+          .get(requestId);
+        if (prior) {
+          if (
+            prior.actorId !== user.id ||
+            prior.investigationId !== investigationId ||
+            prior.commandHash !== fingerprint
+          )
+            return fail(409, 'This investigation request was already used with different details.');
+          return { status: Number(prior.status), body: refused(checked, String(prior.message)) };
+        }
+      }
+      const confirmed = (eventId: string, status: number) => {
+        const current = reviewContext(investigationId);
+        if (!checked) return { status, body: current };
+        const event = current.assignments.find((a) => a.id === eventId);
+        if (!event) throw new Error('The original investigation handover could not be confirmed.');
+        const receipt: InvestigationHandoverReceipt = {
+          requestId,
+          actorId: user.id,
+          investigationId,
+          expectedRevision,
+          assignment: event,
+        };
+        return { status, body: { ...current, receipt } };
+      };
+      // An eligible issuing account can recover its exact handover after the recipient took ownership.
+      const priorEventId = commandReplay(user, 'assignment', investigationId, requestId, evidence);
+      if (priorEventId) return confirmed(priorEventId, 200);
+      const current = reviewContext(investigationId);
+      if (user.role === 'doctor' && user.doctorId !== current.ownerDoctorId)
+        return fail(
+          403,
+          'Only the current investigation owner or an administrator can reassign responsibility.',
+        );
+      const deny = (status: 400 | 409, message: string) => {
+        if (!checked) return fail(status, message);
+        const stored = db
+          .prepare(
+            'INSERT INTO investigationHandoverRefusals(requestId,actorId,investigationId,commandHash,status,message) VALUES (?,?,?,?,?,?)',
+          )
+          .run(requestId, user.id, investigationId, fingerprint, status, message);
+        if (Number(stored.changes) !== 1)
+          throw new Error('Investigation handover refusal could not be recorded.');
+        return { status, body: refused(checked, message) };
+      };
+      if (current.revision !== expectedRevision)
+        return deny(
+          409,
+          'The investigation, results, reviews or responsibility changed. Refresh and review the latest context before saving.',
+        );
       if (current.status === 'cancelled')
-        fail(409, 'A cancelled investigation cannot be reassigned.');
+        return deny(409, 'A cancelled investigation cannot be reassigned.');
       const next = eligibleOwners().find((candidate) => candidate.doctorId === input.doctorId);
-      if (!next) return fail(400, 'Choose a clinician with an active linked account.');
+      if (!next) return deny(400, 'Choose a clinician with an active linked account.');
       if (next.doctorId === current.ownerDoctorId)
-        fail(409, 'This clinician already owns this investigation.');
+        return deny(409, 'This clinician already owns this investigation.');
       const assignment: InvestigationAssignment = {
         id: id(),
         investigationId,
@@ -305,12 +408,14 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
         assignedByName: user.name,
         createdAt: nowISO(),
       };
-      db.prepare(
-        'INSERT INTO investigationAssignments(id,investigationId,data) VALUES (?,?,?)',
-      ).run(assignment.id, investigationId, JSON.stringify(assignment));
-      rememberCommand(user, 'assignment', investigationId, requestId, input, assignment.id);
-      audit(req, 'assigned investigation responsibility', 'investigation', investigationId);
-      notifyClinicians(
+      const stored = db
+        .prepare('INSERT INTO investigationAssignments(id,investigationId,data) VALUES (?,?,?)')
+        .run(assignment.id, investigationId, JSON.stringify(assignment));
+      if (Number(stored.changes) !== 1)
+        throw new Error('Investigation handover could not be recorded.');
+      rememberCommand(user, 'assignment', investigationId, requestId, evidence, assignment.id);
+      audited(req, 'assigned investigation responsibility', investigationId);
+      const delivered = notifyClinicians(
         db,
         current.patientId,
         `investigation-assignment:${assignment.id}`,
@@ -322,13 +427,13 @@ export function registerInvestigationWorklist(app: Express, context: WorklistCon
         },
         { doctorId: next.doctorId, excludeActorId: user.id },
       );
-      return reviewContext(investigationId);
+      if (!delivered) throw new Error('Investigation handover notification could not be recorded.');
+      return confirmed(assignment.id, 201);
     });
-    res.status(duplicate ? 200 : 201).json(result);
+    res.status(result.status).json(result.body);
   });
   return {
     reviewContext,
-    assertRevision,
     commandReplay,
     rememberCommand,
     ownerDoctorId: (investigationId: string) => owner(view(investigationId)).doctorId,

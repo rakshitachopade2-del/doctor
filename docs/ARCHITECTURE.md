@@ -32,6 +32,7 @@ flowchart LR
 | `server/billing-corrections.ts`                | Immutable charge corrections and mistaken-payment reversals, safe histories and revisions  |
 | `server/investigation-order.ts`                | Reviewed order creation, original clinician attribution and recovery of missed replies     |
 | `server/investigation-cancellation.ts`         | Cancellation checks against the latest result, original reasons and clinician attribution  |
+| `server/investigation-review-recording.ts`     | Clinician review receipts, original publication choice and source-change refusals          |
 | `server/investigation-worklist.ts`             | Clinical result queues, private responsibility history and source-aware review retries     |
 | `server/care-summary.ts`                       | Authorized shared-care snapshots and stale-export rejection                                |
 | `server/care-summary-copies.ts`                | Immutable patient-facing summary copies, bounded archive and exact downloads               |
@@ -57,6 +58,7 @@ flowchart LR
 | `server/scheduling.ts`                         | Schedule/closure storage, duration-aware slot generation, booking validation               |
 | `server/visit-duration.ts`                     | Custom booking, explicit length changes, private immutable events and retry receipts       |
 | `server/procedure-scheduling.ts`               | Procedure worklist, appointment assignments, immutable events and retry receipts           |
+| `server/procedure-cancellation.ts`             | Review of the current decision and visit, atomic cancellation and original confirmation    |
 | `server/record-search.ts`                      | SQL-filtered staff directories and appointment/audit pages with bounded results            |
 | `src/record-search.ts`                         | Query-scoped page loading, pagination validation and obsolete-response suppression         |
 | `src/pages/AuditPage.tsx`                      | Administrator history search with actor/action/record/date filters                         |
@@ -296,6 +298,8 @@ Both result writers check the current session, patient access and any required c
 
 `investigationReviews` stores immutable clinician interpretations linked to a specific result. A review must target the latest submission, preventing a stale form from marking a newly arrived report reviewed. `investigationPublications` records the separate explicit action that makes an interpretation patient-visible. Publishing never alters the review text. Additional interpretations retain their predecessors, and audit events identify review and publication separately.
 
+The reviewed writer binds the request UUID to the linked clinician's account, patient, investigation, result, findings, follow-up, source revision and publication choice. It records the outcome under the write lock. Successful reviews use the existing `investigationCommands` and immutable review row. A request refused because the source changed or closed is recorded in `investigationReviewRefusals`. The patient chart uses the publication history. A clinician's recovered receipt reflects the choice at the time of review.
+
 Status is derived from those events: an order with no result is `ordered`; a latest result without review is `result-received`; a latest result with a clinician review is `reviewed`. A supplemental submission therefore requires a fresh review while preserving earlier interpretations. An entry in `investigationCancellations` makes the order terminal without deleting its earlier documentation. The service performs no diagnosis, result classification or automatic laboratory communication.
 
 ### Procedure plans and patient decisions
@@ -307,6 +311,8 @@ Status is derived from those events: an order with no result is `ordered`; a lat
 Both decision routes recheck the signed-in account, patient access and clinical profile where required under the SQLite write lock. The reviewed route binds the UUID to the recording account and normalized command, including the last agreement ID the recorder saw. A fresh write compares that ID with the last appended agreement. The decision, audit, recipient activity and receipt commit in one transaction. Recovering a saved receipt reads the original agreement even after a later withdrawal or completion. The original recorder can also recover a saved refusal for a stale decision or terminal plan. Receipts and refusal details stay outside shared clinical history.
 
 `procedureCompletions` and `procedureCancellations` are separate terminal events. Completion requires the latest decision to be agreed and records outcome, aftercare and the responsible doctor. A linked visit cannot be cancelled/no-show or have a start time still in the future. Decision, cancellation and completion checks use immediate transactions so a concurrent withdrawal cannot leave a completed record whose latest decision is declined. Completion or cancellation leaves the linked appointment unchanged.
+
+For a clinician-bound creation, `procedureCatalogueCommands` links the original request to the planning account and clinician or retains a template or visit refusal. Recovery reads the immutable plan and template attribution directly. For a reviewed cancellation, `procedureCancellationCommands` links the request to the cancellation row or stores a source or terminal-state refusal. The cancellation revision includes the latest patient decision and scheduling event, so removing and restoring the same visit requires another review. The original cancelling clinician, timestamp, reason and visit snapshot come from the saved cancellation. The link, patient decision, invoice and payment records have independent histories.
 
 These events record communication and reported decisions; they are not an electronic signature system or an assurance that all consent requirements have been met. Medication safety checks, clinical protocol validation, pathology interpretation and external laboratory connections remain outside this implementation.
 
@@ -327,6 +333,8 @@ UUID requests return a creation receipt with the original request/account/patien
 ### Procedure appointment assignments
 
 `procedureScheduleEvents` and `procedureScheduleCommands` preserve attributed attachment, replacement and removal without modifying `procedures.data`. The latest event determines the effective link; the original appointment ID is used only when no assignment event exists. An explicit null therefore stays unlinked. Original clinical explanations, authors, agreements and invoice links remain immutable.
+
+The scheduling writer commits the event, receipt, audit and each eligible portal notice in one transaction. A missed insert rolls them all back. A recoverable request can also end in an immutable `procedureScheduleRefusals` record. Both outcomes bind the UUID to the staff account, procedure and normalized command. The worklist and chart share the signed-in tab's pending request so either can recover the original before-and-after visits after navigation. The returned scheduling context separately shows the current link.
 
 The staff worklist and appointment candidates use explicit SQL projections and bounded pages. They do not deserialize complete clinical plans into reception responses. Current names, plan status and safe appointment fields are sufficient for operational scheduling; reasons, discussion, outcomes and payment details are excluded. Source and target revisions protect the displayed association and chosen visit separately. Read context/audit and command/evidence/notification operations use coherent immediate transactions. Retry receipts bind account, procedure and exact normalized intent, and return the current context with the original event after later changes.
 
@@ -518,7 +526,7 @@ Resource allocation contexts contain operational appointment identities and inde
 
 A source hash spans the investigation projection and immutable assignment IDs. `investigationCommands` binds a UUID to the actor, operation, investigation, normalized payload and saved event. Review forms submit the hash and UUID together. Replay occurs before source/ownership checks, while current account and patient authorization still apply. New events, replay receipt, audits and notifications use one immediate transaction. Legacy review callers may omit both tokens, retaining their original latest-result check. New publication on cancelled investigations is denied while already published retries preserve the source timestamp.
 
-The queue and dashboard use private clinical worklist endpoints. Shared review dialogs load current result notes, safe authenticated report links and earlier reviews; controlled drafts survive context conflicts, and uncertain writes retain an exact retry. Handover drafts likewise require explicit refreshed-context review. Internal handover data never enters patient workflows or care summaries. Exact workup links reveal and focus their target, including earlier results and cancelled records, without changing review completion or activity read state.
+The queue and dashboard use private clinical worklist endpoints. Shared review dialogs load current result notes, safe authenticated report links and earlier reviews; controlled drafts survive context conflicts, and uncertain writes retain an exact retry. An editable handover or submitted command survives navigation within the signed-in tab. A confirmed handover returns its immutable assignment alongside current ownership. The command binds the issuer’s current role and doctor profile, revision, destination and reason. Recorded refusals in `investigationHandoverRefusals` and interpretation refusals in `investigationReviewRefusals` share the command ID namespace with successful events. Reassigned doctors can check their authorized original confirmation. Reloading or signing out clears the tab’s private drafts. Internal handover data never enters patient workflows or care summaries. Exact workup links reveal and focus their target, including earlier results and cancelled records, without changing review completion or activity read state.
 
 ## Bounded staff record search
 

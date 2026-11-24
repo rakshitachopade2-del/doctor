@@ -1094,6 +1094,7 @@ export function createApp(options: AppOptions = {}) {
   const clinicalWorkflows = registerClinical(app, {
     db,
     currentCareUser,
+    currentSessionUser,
     actor,
     patientAccess,
     clinicianId,

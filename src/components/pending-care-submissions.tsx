@@ -1,3 +1,4 @@
+import type { ProcedurePlanAttempt } from './procedure-plan-helpers';
 import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } from 'react';
 import type { ProfileEditAttempt } from './doctor-profile-edit-helpers';
 import type { DoctorProfileCreationCommand } from '../../shared/doctor-profile-creation';
@@ -6,10 +7,14 @@ import type { PatientRegistrationCommand } from '../../shared/patient-registrati
 import type { CareMessageCommand } from '../../shared/care-message';
 import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
 import type { CarePlanAttempt } from './care-plan-creation-helpers';
+import type { ProcedureLinkAttempt } from './procedure-scheduling-helpers';
+import type { ProcedureCancellationAttempt } from './procedure-cancellation-helpers';
 import type { CompletionAttempt } from './procedure-completion-helpers';
 import type { DecisionAttempt } from './procedure-decision-helpers';
 import type { CancellationAttempt } from './investigation-cancellation-helpers';
 import type { InvestigationOrderAttempt } from './investigation-order-helpers';
+import type { AssignmentDraft } from '../pages/InvestigationWorklistPage';
+import type { InvestigationReviewAttempt } from './InvestigationReviewModal';
 import type { ResultAttempt } from './investigation-result-helpers';
 import type { ReviewAttempt } from './follow-up-review-helpers';
 import type { ReviewedCheckIn } from './check-in-submission-helpers';
@@ -23,11 +28,16 @@ interface PendingCareSubmissions {
   doctorProfileCreation: { current: DoctorProfileCreationCommand | null };
   staffAccountCreation: { current: StaffAccountCreationReview | null };
   patientRegistration: { current: PatientRegistrationCommand | null };
+  procedurePlans: Map<string, ProcedurePlanAttempt>;
   procedureDecisions: Map<string, DecisionAttempt>;
+  procedureVisitChanges: Map<string, ProcedureLinkAttempt>;
+  procedureCancellations: Map<string, ProcedureCancellationAttempt>;
   procedureCompletions: Map<string, CompletionAttempt>;
   investigationCancellations: Map<string, CancellationAttempt>;
   investigationOrders: Map<string, InvestigationOrderAttempt>;
   investigationResults: Map<string, ResultAttempt>;
+  investigationHandover: { current: AssignmentDraft | null };
+  investigationReviews: Map<string, InvestigationReviewAttempt>;
   followUpReviews: Map<string, ReviewAttempt>;
   checkInSubmission: { current: ReviewedCheckIn | null };
   paymentRecording: { current: ReviewedPayment | null };
@@ -48,11 +58,16 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
       doctorProfileCreation: { current: null as DoctorProfileCreationCommand | null },
       staffAccountCreation: { current: null as StaffAccountCreationReview | null },
       patientRegistration: { current: null as PatientRegistrationCommand | null },
+      procedurePlans: new Map<string, ProcedurePlanAttempt>(),
       procedureDecisions: new Map<string, DecisionAttempt>(),
+      procedureVisitChanges: new Map<string, ProcedureLinkAttempt>(),
+      procedureCancellations: new Map<string, ProcedureCancellationAttempt>(),
       procedureCompletions: new Map<string, CompletionAttempt>(),
       investigationCancellations: new Map<string, CancellationAttempt>(),
       investigationOrders: new Map<string, InvestigationOrderAttempt>(),
       investigationResults: new Map<string, ResultAttempt>(),
+      investigationHandover: { current: null as AssignmentDraft | null },
+      investigationReviews: new Map<string, InvestigationReviewAttempt>(),
       followUpReviews: new Map<string, ReviewAttempt>(),
       checkInSubmission: { current: null as ReviewedCheckIn | null },
       paymentRecording: { current: null as ReviewedPayment | null },
@@ -76,11 +91,16 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
       pending.doctorProfileCreation.current = null;
       pending.staffAccountCreation.current = null;
       pending.patientRegistration.current = null;
+      pending.procedurePlans.clear();
       pending.procedureDecisions.clear();
+      pending.procedureVisitChanges.clear();
+      pending.procedureCancellations.clear();
       pending.procedureCompletions.clear();
       pending.investigationCancellations.clear();
       pending.investigationOrders.clear();
       pending.investigationResults.clear();
+      pending.investigationHandover.current = null;
+      pending.investigationReviews.clear();
       pending.followUpReviews.clear();
       pending.checkInSubmission.current = null;
       pending.paymentRecording.current = null;

@@ -40,7 +40,7 @@ function checkedCompletion(value: unknown, patientId: string): ProcedureCompleti
   return value as unknown as ProcedureCompletion;
 }
 
-export function checkedCompletionContext(
+export function checkedProcedureRecordingContext(
   value: unknown,
   patientId: string,
   procedureId: string,
@@ -65,8 +65,18 @@ export function checkedCompletionContext(
     throw bad();
   if (p.status === 'completed') checkedCompletion(p.completion, patientId);
   else if (p.completion !== null) throw bad();
+  return value as unknown as ProcedureCompletionContext;
+}
+export function checkedCompletionContext(
+  value: unknown,
+  patientId: string,
+  procedureId: string,
+  doctorId: string,
+) {
+  const context = checkedProcedureRecordingContext(value, patientId, procedureId, doctorId);
+  const p = context.procedure;
   if (
-    value.allowed &&
+    context.allowed &&
     (p.status !== 'planned' ||
       p.agreements.at(-1)?.decision !== 'agreed' ||
       (p.effectiveAppointmentId &&
@@ -74,10 +84,10 @@ export function checkedCompletionContext(
           ['cancelled', 'no-show'].includes(p.scheduledAppointment.status))))
   )
     throw bad();
-  return value as unknown as ProcedureCompletionContext;
+  return context;
 }
 
-function sameVisit(
+export function sameVisit(
   a: ProcedureAppointmentSnapshot | null | undefined,
   b: ProcedureAppointmentSnapshot | null | undefined,
 ) {

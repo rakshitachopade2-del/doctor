@@ -17,7 +17,7 @@ import { notifyPatient } from './activity.ts';
 
 interface Dependencies {
   db: DB;
-  actor: (req: AuthRequest, roles?: User['role'][]) => User;
+  currentSessionUser: (req: AuthRequest) => User;
   audit: (req: AuthRequest, action: string, entityType: string, entityId: string) => void;
   fail: (status: number, message: string) => never;
 }
@@ -62,6 +62,7 @@ const commandSchema = z
     requestId: uuid,
     reason: z.string().trim().min(1).max(1000),
     removeConfirmed: z.literal(true).optional(),
+    recoverable: z.literal(true).optional(),
   })
   .strict()
   .refine(
@@ -132,7 +133,7 @@ interface SourceRow {
 
 export function registerProcedureScheduling(
   app: Express,
-  { db, actor, audit, fail }: Dependencies,
+  { db, currentSessionUser, audit, fail }: Dependencies,
 ) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS procedureScheduleEvents (
@@ -145,20 +146,32 @@ export function registerProcedureScheduling(
       procedureId TEXT NOT NULL REFERENCES procedures(id), payload TEXT NOT NULL,
       eventId TEXT NOT NULL REFERENCES procedureScheduleEvents(id)
     );
+    CREATE TABLE IF NOT EXISTS procedureScheduleRefusals (
+      requestId TEXT PRIMARY KEY, actorId TEXT NOT NULL REFERENCES users(id),
+      procedureId TEXT NOT NULL REFERENCES procedures(id), payload TEXT NOT NULL,
+      status INTEGER NOT NULL CHECK(status IN (400,409)), message TEXT NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS procedure_schedule_created ON procedures(json_extract(data,'$.createdAt') DESC,id DESC);
     CREATE INDEX IF NOT EXISTS procedure_schedule_candidates ON appointments(patientId,status,date,time,id);
   `);
-  for (const table of ['procedureScheduleEvents', 'procedureScheduleCommands'])
+  for (const table of [
+    'procedureScheduleEvents',
+    'procedureScheduleCommands',
+    'procedureScheduleRefusals',
+  ])
     db.exec(`
     CREATE TRIGGER IF NOT EXISTS ${table}_no_update BEFORE UPDATE ON ${table}
     BEGIN SELECT RAISE(ABORT,'Procedure scheduling evidence is immutable'); END;
     CREATE TRIGGER IF NOT EXISTS ${table}_no_delete BEFORE DELETE ON ${table}
     BEGIN SELECT RAISE(ABORT,'Procedure scheduling evidence is immutable'); END;
   `);
-  function transaction<T>(work: () => T) {
+  function withStaff<T>(req: AuthRequest, work: (user: User) => T) {
     db.exec('BEGIN IMMEDIATE');
     try {
-      const value = work();
+      const user = currentSessionUser(req);
+      if (user.mustChangePassword || !['admin', 'doctor', 'receptionist'].includes(user.role))
+        fail(403, 'Procedure scheduling requires a current staff account.');
+      const value = work(user);
       db.exec('COMMIT');
       return value;
     } catch (error) {
@@ -166,7 +179,9 @@ export function registerProcedureScheduling(
       throw error;
     }
   }
-  const staff = (req: AuthRequest) => actor(req, ['admin', 'doctor', 'receptionist']);
+  function requireWrite(changes: number | bigint) {
+    if (Number(changes) !== 1) throw new Error('Procedure appointment change could not be saved.');
+  }
   const effectiveId =
     "CASE WHEN e.id IS NULL THEN json_extract(p.data,'$.appointmentId') ELSE e.afterAppointmentId END";
   const source = `WITH base AS (
@@ -251,17 +266,16 @@ export function registerProcedureScheduling(
     return { page: Math.min(requested, totalPages), pageSize, total, totalPages };
   };
   app.get('/api/procedure-scheduling', (req: AuthRequest, res) => {
-    staff(req);
-    const input = z
-      .object({
-        search: z.string().trim().max(300).default(''),
-        status: z.enum(['planned', 'completed', 'cancelled', 'all']).default('planned'),
-        booking: z.enum(['all', 'unlinked', 'linked', 'attention']).default('all'),
-        ...pagination,
-      })
-      .strict()
-      .parse(req.query);
-    const result = transaction((): ProcedureSchedulePage => {
+    const result = withStaff(req, (): ProcedureSchedulePage => {
+      const input = z
+        .object({
+          search: z.string().trim().max(300).default(''),
+          status: z.enum(['planned', 'completed', 'cancelled', 'all']).default('planned'),
+          booking: z.enum(['all', 'unlinked', 'linked', 'attention']).default('all'),
+          ...pagination,
+        })
+        .strict()
+        .parse(req.query);
       const clauses: string[] = [],
         values: (string | number)[] = [localNow()];
       if (input.search) {
@@ -296,10 +310,9 @@ export function registerProcedureScheduling(
     res.json(result);
   });
   app.get('/api/procedures/:id/scheduling', (req: AuthRequest, res) => {
-    staff(req);
-    z.object({}).strict().parse(req.query);
     res.json(
-      transaction(() => {
+      withStaff(req, () => {
+        z.object({}).strict().parse(req.query);
         const value = context(String(req.params.id));
         audit(req, 'viewed procedure scheduling history', 'procedure', value.procedure.id);
         return value;
@@ -307,19 +320,18 @@ export function registerProcedureScheduling(
     );
   });
   app.get('/api/procedures/:id/scheduling/candidates', (req: AuthRequest, res) => {
-    staff(req);
-    const today = clinicToday(),
-      lastDay = addDays(today, 180);
-    const input = z
-      .object({ from: date.default(today), to: date.default(lastDay), ...pagination })
-      .strict()
-      .refine(
-        (value) => value.from >= today && value.to <= lastDay && value.from <= value.to,
-        'Choose an ordered date range within the next 180 days.',
-      )
-      .parse(req.query);
     res.json(
-      transaction((): ProcedureCandidatePage => {
+      withStaff(req, (): ProcedureCandidatePage => {
+        const today = clinicToday(),
+          lastDay = addDays(today, 180);
+        const input = z
+          .object({ from: date.default(today), to: date.default(lastDay), ...pagination })
+          .strict()
+          .refine(
+            (value) => value.from >= today && value.to <= lastDay && value.from <= value.to,
+            'Choose an ordered date range within the next 180 days.',
+          )
+          .parse(req.query);
         const plan = sourceRow(String(req.params.id));
         const where =
           "WHERE a.patientId=? AND a.status='scheduled' AND a.date>=? AND a.date<=? AND a.id!=? AND a.date||'T'||a.time||':00.000'>?";
@@ -353,98 +365,140 @@ export function registerProcedureScheduling(
     );
   });
   app.post('/api/procedures/:id/scheduling', (req: AuthRequest, res) => {
-    const user = staff(req),
-      procedureId = String(req.params.id),
-      input = commandSchema.parse(req.body);
-    res.json(
-      transaction((): ProcedureScheduleMutation => {
-        const prior = db
-          .prepare('SELECT * FROM procedureScheduleCommands WHERE requestId=?')
-          .get(input.requestId);
-        if (prior) {
-          if (
-            prior.actorId !== user.id ||
-            prior.procedureId !== procedureId ||
-            prior.payload !== JSON.stringify(input)
-          )
-            return fail(409, 'This request ID was already used for a different command.');
-          return {
+    const result = withStaff(req, (user) => {
+      const procedureId = String(req.params.id),
+        input = commandSchema.parse(req.body),
+        payload = JSON.stringify(input);
+      const refused = (status: number, message: string) => ({
+        status,
+        body: {
+          code: 'PROCEDURE_VISIT_NOT_CHANGED',
+          actorId: user.id,
+          procedureId,
+          command: input,
+          message,
+        },
+      });
+      const prior = db
+        .prepare(
+          `SELECT actorId,procedureId,payload,eventId,NULL AS status,NULL AS message
+            FROM procedureScheduleCommands WHERE requestId=?
+            UNION ALL SELECT actorId,procedureId,payload,NULL,status,message
+            FROM procedureScheduleRefusals WHERE requestId=?`,
+        )
+        .get(input.requestId, input.requestId);
+      if (prior) {
+        if (
+          prior.actorId !== user.id ||
+          prior.procedureId !== procedureId ||
+          prior.payload !== payload
+        )
+          return fail(409, 'This request ID was already used for a different command.');
+        if (prior.status !== null) return refused(Number(prior.status), String(prior.message));
+        return {
+          status: 200,
+          body: {
             context: context(procedureId),
             event: get<ProcedureScheduleEvent>(
               db,
               'procedureScheduleEvents',
               prior.eventId as string,
             )!,
-          };
-        }
-        const current = context(procedureId),
-          plan = current.procedure;
-        if (current.revision !== input.expectedRevision)
-          return fail(
-            409,
-            'The procedure or its current visit changed. Review the latest scheduling details.',
-          );
-        if (!plan.canChange) return fail(409, plan.blockedReason!);
-        if (plan.effectiveAppointmentId === input.appointmentId)
-          return fail(400, 'The appointment association is unchanged.');
-        let target: ProcedureAppointmentSnapshot | null = null;
-        if (input.appointmentId) {
-          const appointment = get<Appointment>(db, 'appointments', input.appointmentId);
-          if (!appointment || appointment.patientId !== plan.patientId)
-            return fail(400, 'Choose an appointment for this patient.');
-          target = procedureAppointmentSnapshot(appointment);
-          if (hash(target) !== input.expectedAppointmentRevision)
-            return fail(
-              409,
-              'The selected visit changed. Refresh the candidates and review it again.',
-            );
-          if (
-            appointment.status !== 'scheduled' ||
-            Date.parse(`${appointment.date}T${appointment.time}:00+05:30`) <= Date.now()
-          )
-            return fail(409, 'Choose a future scheduled appointment.');
-        }
-        const event: ProcedureScheduleEvent = {
-          id: id(),
-          procedureId,
-          operation:
-            input.appointmentId === null
-              ? 'unlink'
-              : plan.effectiveAppointmentId === null
-                ? 'attach'
-                : 'replace',
-          requestId: input.requestId,
-          expectedRevision: input.expectedRevision,
-          expectedAppointmentRevision: input.expectedAppointmentRevision,
-          beforeAppointmentId: plan.effectiveAppointmentId,
-          afterAppointmentId: input.appointmentId,
-          beforeAppointment: plan.appointment,
-          afterAppointment: target,
-          reason: input.reason,
-          createdById: user.id,
-          createdByName: user.name,
-          createdByRole: user.role as ProcedureScheduleEvent['createdByRole'],
-          createdAt: nowISO(),
+          } satisfies ProcedureScheduleMutation,
         };
-        db.prepare(
-          'INSERT INTO procedureScheduleEvents(id,procedureId,afterAppointmentId,data) VALUES (?,?,?,?)',
-        ).run(event.id, procedureId, event.afterAppointmentId, JSON.stringify(event));
-        db.prepare(
-          'INSERT INTO procedureScheduleCommands(requestId,actorId,procedureId,payload,eventId) VALUES (?,?,?,?,?)',
-        ).run(input.requestId, user.id, procedureId, JSON.stringify(input), event.id);
-        audit(req, `procedure appointment ${event.operation}`, 'procedure', procedureId);
-        notifyPatient(db, plan.patientId, `procedure-scheduling:${event.id}`, {
-          kind: 'procedure',
-          title: target
-            ? 'Your procedure plan has an appointment'
-            : 'A procedure appointment link was removed',
-          detail: target
-            ? `${target.date} at ${target.time} IST · ${target.durationMinutes} minutes · ${target.doctorName}`
-            : 'The procedure plan is now unlinked. Existing appointments remain booked.',
-          href: '/my-care/record?tab=workflows',
-        });
-        return { context: context(procedureId), event };
-      }),
-    );
+      }
+      const current = context(procedureId),
+        plan = current.procedure;
+      function refuse(status: number, message: string) {
+        if (!input.recoverable) return fail(status, message);
+        requireWrite(
+          db
+            .prepare(
+              'INSERT INTO procedureScheduleRefusals(requestId,actorId,procedureId,payload,status,message) VALUES (?,?,?,?,?,?)',
+            )
+            .run(input.requestId, user.id, procedureId, payload, status, message).changes,
+        );
+        return refused(status, message);
+      }
+      if (current.revision !== input.expectedRevision)
+        return refuse(
+          409,
+          'The procedure or its current visit changed. Review the latest scheduling details.',
+        );
+      if (!plan.canChange) return refuse(409, plan.blockedReason!);
+      if (plan.effectiveAppointmentId === input.appointmentId)
+        return refuse(400, 'The appointment association is unchanged.');
+      let target: ProcedureAppointmentSnapshot | null = null;
+      if (input.appointmentId) {
+        const appointment = get<Appointment>(db, 'appointments', input.appointmentId);
+        if (!appointment || appointment.patientId !== plan.patientId)
+          return refuse(400, 'Choose an appointment for this patient.');
+        target = procedureAppointmentSnapshot(appointment);
+        if (hash(target) !== input.expectedAppointmentRevision)
+          return refuse(
+            409,
+            'The selected visit changed. Refresh the candidates and review it again.',
+          );
+        if (
+          appointment.status !== 'scheduled' ||
+          Date.parse(`${appointment.date}T${appointment.time}:00+05:30`) <= Date.now()
+        )
+          return refuse(409, 'Choose a future scheduled appointment.');
+      }
+      const event: ProcedureScheduleEvent = {
+        id: id(),
+        procedureId,
+        operation:
+          input.appointmentId === null
+            ? 'unlink'
+            : plan.effectiveAppointmentId === null
+              ? 'attach'
+              : 'replace',
+        requestId: input.requestId,
+        expectedRevision: input.expectedRevision,
+        expectedAppointmentRevision: input.expectedAppointmentRevision,
+        beforeAppointmentId: plan.effectiveAppointmentId,
+        afterAppointmentId: input.appointmentId,
+        beforeAppointment: plan.appointment,
+        afterAppointment: target,
+        reason: input.reason,
+        createdById: user.id,
+        createdByName: user.name,
+        createdByRole: user.role as ProcedureScheduleEvent['createdByRole'],
+        createdAt: nowISO(),
+      };
+      requireWrite(
+        db
+          .prepare(
+            'INSERT INTO procedureScheduleEvents(id,procedureId,afterAppointmentId,data) VALUES (?,?,?,?)',
+          )
+          .run(event.id, procedureId, event.afterAppointmentId, JSON.stringify(event)).changes,
+      );
+      requireWrite(
+        db
+          .prepare(
+            'INSERT INTO procedureScheduleCommands(requestId,actorId,procedureId,payload,eventId) VALUES (?,?,?,?,?)',
+          )
+          .run(input.requestId, user.id, procedureId, payload, event.id).changes,
+      );
+      audit(req, `procedure appointment ${event.operation}`, 'procedure', procedureId);
+      requireWrite(Number(db.prepare('SELECT changes() AS n').get()!.n));
+      const delivered = notifyPatient(db, plan.patientId, `procedure-scheduling:${event.id}`, {
+        kind: 'procedure',
+        title: target
+          ? 'Your procedure plan has an appointment'
+          : 'A procedure appointment link was removed',
+        detail: target
+          ? `${target.date} at ${target.time} IST · ${target.durationMinutes} minutes · ${target.doctorName}`
+          : 'The procedure plan is now unlinked. Existing appointments remain booked.',
+        href: '/my-care/record?tab=workflows',
+      });
+      if (!delivered) throw new Error('Procedure appointment notice could not be saved.');
+      return {
+        status: 200,
+        body: { context: context(procedureId), event } satisfies ProcedureScheduleMutation,
+      };
+    });
+    res.status(result.status).json(result.body);
   });
 }

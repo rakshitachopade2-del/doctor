@@ -496,9 +496,9 @@ test('catalogue and patient-plan writes preserve stale drafts and confirm exact 
     dialog.getByRole('button', { name: 'Retry same request', exact: true }),
   ).toBeVisible();
   await expect(dialog.getByLabel('Indication / reason', { exact: true })).toBeDisabled();
-  await page.keyboard.press('Escape');
-  await dialog.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close for now', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await page.getByRole('button', { name: 'Resume procedure plan', exact: true }).click();
   source = await availability(page.request, headers, source, false);
   await page.unroute('**/api/procedures', corruptPlan);
   const replay = response(page, '/api/procedures');
@@ -509,6 +509,11 @@ test('catalogue and patient-plan writes preserve stale drafts and confirm exact 
   expect(((await receipt.json()) as ProcedureCreateMutation).receipt).toEqual(
     committedPlan!.receipt,
   );
+  const confirmation = page.getByRole('dialog', { name: 'Procedure plan confirmed' });
+  await expect(confirmation).toContainText(committedPlan!.procedure.id);
+  await expect(confirmation).toContainText(risk);
+  await expect(confirmation).toContainText(indication);
+  await confirmation.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(dialog).toBeHidden();
   const workflows = await get<PatientClinicalWorkflows>(
     page.request,

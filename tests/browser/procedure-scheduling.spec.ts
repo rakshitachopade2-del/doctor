@@ -177,7 +177,9 @@ async function agreed(request: APIRequestContext, headers: Record<string, string
   });
 }
 function modal(page: Page) {
-  return page.getByRole('dialog', { name: 'Procedure appointment', exact: true });
+  return page.getByRole('dialog', {
+    name: /^(Procedure appointment|Appointment change awaiting confirmation)$/,
+  });
 }
 async function choose(dialog: Locator, appointment: Appointment) {
   await dialog
@@ -530,9 +532,11 @@ test('procedure assignment keeps stale drafts and retries uncertain saves agains
   ).toBeVisible();
   await expect(dialog.getByLabel('Reason for appointment link', { exact: true })).toBeDisabled();
   await page.keyboard.press('Escape');
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole('button', { name: 'Resume appointment change', exact: true }).click();
+  await expect(dialog.getByLabel('Reason for appointment link', { exact: true })).toHaveValue(
+    reason,
+  );
   await page.unroute(`**${path}`, lost);
   await assign(page.request, headers, created.id, null, 'PRIVATE later unlink before exact retry.');
   const retryResponse = page.waitForResponse(
