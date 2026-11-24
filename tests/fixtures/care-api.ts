@@ -97,7 +97,7 @@ export async function simultaneousCareRequests(
   route: string,
   who: Client,
   body: unknown,
-  other: { who: Client; body: unknown } = { who, body },
+  other: { who: Client; body: unknown; route?: string } = { who, body },
 ) {
   const program = `
     import { createApp } from './server/app.ts';
@@ -119,7 +119,7 @@ export async function simultaneousCareRequests(
       }),
     ]);
     const second = async () => {
-      const res = await fetch(`http://127.0.0.1:${port}/api${route}`, {
+      const res = await fetch(`http://127.0.0.1:${port}/api${other.route ?? route}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,7 +1,7 @@
-import { useSearchParams, Link } from 'react-router-dom';
+import { useLocation, useSearchParams, Link } from 'react-router-dom';
 import { useState, type FormEvent } from 'react';
 import { Check, CircleOff, Plus } from 'lucide-react';
-import { api, useResource, useToast } from '../lib';
+import { api, useResource, useSession, useToast } from '../lib';
 import {
   Avatar,
   Badge,
@@ -15,12 +15,45 @@ import {
 import type { Doctor, User, Patient } from '../../shared/types';
 import { ClinicConfigurationPanel } from '../components/ClinicConfigurationPanel';
 import { DoctorBookingStatusControls } from '../components/DoctorBookingStatus';
+import { useAppointmentBookingData } from '../components/appointment-booking-helpers';
+import { StaffAccountCreationControl } from '../components/StaffAccountCreationModal';
 export function SettingsPage() {
-  const doctors = useResource<Doctor[]>('/api/doctors');
-  const users = useResource<User[]>('/api/users');
+  const { session } = useSession();
+  const location = useLocation();
+  const doctors = useAppointmentBookingData<Doctor[]>('/api/doctors', (value) => {
+    if (
+      !Array.isArray(value) ||
+      value.some(
+        (doctor) =>
+          !doctor ||
+          typeof doctor.id !== 'string' ||
+          !doctor.id ||
+          typeof doctor.name !== 'string' ||
+          !Array.isArray(doctor.specialties) ||
+          !Array.isArray(doctor.languages),
+      )
+    )
+      throw new Error('The doctor profiles could not be loaded.');
+    return value;
+  });
+  const users = useAppointmentBookingData<User[]>('/api/users', (value) => {
+    if (
+      !Array.isArray(value) ||
+      value.some(
+        (account) =>
+          !account ||
+          typeof account.id !== 'string' ||
+          typeof account.name !== 'string' ||
+          typeof account.email !== 'string' ||
+          !['admin', 'doctor', 'receptionist', 'patient'].includes(account.role),
+      )
+    )
+      throw new Error('The workspace accounts could not be loaded.');
+    return value;
+  });
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const [modal, setModal] = useState<'doctor' | 'user' | null>(null);
+  const [doctorFormOpen, setDoctorFormOpen] = useState(false);
   const [editing, setEditing] = useState<Doctor | null>(null);
   const [params, setParams] = useSearchParams();
   const sections = [
@@ -36,41 +69,33 @@ export function SettingsPage() {
     next.set('tab', key);
     setParams(next);
   }
-  async function create(e: FormEvent<HTMLFormElement>) {
+  async function saveDoctor(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
     setBusy(true);
     try {
-      if (modal === 'doctor') {
-        const body = {
-          ...form,
-          experience: Number(form.experience),
-          fee: Number(form.fee),
-          specialties: form.specialties
-            .split(',')
-            .map((x) => x.trim())
-            .filter(Boolean),
-          languages: form.languages
-            .split(',')
-            .map((x) => x.trim())
-            .filter(Boolean),
-          color: form.color || '#e0ede6',
-        };
-        await api(editing ? `/api/doctors/${editing.id}` : '/api/doctors', {
-          method: editing ? 'PATCH' : 'POST',
-          body,
-        });
-        await doctors.reload();
-      } else {
-        await api('/api/users', {
-          method: 'POST',
-          body: { ...form, doctorId: form.doctorId || undefined },
-        });
-        await users.reload();
-      }
-      setModal(null);
+      const body = {
+        ...form,
+        experience: Number(form.experience),
+        fee: Number(form.fee),
+        specialties: form.specialties
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean),
+        languages: form.languages
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean),
+        color: form.color || '#e0ede6',
+      };
+      await api(editing ? `/api/doctors/${editing.id}` : '/api/doctors', {
+        method: editing ? 'PATCH' : 'POST',
+        body,
+      });
+      await doctors.reload();
+      setDoctorFormOpen(false);
       setEditing(null);
-      toast(modal === 'doctor' ? 'Doctor profile saved.' : 'Team member added.');
+      toast('Doctor profile saved.');
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -134,7 +159,7 @@ export function SettingsPage() {
                 className="button button-primary"
                 onClick={() => {
                   setEditing(null);
-                  setModal('doctor');
+                  setDoctorFormOpen(true);
                 }}
               >
                 <Plus size={16} />
@@ -163,7 +188,7 @@ export function SettingsPage() {
                         className="button button-secondary button-small"
                         onClick={() => {
                           setEditing(d);
-                          setModal('doctor');
+                          setDoctorFormOpen(true);
                         }}
                       >
                         Edit profile
@@ -187,10 +212,15 @@ export function SettingsPage() {
                   in Accounts & access.
                 </p>
               </div>
-              <button className="button button-secondary" onClick={() => setModal('user')}>
-                <Plus size={16} />
-                Add team member
-              </button>
+              {session.user?.role === 'admin' && !session.user.mustChangePassword && (
+                <StaffAccountCreationControl
+                  key={JSON.stringify([location.key, session.user.id, session.csrfToken])}
+                  actorId={session.user.id}
+                  doctors={doctors.data ?? []}
+                  onRefreshDoctors={() => void doctors.reload()}
+                  onSaved={() => void users.reload()}
+                />
+              )}
             </div>
             {users.error ? (
               <ErrorState message={users.error} retry={users.reload} />
@@ -231,7 +261,7 @@ export function SettingsPage() {
               </div>
             )}
           </Card>
-          <PortalAccessCard />
+          <PortalAccessCard accounts={users.data} reloadAccounts={users.reload} />
         </div>
       )}
       {tab === 'integrations' && (
@@ -295,135 +325,81 @@ export function SettingsPage() {
           ))}
         </div>
       )}
-      {modal && (
+      {doctorFormOpen && (
         <Modal
-          title={
-            modal === 'doctor'
-              ? editing
-                ? 'Edit doctor profile'
-                : 'Add a doctor'
-              : 'Add a team member'
-          }
+          title={editing ? 'Edit doctor profile' : 'Add a doctor'}
           onClose={() => {
-            setModal(null);
+            setDoctorFormOpen(false);
             setEditing(null);
           }}
         >
-          <form className="stack" onSubmit={create}>
-            {modal === 'doctor' ? (
-              <>
-                <Field label="Display name">
-                  <input
-                    name="name"
-                    defaultValue={editing?.name}
-                    placeholder="Dr. Full name"
-                    required
-                  />
-                </Field>
-                <Field label="Professional title">
-                  <input
-                    name="title"
-                    defaultValue={editing?.title || 'Consultant Dermatologist'}
-                    required
-                  />
-                </Field>
-                <Field label="Qualifications">
-                  <input
-                    name="qualifications"
-                    defaultValue={editing?.qualifications}
-                    placeholder="MBBS, MD Dermatology"
-                    required
-                  />
-                </Field>
-                <div className="form-grid">
-                  <Field label="Years of experience">
-                    <input
-                      type="number"
-                      name="experience"
-                      min="0"
-                      max="70"
-                      defaultValue={editing?.experience || 0}
-                      required
-                    />
-                  </Field>
-                  <Field label="Consultation fee (₹)">
-                    <input
-                      type="number"
-                      name="fee"
-                      min="0"
-                      max="100000"
-                      defaultValue={editing?.fee || 800}
-                      required
-                    />
-                  </Field>
-                </div>
-                <Field label="Focus areas" hint="Separate each focus area with a comma.">
-                  <input
-                    name="specialties"
-                    defaultValue={editing?.specialties.join(', ')}
-                    placeholder="Acne, Hair and scalp, General dermatology"
-                    required
-                  />
-                </Field>
-                <Field label="Languages" hint="Separate with commas.">
-                  <input
-                    name="languages"
-                    defaultValue={editing?.languages.join(', ') || 'English, Hindi'}
-                    required
-                  />
-                </Field>
-                <Field label="About the doctor">
-                  <textarea name="bio" defaultValue={editing?.bio} required maxLength={2000} />
-                </Field>
-                <input name="color" type="hidden" value={editing?.color || '#e0ede6'} />
-              </>
-            ) : (
-              <>
-                <Field label="Full name">
-                  <input name="name" required maxLength={100} />
-                </Field>
-                <Field label="Email address">
-                  <input name="email" type="email" required />
-                </Field>
-                <Field
-                  label="Initial password"
-                  hint="Share securely. The team member must replace this password at first sign-in."
-                >
-                  <input
-                    name="password"
-                    type="password"
-                    minLength={12}
-                    maxLength={128}
-                    autoComplete="new-password"
-                    required
-                  />
-                </Field>
-                <Field label="Role">
-                  <select name="role" defaultValue="receptionist">
-                    <option value="receptionist">
-                      Receptionist — appointments and demographics
-                    </option>
-                    <option value="doctor">Doctor — clinical workspace</option>
-                    <option value="admin">Administrator — full clinic access</option>
-                  </select>
-                </Field>
-                <Field
-                  label="Doctor profile"
-                  hint="Required for doctor accounts. Leave empty for other roles."
-                >
-                  <select name="doctorId">
-                    <option value="">No doctor profile</option>
-                    {doctors.data?.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </>
-            )}
+          <form className="stack" onSubmit={saveDoctor}>
+            <Field label="Display name">
+              <input
+                name="name"
+                defaultValue={editing?.name}
+                placeholder="Dr. Full name"
+                required
+              />
+            </Field>
+            <Field label="Professional title">
+              <input
+                name="title"
+                defaultValue={editing?.title || 'Consultant Dermatologist'}
+                required
+              />
+            </Field>
+            <Field label="Qualifications">
+              <input
+                name="qualifications"
+                defaultValue={editing?.qualifications}
+                placeholder="MBBS, MD Dermatology"
+                required
+              />
+            </Field>
+            <div className="form-grid">
+              <Field label="Years of experience">
+                <input
+                  type="number"
+                  name="experience"
+                  min="0"
+                  max="70"
+                  defaultValue={editing?.experience || 0}
+                  required
+                />
+              </Field>
+              <Field label="Consultation fee (₹)">
+                <input
+                  type="number"
+                  name="fee"
+                  min="0"
+                  max="100000"
+                  defaultValue={editing?.fee || 800}
+                  required
+                />
+              </Field>
+            </div>
+            <Field label="Focus areas" hint="Separate each focus area with a comma.">
+              <input
+                name="specialties"
+                defaultValue={editing?.specialties.join(', ')}
+                placeholder="Acne, Hair and scalp, General dermatology"
+                required
+              />
+            </Field>
+            <Field label="Languages" hint="Separate with commas.">
+              <input
+                name="languages"
+                defaultValue={editing?.languages.join(', ') || 'English, Hindi'}
+                required
+              />
+            </Field>
+            <Field label="About the doctor">
+              <textarea name="bio" defaultValue={editing?.bio} required maxLength={2000} />
+            </Field>
+            <input name="color" type="hidden" value={editing?.color || '#e0ede6'} />
             <button className="button button-primary" disabled={busy}>
-              {busy ? 'Saving…' : modal === 'doctor' ? 'Save doctor' : 'Create account'}
+              {busy ? 'Saving…' : 'Save doctor'}
             </button>
           </form>
         </Modal>
@@ -431,13 +407,18 @@ export function SettingsPage() {
     </>
   );
 }
-function PortalAccessCard() {
+function PortalAccessCard({
+  accounts,
+  reloadAccounts,
+}: {
+  accounts: User[] | null;
+  reloadAccounts: () => Promise<User[] | null>;
+}) {
   const patients = useResource<Patient[]>('/api/patients');
-  const users = useResource<User[]>('/api/users');
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const linked = new Set(users.data?.map((u) => u.patientId).filter(Boolean));
+  const linked = new Set(accounts?.map((u) => u.patientId).filter(Boolean));
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -450,7 +431,7 @@ function PortalAccessCard() {
         body: { email: values.email, password: values.password, identityVerified: true },
       });
       form.reset();
-      await users.reload();
+      await reloadAccounts();
       toast('Portal account created and linked to the existing patient record.');
     } catch (e) {
       setError((e as Error).message);

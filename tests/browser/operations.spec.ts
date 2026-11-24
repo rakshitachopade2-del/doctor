@@ -102,7 +102,11 @@ test('admin configures a doctor, provisions staff, and links a verified patient 
   await dialog.getByLabel('Full name').fill('Test Staff');
   await dialog.getByLabel('Email address').fill('browser.staff@example.test');
   await dialog.getByLabel('Initial password').fill('BrowserStaff2026!');
+  await dialog.getByRole('button', { name: 'Review account', exact: true }).click();
+  await dialog.getByRole('checkbox').check();
   await dialog.getByRole('button', { name: 'Create account', exact: true }).click();
+  await expect(dialog.getByRole('heading', { name: 'Staff account created' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('browser.staff@example.test', { exact: true })).toBeVisible();
   await page.getByLabel('Existing patient').selectOption('patient-2');

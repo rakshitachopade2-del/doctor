@@ -904,21 +904,51 @@ async function rehearseRecovery() {
       expectedRevision: enrolled.revision,
       requestId: randomUUID(),
     });
-    const receptionId = 'recovery-receptionist';
     const receptionEmail = 'synthetic-reception@example.test';
-    createUser(
-      db,
-      {
-        id: receptionId,
-        name: 'Synthetic recovery receptionist',
-        email: receptionEmail,
-        role: 'receptionist',
-        active: true,
-      },
-      password,
+    const staffCreatePath = '/users/create';
+    const staffCheckPath = '/users/creation-outcome';
+    const receptionReview = {
+      requestId: randomUUID(),
+      name: 'Synthetic recovery receptionist',
+      email: receptionEmail,
+      role: 'receptionist',
+      doctorId: null,
+      reviewedConfirmed: true,
+    };
+    const initialReceptionPassword = randomBytes(24).toString('base64url');
+    const receptionCreation = await call(
+      source,
+      staffCreatePath,
+      admin,
+      'POST',
+      { ...receptionReview, password: initialReceptionPassword },
+      201,
     );
+    const receptionId = receptionCreation.receipt.account.id;
+    const abandonedReview = {
+      ...receptionReview,
+      requestId: randomUUID(),
+      email: 'uncreated-reception@example.test',
+    };
+    const abandonedOutcome = await call(
+      source,
+      staffCheckPath,
+      admin,
+      'POST',
+      abandonedReview,
+      409,
+    );
+    assert.equal(abandonedOutcome.code, 'STAFF_ACCOUNT_NOT_CREATED');
     const reception = client();
-    await call(source, '/auth/login', reception, 'POST', { email: receptionEmail, password });
+    const initialLogin = await call(source, '/auth/login', reception, 'POST', {
+      email: receptionEmail,
+      password: initialReceptionPassword,
+    });
+    assert.equal(initialLogin.user.mustChangePassword, true);
+    await call(source, '/auth/password', reception, 'POST', {
+      currentPassword: initialReceptionPassword,
+      newPassword: password,
+    });
     const registrationPath = '/patients/register';
     const registrationCommand = {
       requestId: randomUUID(),
@@ -1320,6 +1350,45 @@ async function rehearseRecovery() {
       assert.equal(JSON.stringify(restoredSummary).includes(command.body), false);
       assert.equal(JSON.stringify(restoredClinicalRecord).includes(command.requestId), false);
     }
+    assert.deepEqual(
+      await call(target, staffCheckPath, newAdmin, 'POST', receptionReview),
+      receptionCreation,
+    );
+    assert.equal(receptionCreation.receipt.account.mustChangePassword, true);
+    assert.equal(
+      (await call(target, '/accounts?search=' + encodeURIComponent(receptionEmail), newAdmin))[0]
+        .mustChangePassword,
+      false,
+    );
+    assert.deepEqual(
+      await call(target, staffCheckPath, newAdmin, 'POST', abandonedReview, 409),
+      abandonedOutcome,
+    );
+    assert.deepEqual(
+      await call(
+        target,
+        staffCreatePath,
+        newAdmin,
+        'POST',
+        { ...abandonedReview, password: initialReceptionPassword },
+        409,
+      ),
+      abandonedOutcome,
+    );
+    assert.equal(
+      restoredDb.prepare('SELECT count(*) n FROM users WHERE email=?').get(abandonedReview.email).n,
+      0,
+    );
+    const staffEvidence = restoredDb
+      .prepare('SELECT * FROM staffAccountCreationCommands WHERE requestId IN (?,?)')
+      .all(receptionReview.requestId, abandonedReview.requestId);
+    assert.equal(staffEvidence.length, 2);
+    const restoredVerifier = restoredDb
+      .prepare('SELECT password FROM users WHERE id=?')
+      .get(receptionId).password;
+    for (const value of [initialReceptionPassword, password, restoredVerifier]) {
+      assert.equal(JSON.stringify(staffEvidence).includes(value), false);
+    }
     const newReception = client();
     await call(target, '/auth/login', newReception, 'POST', { email: receptionEmail, password });
     assert.deepEqual(
@@ -1526,7 +1595,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, role-safe walk-in registration receipts after later corrections, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, role-safe walk-in registration receipts after later corrections, staff account creation outcomes after a mandatory credential change, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

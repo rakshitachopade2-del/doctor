@@ -59,13 +59,17 @@ Password change, recovery and account access changes invalidate pending MFA prep
 ## Administration and public configuration
 
 - `GET /users` → normalized account data (administrator; retained for staff and portal setup).
-- `POST /users {name,email,password,role,doctorId?}` → `User` (administrator). Roles are `doctor`, `receptionist` or `admin`; doctors require a profile. New accounts have `active:true` and `mustChangePassword:true`.
+- `POST /users {name,email,password,role,doctorId?}` → `User` with 201 (administrator). The compatibility route commits the user and creation audit together. Repeating a successful creation with the same email returns 409.
+- `POST /users/create {requestId,name,email,role,doctorId,reviewedConfirmed:true,password}` → `{receipt:{actorId,requestId,account}}` with 201 for creation or 200 for an earlier success. The account snapshot includes the original ID, name, normalized email, role, linked profile if present, `active:true` and `mustChangePassword:true`.
+- `POST /users/creation-outcome {requestId,name,email,role,doctorId,reviewedConfirmed:true}` → the same receipt with 200, or a definitive 409 with `{code:'STAFF_ACCOUNT_NOT_CREATED',actorId,review,message}`. This route rejects extra fields, including a password. If the request has never been recorded, the check closes it atomically. A delayed creation with that UUID receives the same refusal. A fresh UUID and initial password are required to intentionally start again.
 - `GET /doctors` → `Doctor[]` (public). Each profile includes its current `appointmentDurationMinutes` and safe `acceptingNewBookings` boolean. Paused profiles remain in the directory; private reasons/history/revisions are excluded.
 - `POST /doctors`, `PATCH /doctors/:id` → `Doctor` (administrator; full profile: name, title, qualifications, specialties, experience, fee, bio, languages, optional color).
 - `GET /settings` → `ClinicSettings` (public fields only).
 - `PATCH /settings` → `ClinicSettings` (administrator; compatibility API with partial clinic fields). Timezone remains `Asia/Kolkata`; module settings cover `intake`, `images` and `followUp`. Explicitly submitted fields merge into current settings under the write lock, with atomic legacy change history and audit. This unversioned API does not reject stale submitted fields. Unknown fields are stripped; a no-op creates no configuration change.
 - `GET /audit` → `AuditEntry[]` (administrator).
 - `GET /health` → `{status:'ok'}`.
+
+Both reviewed routes require the same currently authorized administrator, UUID and normalized account details. A UUID claimed by another actor or different details yields a generic 409. An email already in use or an invalid profile linkage produces a recorded refusal on the reviewed creation route. Set `doctorId` to an existing profile for a doctor, an existing profile or `null` for an administrator, and `null` for a receptionist. The initial password accepts 12–128 characters and is used only when a new user is created. A successful replay with a different valid password returns the original receipt and leaves the credential intact. Use the outcome route after an interrupted response. Use `GET /accounts` for current roles, access and password-change status.
 
 Disabling a module pauses its new activity. Existing records remain readable within the usual permissions. The clinic’s public `hours` string is descriptive; bookable hours are configured by scheduling endpoints.
 

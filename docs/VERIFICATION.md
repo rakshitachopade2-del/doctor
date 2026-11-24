@@ -1,5 +1,19 @@
 # Release verification
 
+## 1.52.0 · Staff-account creation
+
+Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **779 API, backup and recovery tests** and **209 browser journeys across 46 projects** passed. The production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A Docker engine was unavailable for the container runtime check.
+
+On v1.51, an injected audit failure returned 500 and left a staff account without its creation audit. A second rehearsal lost the successful confirmation for a linked doctor account. In both cases retrying returned the same email conflict. On v1.52, a failed write rolls back the user, audit and receipt. A committed request can recover its original account ID and access flags without resending a password.
+
+Eight new API tests cover both account-creation routes, current administrator permissions, concurrent SQLite writers, competing passwords, and recovery after rotation, suspension and restart. When an outcome check reaches the server before the initial creation, the delayed creation receives the recorded refusal. Tests inspected the HTTP responses, audit and private creation evidence for the initial password and the user's sign-in verifier.
+
+Five new Chrome journeys cover a lost or undelivered request, malformed confirmations, corrections after a duplicate email, delayed replies during navigation, and cleanup on reload and sign-out. The review, pending, refusal and confirmation screens passed automated accessibility checks at a width of 320 pixels.
+
+An existing reminder test sometimes matched the fee digits inside a randomly generated appointment ID. A fixed ID reproduces that case. The test now checks the notification's allowed fields and the text shown to the patient for any disclosure of the fee.
+
+The built production app recovered the original linked doctor account after a name change and suspension. The backup and restore rehearsal preserved a receptionist's original creation receipt, the later mandatory password change and a separate closed request. Opening a database created by v1.51 preserved both existing accounts, their credentials, doctor linkage and creation audit history. The upgrade added no retrospective receipts.
+
 ## 1.51.0 · Staff patient registration
 
 Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **771 API, backup and recovery tests** and **204 browser journeys across 45 projects** passed. The production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A Docker engine was unavailable for a container runtime check.

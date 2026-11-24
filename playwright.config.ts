@@ -242,6 +242,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)staff-patient-registration\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5227' },
     },
+    {
+      name: 'staff-account-creation',
+      testMatch: /(?:^|\/)staff-account-creation\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5228', trace: 'off' },
+    },
   ],
   webServer: [
     {
@@ -514,6 +519,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3055 E2E_VITE_PORT=5227 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5227/api/health',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3056 E2E_VITE_PORT=5228 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5228/api/health',
       reuseExistingServer: false,
       timeout: 60000,
     },

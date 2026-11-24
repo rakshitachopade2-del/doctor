@@ -15,6 +15,7 @@ import {
   safeAllergyHistory,
 } from './patient-profile.ts';
 import { date, email, required, short, text } from './validation.ts';
+import { registerStaffAccountCreation } from './staff-account-creation.ts';
 import { registerPatientRegistration } from './patient-registration.ts';
 import { registerCarePlanCreation } from './care-plan-creation.ts';
 import { registerCheckInSubmission } from './check-in-submission.ts';
@@ -35,7 +36,6 @@ import {
   registerIdentity,
   restrictedSessionAllows,
   sessionLabel,
-  validateAccountLinkage,
 } from './identity.ts';
 import { createScheduling } from './scheduling.ts';
 import { createClinicResources } from './clinic-resources.ts';
@@ -610,32 +610,12 @@ export function createApp(options: AppOptions = {}) {
     actor(req, ['admin']);
     res.json(list<User>(db, 'users').map(managedAccount));
   });
-  app.post('/api/users', (req: AuthRequest, res) => {
-    actor(req, ['admin']);
-    const input = z
-      .object({
-        name: required,
-        email,
-        password,
-        role: z.enum(['doctor', 'receptionist', 'admin']),
-        doctorId: required.optional(),
-      })
-      .parse(req.body);
-    validateAccountLinkage(db, input, fail);
-    if (db.prepare('SELECT 1 FROM users WHERE email=? COLLATE NOCASE').get(input.email))
-      fail(409, 'An account already exists with this email.');
-    const user: User = {
-      id: id(),
-      name: input.name,
-      email: input.email,
-      role: input.role,
-      active: true,
-      mustChangePassword: true,
-      ...(input.doctorId ? { doctorId: input.doctorId } : {}),
-    };
-    createUser(db, user, input.password);
-    audit(req, 'created staff account', 'user', user.id);
-    res.status(201).json(user);
+  registerStaffAccountCreation(app, {
+    db,
+    currentSessionUser,
+    transaction: scheduling.transaction,
+    audit,
+    fail,
   });
   app.get('/api/doctors', (_req, res) =>
     res.json(

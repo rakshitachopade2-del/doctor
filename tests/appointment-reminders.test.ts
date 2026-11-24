@@ -352,7 +352,7 @@ test('current demographic name, booked clinician snapshot and narrow patient not
   clock(t);
   const f = await fixture(t),
     patient = await f.login('patient');
-  const a = f.appointment();
+  const a = f.appointment(60, { id: '00000777-0000-4000-8000-000000000001' });
   await f.setPolicy();
   f.db
     .prepare(
@@ -392,7 +392,17 @@ test('current demographic name, booked clinician snapshot and narrow patient not
   for (const value of [p, run.value, notice])
     assert.equal(JSON.stringify(value).includes(privateText), false);
   assert.equal(JSON.stringify(notice).includes('PRIVATE_POLICY_NOTE'), false);
-  assert.equal(JSON.stringify(notice).includes('777'), false);
+  assert.deepEqual(Object.keys(notice).sort(), [
+    'createdAt',
+    'detail',
+    'href',
+    'id',
+    'kind',
+    'readAt',
+    'title',
+  ]);
+  assert.equal(notice.kind, 'appointment');
+  assert.equal(notice.detail.includes(String(a.fee)), false);
   assert.equal(f.db.prepare('SELECT data FROM appointments WHERE id=?').get(a.id)!.data, source);
   const summary = await f.call(`/patients/${a.patientId}/care-summary`, patient);
   assert.equal(summary.data.revision, oldSummary.data.revision);

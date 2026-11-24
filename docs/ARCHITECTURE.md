@@ -63,6 +63,7 @@ flowchart LR
 | `src/components/AppointmentResourcesModal.tsx` | Full-set allocation, source review, safe retries and visit resource history                |
 | `server/waitlist.ts`                           | Immutable requests, terminal history, active claims and atomic confirmed booking           |
 | `server/identity.ts`                           | Account lifecycle, session metadata migration/revocation, recovery grants                  |
+| `server/staff-account-creation.ts`             | Atomic staff creation and password-free recovery of the original account confirmation      |
 | `server/private-upload.ts`                     | Image and PDF validation, authorized saves, original attribution and upload receipts       |
 | `server/documents.ts`                          | Immutable PDF storage, patient-scoped report lists and attachment downloads                |
 | `server/procedure-catalogue.ts`                | Private versioned procedure templates, publication, availability and creation receipts     |
@@ -246,6 +247,10 @@ SQLite's immediate appointment uniqueness indexes and resource overlap triggers 
 Patients see only their own requests. Staff receive operational contact information, while patient responses omit the staff phone field. Joining reserves no capacity and creates no priority score, automatic offer or external contact. Reception records confirmation after coordinating with the patient; patients can confirm their own available slot through the booking page. An eventual appointment cancellation or reschedule does not rewrite its waitlist history. A new request is a separate record.
 
 ## Account lifecycle and recovery
+
+`server/staff-account-creation.ts` takes the SQLite write lock and rechecks the administrator's session, role, email availability and profile linkage before creating an account. Both creation routes commit the user, sign-in verifier and audit together. The reviewed route also writes an immutable entry in `staffAccountCreationCommands`. Its UUID and actor ID bind a digest of normalized account details to either the original safe account snapshot or a final refusal. The evidence contains no password or password-derived verifier. Opening an older database adds the table and preserves its existing users and audits.
+
+The browser sends the initial password once. During same-tab navigation it can retain the reviewed details and UUID in memory for that signed-in administrator. The outcome route needs only those details. Checking a previously unseen UUID takes the same write lock and records a refusal before replying, so delayed delivery cannot create an account the administrator was told did not exist. Later role changes, suspension and password rotation affect the live account. Replaying the original receipt after a backup restore still returns the flags and linked profile at creation.
 
 Account access flags live in the user JSON record. Existing accounts without flags remain active and are not unexpectedly forced through password rotation. Role updates also change the indexed `users.role` field. Patient accounts retain their patient linkage and cannot be converted into staff; staff accounts cannot become patient accounts. Administrators cannot deactivate themselves or demote the last active administrator. Suspension preserves clinical and operational records.
 

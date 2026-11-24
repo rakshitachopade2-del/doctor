@@ -97,24 +97,29 @@ export function restrictedSessionAllows(method: string, path: string) {
   return method === 'DELETE' && /^\/auth\/sessions\/[a-f0-9]{64}$/.test(path);
 }
 
-export function validateAccountLinkage(
+export function accountLinkageProblem(
   db: DB,
   account: Pick<User, 'role' | 'doctorId' | 'patientId'>,
-  fail: IdentityContext['fail'],
-) {
+): { status: number; message: string } | null {
   if (account.role === 'patient') {
     if (!account.patientId || !get<Patient>(db, 'patients', account.patientId))
-      fail(400, 'A patient account must remain linked to its patient record.');
-    if (account.doctorId) fail(400, 'Patient accounts cannot be linked to doctor profiles.');
-    return;
+      return {
+        status: 400,
+        message: 'A patient account must remain linked to its patient record.',
+      };
+    if (account.doctorId)
+      return { status: 400, message: 'Patient accounts cannot be linked to doctor profiles.' };
+    return null;
   }
-  if (account.patientId) fail(400, 'Staff accounts cannot be linked to patient records.');
+  if (account.patientId)
+    return { status: 400, message: 'Staff accounts cannot be linked to patient records.' };
   if (account.role === 'doctor' && !account.doctorId)
-    fail(400, 'Link a doctor account to a doctor profile.');
+    return { status: 400, message: 'Link a doctor account to a doctor profile.' };
   if (account.role === 'receptionist' && account.doctorId)
-    fail(400, 'Reception accounts cannot be linked to doctor profiles.');
+    return { status: 400, message: 'Reception accounts cannot be linked to doctor profiles.' };
   if (account.doctorId && !get<Doctor>(db, 'doctors', account.doctorId))
-    fail(404, 'Doctor profile not found.');
+    return { status: 404, message: 'Doctor profile not found.' };
+  return null;
 }
 
 export function registerIdentity(app: Express, context: IdentityContext) {
@@ -165,7 +170,8 @@ export function registerIdentity(app: Express, context: IdentityContext) {
       const doctorId = input.doctorId === null ? undefined : (input.doctorId ?? original.doctorId);
       updated = { ...original, ...input, doctorId };
       if (!doctorId) delete updated.doctorId;
-      validateAccountLinkage(db, updated, fail);
+      const linkageProblem = accountLinkageProblem(db, updated);
+      if (linkageProblem) fail(linkageProblem.status, linkageProblem.message);
       if (
         original.active &&
         original.role === 'admin' &&

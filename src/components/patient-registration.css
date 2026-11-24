@@ -1,4 +1,4 @@
-.patient-registration {
+:is(.patient-registration, .reviewed-account-form) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -16,12 +16,12 @@
   white-space: pre-wrap;
 }
 @media (max-width: 480px) {
-  .patient-registration .modal-actions {
+  :is(.patient-registration, .reviewed-account-form) .modal-actions {
     flex-direction: column-reverse;
     align-items: stretch;
   }
-  .patient-registration input,
-  .patient-registration select {
+  :is(.patient-registration, .reviewed-account-form) input,
+  :is(.patient-registration, .reviewed-account-form) select {
     min-width: 0;
     max-width: 100%;
   }

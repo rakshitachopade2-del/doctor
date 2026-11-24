@@ -4848,6 +4848,104 @@ try {
     403,
   );
   assert.equal(deniedRegistration.receipt, undefined);
+  const teamCreatePath = '/users/create';
+  const teamCheckPath = '/users/creation-outcome';
+  const teamReview = {
+    requestId: randomUUID(),
+    name: 'Synthetic team member',
+    email: 'staff-confirmation@example.test',
+    role: 'doctor',
+    doctorId: visitDoctor.id,
+    reviewedConfirmed: true,
+  };
+  const teamInput = { ...teamReview, password: randomBytes(24).toString('base64url') };
+  const teamCreation = await ordinaryWrite(teamCreatePath, teamInput);
+  const teamId = teamCreation.receipt.account.id;
+  assert.match(teamId, /^[a-f0-9-]{36}$/);
+  assert.deepEqual(teamCreation.receipt, {
+    requestId: teamReview.requestId,
+    actorId: verified.user.id,
+    account: {
+      id: teamId,
+      name: teamReview.name,
+      email: teamReview.email,
+      role: 'doctor',
+      doctorId: visitDoctor.id,
+      active: true,
+      mustChangePassword: true,
+    },
+  });
+  await ordinaryWrite(
+    '/accounts/' + teamId,
+    { name: 'Synthetic renamed member', active: false },
+    verifiedHeaders,
+    200,
+    'PATCH',
+  );
+  assert.deepEqual(
+    await ordinaryWrite(teamCheckPath, teamReview, verifiedHeaders, 200),
+    teamCreation,
+  );
+  const currentTeam = await reminderRead(
+    '/accounts?search=' + encodeURIComponent(teamReview.email),
+  );
+  assert.equal(currentTeam.length, 1);
+  assert.equal(currentTeam[0].id, teamId);
+  assert.equal(currentTeam[0].active, false);
+  assert.equal(currentTeam[0].name, 'Synthetic renamed member');
+  const duplicateReview = { ...teamReview, requestId: randomUUID() };
+  const duplicateRefusal = await ordinaryWrite(
+    teamCreatePath,
+    { ...duplicateReview, password: teamInput.password },
+    verifiedHeaders,
+    409,
+  );
+  assert.equal(duplicateRefusal.code, 'STAFF_ACCOUNT_NOT_CREATED');
+  assert.deepEqual(duplicateRefusal.review, duplicateReview);
+  assert.deepEqual(
+    await ordinaryWrite(teamCheckPath, duplicateReview, verifiedHeaders, 409),
+    duplicateRefusal,
+  );
+
+  const pendingTeam = {
+    ...teamReview,
+    requestId: randomUUID(),
+    email: 'staff-undelivered@example.test',
+    role: 'receptionist',
+    doctorId: null,
+  };
+  const closedTeam = await ordinaryWrite(teamCheckPath, pendingTeam, verifiedHeaders, 409);
+  assert.equal(closedTeam.code, 'STAFF_ACCOUNT_NOT_CREATED');
+  assert.deepEqual(closedTeam.review, pendingTeam);
+  assert.deepEqual(
+    await ordinaryWrite(
+      teamCreatePath,
+      { ...pendingTeam, password: teamInput.password },
+      verifiedHeaders,
+      409,
+    ),
+    closedTeam,
+  );
+  assert.deepEqual(
+    await reminderRead('/accounts?search=' + encodeURIComponent(pendingTeam.email)),
+    [],
+  );
+  const newTeam = await ordinaryWrite(teamCreatePath, {
+    ...pendingTeam,
+    requestId: randomUUID(),
+    password: randomBytes(24).toString('base64url'),
+  });
+  assert.equal(newTeam.receipt.account.role, 'receptionist');
+  assert.equal(Object.hasOwn(newTeam.receipt.account, 'doctorId'), false);
+  const teamAudit = await reminderRead('/search/audit?entityType=user&entityId=' + teamId);
+  assert.equal(teamAudit.items.filter((row) => row.action === 'created staff account').length, 1);
+  for (const value of [teamCreation, duplicateRefusal, closedTeam, teamAudit, currentTeam]) {
+    assert.equal(JSON.stringify(value).includes(teamInput.password), false);
+    assert.equal(JSON.stringify(value).includes('"password":'), false);
+  }
+  const deniedTeam = await ordinaryWrite(teamCheckPath, teamReview, patientHeaders, 403);
+  assert.equal(deniedTeam.receipt, undefined);
+  assert.equal(deniedTeam.code, undefined);
   const patientLogout = await fetch(`${base}/api/auth/logout`, {
     method: 'POST',
     headers: patientHeaders,
@@ -4949,6 +5047,8 @@ try {
     200,
   );
   assert.equal((await fetch(mfaUrl, { headers: verifiedHeaders })).status, 401);
+  const signedOutTeam = await ordinaryWrite(teamCheckPath, teamReview, verifiedHeaders, 401);
+  assert.equal(signedOutTeam.receipt, undefined);
   const deniedChartReplay = await ordinaryWrite(
     registrationPath,
     chartCommand,
@@ -4979,7 +5079,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {
