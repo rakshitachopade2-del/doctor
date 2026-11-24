@@ -25,6 +25,7 @@ import type {
 } from '../../shared/clinical';
 import { api, formatDate, useSession, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
+import { useInvestigationCancellation } from '../components/InvestigationCancellationModal';
 import { useInvestigationOrder } from '../components/InvestigationOrderModal';
 import { useInvestigationResultSubmission } from '../components/InvestigationResultModal';
 import { usePatientDocuments } from '../components/private-upload-helpers';
@@ -45,7 +46,6 @@ type ClinicalResource = {
 };
 type WorkflowAction =
   | { kind: 'procedure' }
-  | { kind: 'cancel-investigation'; investigation: Investigation }
   | { kind: 'review'; investigation: Investigation; result: InvestigationResult }
   | {
       kind: 'cancel-procedure' | 'scheduling';
@@ -112,6 +112,7 @@ export function ClinicalWorkflowPanel({
   selectedResultId?: string | null;
 }) {
   const { session } = useSession();
+  const cancellations = useInvestigationCancellation(patientId, resource.reload);
   const order = useInvestigationOrder(
     patientId,
     patientName,
@@ -229,6 +230,7 @@ export function ClinicalWorkflowPanel({
       <div>
         {order.modal}
         {order.hasPending && order.button}
+        {cancellations.controls}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
@@ -240,6 +242,7 @@ export function ClinicalWorkflowPanel({
       <div>
         {order.modal}
         {order.hasPending && order.button}
+        {cancellations.controls}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
@@ -251,6 +254,7 @@ export function ClinicalWorkflowPanel({
       <>
         {order.modal}
         {order.hasPending && order.button}
+        {cancellations.controls}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
@@ -263,6 +267,7 @@ export function ClinicalWorkflowPanel({
   return (
     <div className="cw-workspace">
       {order.modal}
+      {cancellations.controls}
       {resultSubmission.controls}
       {decisions.controls}
       {completions.controls}
@@ -500,14 +505,15 @@ export function ClinicalWorkflowPanel({
                           <FilePlus2 size={15} /> Add result
                         </button>
                       )}
-                      {investigation.status !== 'reviewed' && (
-                        <button
-                          className="button button-ghost button-small"
-                          onClick={() => setAction({ kind: 'cancel-investigation', investigation })}
-                        >
-                          Cancel order
-                        </button>
-                      )}
+                      {investigation.status !== 'reviewed' &&
+                        !cancellations.hasPending(investigation.id) && (
+                          <button
+                            className="button button-ghost button-small"
+                            onClick={() => cancellations.open(investigation.id)}
+                          >
+                            Cancel order
+                          </button>
+                        )}
                     </div>
                   )}
                 </Card>
@@ -767,14 +773,6 @@ export function ClinicalWorkflowPanel({
           procedureId={action.procedure.id}
           onClose={() => setAction(null)}
           onSaved={resource.reload}
-        />
-      )}
-      {action?.kind === 'cancel-investigation' && (
-        <CancellationModal
-          title={action.investigation.title}
-          endpoint={`/api/investigations/${action.investigation.id}/cancel`}
-          onClose={() => setAction(null)}
-          onSaved={afterSave}
         />
       )}
       {action?.kind === 'cancel-procedure' && (

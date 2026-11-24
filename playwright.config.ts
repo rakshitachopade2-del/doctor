@@ -262,6 +262,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)investigation-order\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5231' },
     },
+    {
+      name: 'investigation-cancellation',
+      testMatch: /(?:^|\/)investigation-cancellation\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5232' },
+    },
   ],
   webServer: [
     {
@@ -558,6 +563,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3059 E2E_VITE_PORT=5231 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5231/api/health',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3060 E2E_VITE_PORT=5232 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5232/api/health',
       reuseExistingServer: false,
       timeout: 60000,
     },

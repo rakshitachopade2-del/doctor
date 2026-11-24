@@ -93,7 +93,10 @@ function checkedInvestigation(value: unknown, id: string): Investigation {
     );
   return value as unknown as Investigation;
 }
-function checkedContext(value: unknown, id: string): InvestigationReviewContext {
+export function checkedInvestigationContext(
+  value: unknown,
+  id: string,
+): InvestigationReviewContext {
   if (!record(value)) throw new Error('The review context could not be loaded. Try again.');
   const investigation = checkedInvestigation(value.investigation, id);
   if (
@@ -232,7 +235,7 @@ function ReviewDialog({ investigationId, onClose, onSaved }: Props) {
     setLoading(true);
     setLoadError('');
     try {
-      const next = checkedContext(await api<unknown>(path), investigationId);
+      const next = checkedInvestigationContext(await api<unknown>(path), investigationId);
       if (mounted.current && sequence === loadSequence.current) setSource(next);
     } catch (problem) {
       if (mounted.current && sequence === loadSequence.current) setLoadError(errorText(problem));
@@ -260,7 +263,7 @@ function ReviewDialog({ investigationId, onClose, onSaved }: Props) {
     setRefreshing(true);
     setError('');
     try {
-      const current = checkedContext(await api<unknown>(path), investigationId);
+      const current = checkedInvestigationContext(await api<unknown>(path), investigationId);
       if (mounted.current) {
         setReviewed(current);
         setPublish(false);

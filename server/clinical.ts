@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import type { Express } from 'express';
 import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
+import {
+  cancelledInvestigation,
+  registerInvestigationCancellations,
+} from './investigation-cancellation.ts';
 import { registerInvestigationOrders } from './investigation-order.ts';
 import { registerProcedureCompletion } from './procedure-completion.ts';
 import type { Appointment, Doctor, Encounter, Patient, User } from '../shared/types.ts';
@@ -58,8 +62,6 @@ type ProcedurePlan = Omit<
 >;
 const required = z.string().trim().min(1).max(300);
 const text = z.string().trim().max(8000);
-const cancelledInvestigation =
-  'This investigation is cancelled. Create a new order if further testing is needed.';
 const resultFields = z.object({ note: text, documentIds: z.array(required).max(10) });
 const validateResult = (input: z.infer<typeof resultFields>, ctx: z.RefinementCtx) => {
   if (!input.note && !input.documentIds.length)
@@ -277,16 +279,17 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     audit(req, 'viewed clinical workflows', 'patient', patientId);
     res.json(data);
   });
+  function authorizeInvestigationClinician(req: AuthRequest) {
+    const user = context.currentCareUser(req);
+    return { actorId: user.id, role: user.role, clinician: doctorIdentity(req) };
+  }
   registerInvestigationOrders(app, {
     db,
     transaction,
     patientAccess,
     audit,
     fail,
-    authorize: (req) => {
-      const user = context.currentCareUser(req);
-      return { actorId: user.id, role: user.role, clinician: doctorIdentity(req) };
-    },
+    authorize: authorizeInvestigationClinician,
   });
   function resultContext(req: AuthRequest) {
     const user = context.currentCareUser(req);
@@ -518,30 +521,14 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     });
     res.json(investigationView(order));
   });
-  app.post('/api/investigations/:id/cancel', (req: AuthRequest, res) => {
-    doctorIdentity(req);
-    const order = investigationAccess(req, String(req.params.id));
-    const input = z.object({ reason: text.min(1) }).parse(req.body);
-    transaction(() => {
-      requireOpenInvestigation(order);
-      if (investigationView(order).status === 'reviewed')
-        fail(
-          409,
-          'A reviewed investigation is already documented. Create a new order for further testing.',
-        );
-      db.prepare('INSERT INTO investigationCancellations(id,data) VALUES (?,?)').run(
-        order.id,
-        JSON.stringify({ ...input, createdAt: nowISO() }),
-      );
-      audit(req, 'cancelled investigation', 'investigation', order.id);
-      notifyPatient(db, order.patientId, `investigation-cancelled:${order.id}`, {
-        kind: 'investigation',
-        title: 'An investigation request was cancelled',
-        detail: order.title,
-        href: '/my-care/record?tab=workflows',
-      });
-    });
-    res.json(investigationView(order));
+  registerInvestigationCancellations(app, {
+    db,
+    transaction,
+    investigationAccess,
+    view: investigationView,
+    audit,
+    fail,
+    authorize: authorizeInvestigationClinician,
   });
   app.post('/api/procedures', (req: AuthRequest, res) => {
     z.object({}).strict().parse(req.query);

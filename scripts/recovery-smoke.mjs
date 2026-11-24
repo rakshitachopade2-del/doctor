@@ -579,6 +579,27 @@ async function rehearseRecovery() {
       },
       201,
     );
+    const investigationCancellationPath = investigationPath + '/cancellation';
+    const protectedCancellation = {
+      requestId: randomUUID(),
+      investigationId: order.id,
+      patientId,
+      doctorId: doctor.id,
+      cancelledByRole: 'admin',
+      expectedLatestResultId: originalInvestigationResult.id,
+      reason: 'Synthetic cancellation after supplement.',
+      reviewedConfirmed: true,
+    };
+    const refusedCancellation = await call(
+      source,
+      investigationCancellationPath,
+      admin,
+      'POST',
+      protectedCancellation,
+      409,
+    );
+    assert.equal(refusedCancellation.code, 'INVESTIGATION_NOT_CANCELLED');
+    assert.deepEqual(refusedCancellation.command, protectedCancellation);
     const staffSupplement = {
       ...resultCommand,
       requestId: randomUUID(),
@@ -593,8 +614,33 @@ async function rehearseRecovery() {
       staffSupplement,
       201,
     );
-    await call(source, investigationPath + '/cancel', admin, 'POST', {
-      reason: 'Synthetic cancellation after supplement.',
+    const investigationCancellation = {
+      ...protectedCancellation,
+      expectedLatestResultId: supplementalSubmission.receipt.result.id,
+      requestId: randomUUID(),
+    };
+    const cancelledInvestigation = await call(
+      source,
+      investigationCancellationPath,
+      admin,
+      'POST',
+      investigationCancellation,
+      201,
+    );
+    const { cancelledAt } = cancelledInvestigation.receipt;
+    assert.equal(new Date(cancelledAt).toISOString(), cancelledAt);
+    assert.deepEqual(cancelledInvestigation.receipt, {
+      actorId: 'recovery-admin',
+      requestId: investigationCancellation.requestId,
+      investigationId: order.id,
+      patientId,
+      doctorId: doctor.id,
+      doctorName: doctor.name,
+      cancelledByRole: 'admin',
+      expectedLatestResultId: supplementalSubmission.receipt.result.id,
+      reason: investigationCancellation.reason,
+      title: order.title,
+      cancelledAt,
     });
     const closedCommand = { ...resultCommand, requestId: randomUUID() };
     const closedResult = await call(source, resultPath, patient, 'POST', closedCommand, 409);
@@ -1585,12 +1631,39 @@ async function rehearseRecovery() {
         assert.equal(JSON.stringify(procedure).includes(cmd.requestId), false);
     }
     const restoredOrder = restoredWorkflows.investigations.find((row) => row.id === order.id);
+    assert.deepEqual(
+      await call(
+        target,
+        investigationCancellationPath,
+        newAdmin,
+        'POST',
+        investigationCancellation,
+      ),
+      cancelledInvestigation,
+    );
+    assert.deepEqual(
+      await call(
+        target,
+        investigationCancellationPath,
+        newAdmin,
+        'POST',
+        protectedCancellation,
+        409,
+      ),
+      refusedCancellation,
+    );
     assert.deepEqual(await call(target, orderPath, newAdmin, 'POST', orderCommand), ordered);
     assert.deepEqual(
       await call(target, orderPath, newAdmin, 'POST', expiredOrder, 409),
       orderRefusal,
     );
-    const orderNotices = (await call(target, '/activity?limit=100', newPatient)).items.filter(
+    const patientActivity = (await call(target, '/activity?limit=100', newPatient)).items;
+    const cancellationNotices = patientActivity.filter(
+      (entry) =>
+        entry.title === 'An investigation request was cancelled' && entry.detail === order.title,
+    );
+    assert.equal(cancellationNotices.length, 1);
+    const orderNotices = patientActivity.filter(
       (entry) =>
         entry.title === 'Your clinician requested an investigation' && entry.detail === order.title,
     );
@@ -1605,13 +1678,16 @@ async function rehearseRecovery() {
       (row) => row.id === order.id,
     );
     assert.deepEqual(restoredPatientOrder.reviews, []);
+    assert.equal(restoredPatientOrder.cancellationReason, investigationCancellation.reason);
     assert.deepEqual(restoredPatientOrder.results, restoredOrder.results);
-    for (const data of [restoredSummary, restoredPatientOrder]) {
+    for (const data of [restoredSummary, restoredPatientOrder, cancellationNotices]) {
       const json = JSON.stringify(data);
       for (const hidden of [
         privateInterpretation,
         orderCommand.requestId,
         expiredOrder.requestId,
+        investigationCancellation.requestId,
+        protectedCancellation.requestId,
         resultCommand.requestId,
         staffSupplement.requestId,
         closedCommand.requestId,
@@ -1622,6 +1698,10 @@ async function rehearseRecovery() {
       target,
       `/search/audit?entityType=investigation&entityId=${order.id}`,
       newAdmin,
+    );
+    assert.equal(
+      resultAudit.items.filter((entry) => entry.action === 'cancelled investigation').length,
+      1,
     );
     assert.equal(
       resultAudit.items.filter((entry) => entry.action === 'ordered investigation').length,
@@ -1710,7 +1790,7 @@ async function rehearseRecovery() {
     assert.equal(recoveredMfa.recoveryCodesRemaining, 0);
     assert.equal(hash(await readFile(snapshot)), snapshotHash);
     console.log(
-      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, original investigation order confirmations after cancellation, retained expired-order refusals, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, role-safe walk-in registration receipts after later corrections, staff account creation outcomes after a mandatory credential change, doctor profile creation and edit confirmations, edit history and a superseded edit after a public correction and booking pause, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
+      'Recovery rehearsal passed: online backup, verified new-file restore, original preservation, private files and saved-copy bytes, booking, rescheduling, cancellation and staff progression receipts, private consultation originals/amendments and terminal rejections, daily check-ins and original follow-up reviews with preserved stale rejections, original investigation order and cancellation confirmations, preserved cancellation reasons and refusals for reviewed investigations, retained expired-order refusals, investigation result receipts and linked PDFs, procedure decision and completion receipts with the recorded visit and stale refusals, role-safe walk-in registration receipts after later corrections, staff account creation outcomes after a mandatory credential change, doctor profile creation and edit confirmations, edit history and a superseded edit after a public correction and booking pause, retired sessions/recovery access, retained MFA with fresh authenticator sign-in, and recovery audit.',
     );
   } finally {
     const closed = await Promise.allSettled(runtimes.map((runtime) => runtime.close()));

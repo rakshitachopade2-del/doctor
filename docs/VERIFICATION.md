@@ -1,5 +1,17 @@
 # Release verification
 
+## 1.56.0 · Investigation cancellation
+
+Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **806 API, backup and recovery tests** and **231 browser journeys across 50 projects** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A local Docker engine was unavailable for the container runtime check.
+
+On v1.55, cancelling an investigation succeeded and sent a patient notice. Repeating the same request after losing its reply returned 409. A clinician could also cancel from a form opened before the patient's supplemental report arrived. On v1.56, the first case recovers the original confirmation. In the second case the submitted cancellation is refused and the clinician can read the new report before deciding again.
+
+Seven API tests cover a competing patient report, a competing clinician's cancellation, a review committed immediately before the write, changes to account permissions, and rollback of the cancellation, audit, patient notice and receipt. Restarting the server and renaming the clinician preserved the original cancellation time, author and reason. Earlier results retained their PDF links and each interpretation retained its publication state.
+
+Seven Chrome journeys cover two different clinicians ordering and cancelling, lost and undelivered requests, malformed confirmations and refusals, and delayed replies after navigation. A new report required fresh review. A competing cancellation preserved its own reason. The patient saw the existing reports, published findings, cancellation reason and one cancellation notice. The review, retry, refusal and confirmation screens passed automated accessibility checks at 320 pixels.
+
+The local production smoke test recovered a cancellation after a supplemental report and preserved two earlier refusals. The backup rehearsal restored the receipt, the earlier refusal for a reviewed report, the patient-visible reason, the attached PDF, the private interpretation and one cancellation notice and audit. Opening a v1.55 database preserved its historical cancellation, two order receipts, result and review history, notices, audits and all 42 appointments. The new request table began empty.
+
 ## 1.55.0 · Investigation order creation
 
 Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **799 API, backup and recovery tests** and **224 browser journeys across 49 projects** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A local Docker engine was unavailable for the container runtime check.

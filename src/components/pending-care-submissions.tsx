@@ -8,6 +8,7 @@ import type { IntakeSubmissionCommand } from '../../shared/intake-submission';
 import type { CarePlanAttempt } from './care-plan-creation-helpers';
 import type { CompletionAttempt } from './procedure-completion-helpers';
 import type { DecisionAttempt } from './procedure-decision-helpers';
+import type { CancellationAttempt } from './investigation-cancellation-helpers';
 import type { InvestigationOrderAttempt } from './investigation-order-helpers';
 import type { ResultAttempt } from './investigation-result-helpers';
 import type { ReviewAttempt } from './follow-up-review-helpers';
@@ -24,6 +25,7 @@ interface PendingCareSubmissions {
   patientRegistration: { current: PatientRegistrationCommand | null };
   procedureDecisions: Map<string, DecisionAttempt>;
   procedureCompletions: Map<string, CompletionAttempt>;
+  investigationCancellations: Map<string, CancellationAttempt>;
   investigationOrders: Map<string, InvestigationOrderAttempt>;
   investigationResults: Map<string, ResultAttempt>;
   followUpReviews: Map<string, ReviewAttempt>;
@@ -48,6 +50,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
       patientRegistration: { current: null as PatientRegistrationCommand | null },
       procedureDecisions: new Map<string, DecisionAttempt>(),
       procedureCompletions: new Map<string, CompletionAttempt>(),
+      investigationCancellations: new Map<string, CancellationAttempt>(),
       investigationOrders: new Map<string, InvestigationOrderAttempt>(),
       investigationResults: new Map<string, ResultAttempt>(),
       followUpReviews: new Map<string, ReviewAttempt>(),
@@ -75,6 +78,7 @@ export function PendingCareProvider({ children }: { children: ReactNode }) {
       pending.patientRegistration.current = null;
       pending.procedureDecisions.clear();
       pending.procedureCompletions.clear();
+      pending.investigationCancellations.clear();
       pending.investigationOrders.clear();
       pending.investigationResults.clear();
       pending.followUpReviews.clear();
