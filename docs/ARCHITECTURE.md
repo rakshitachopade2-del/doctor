@@ -30,6 +30,7 @@ flowchart LR
 | `src/pages/CareSummaryPage.tsx`                | Patient-facing print view and revision-checked JSON download                               |
 | `server/image-annotations.ts`                  | Immutable annotation versions/publications, source provenance and private projections      |
 | `server/billing-corrections.ts`                | Immutable charge corrections and mistaken-payment reversals, safe histories and revisions  |
+| `server/investigation-order.ts`                | Reviewed order creation, original clinician attribution and recovery of missed replies     |
 | `server/investigation-worklist.ts`             | Clinical result queues, private responsibility history and source-aware review retries     |
 | `server/care-summary.ts`                       | Authorized shared-care snapshots and stale-export rejection                                |
 | `server/care-summary-copies.ts`                | Immutable patient-facing summary copies, bounded archive and exact downloads               |
@@ -281,6 +282,10 @@ PDFs and raster clinical images have separate types, tables and endpoints. A PDF
 `GET /patients/:id/clinical-workflows` assembles investigation records, procedures and consultation amendments without expanding the original `PatientRecord` contract. The patient view excludes unpublished review objects and all internal amendments. Top-level records are newest first; nested events are returned in stable insertion order. Patient-submitted result notes and uploaded reports are raw information, not clinician interpretations.
 
 ### Investigations and publication
+
+`server/investigation-order.ts` checks the current clinical session, linked doctor profile and patient access under the SQLite write lock. Both order writers insert the immutable order, its audit and an in-app notice for each eligible linked patient account in the same transaction. Patients without a portal account can still have orders. The reviewed writer also records a request UUID, account, patient and digest of the normalized command in `investigationOrderCommands`. A successful command references the original order row, which retains the ordering doctor's name and instructions. The receipt reads this row directly, so it still shows the original order after a result, review, cancellation or clinician rename.
+
+An exact retry checks for a recorded outcome before applying today's due-date rule. A first delivery with an elapsed due date records a definitive refusal, so subsequent recovery yields the same result. Existing orders and their notices keep their IDs on upgrade. The browser retains an interrupted submission in memory for the signed-in tab and patient, and checks the actor, linked clinician, patient, order fields and request ID on the response before clearing it.
 
 An immutable `investigations` row records the requested test, clinical reason, patient-facing instructions, optional due date and ordering doctor. `investigationResults` holds separate immutable submissions with stable uploader identity and optional PDF references. Every linked document is validated against the same patient; a report cannot be attached across patient boundaries. Patients can submit their own report information but cannot order, review or publish an interpretation.
 

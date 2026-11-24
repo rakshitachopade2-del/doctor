@@ -23,8 +23,9 @@ import type {
   PatientClinicalWorkflows,
   ProcedureRecord,
 } from '../../shared/clinical';
-import { api, formatDate, today, useSession, useToast } from '../lib';
+import { api, formatDate, useSession, useToast } from '../lib';
 import { Badge, Card, EmptyState, ErrorState, Field, Loading, Modal } from '../components/ui';
+import { useInvestigationOrder } from '../components/InvestigationOrderModal';
 import { useInvestigationResultSubmission } from '../components/InvestigationResultModal';
 import { usePatientDocuments } from '../components/private-upload-helpers';
 import { InvestigationReviewModal } from '../components/InvestigationReviewModal';
@@ -43,7 +44,7 @@ type ClinicalResource = {
   reload: () => Promise<void>;
 };
 type WorkflowAction =
-  | { kind: 'order' | 'procedure' }
+  | { kind: 'procedure' }
   | { kind: 'cancel-investigation'; investigation: Investigation }
   | { kind: 'review'; investigation: Investigation; result: InvestigationResult }
   | {
@@ -111,6 +112,12 @@ export function ClinicalWorkflowPanel({
   selectedResultId?: string | null;
 }) {
   const { session } = useSession();
+  const order = useInvestigationOrder(
+    patientId,
+    patientName,
+    resource.data?.investigations ?? [],
+    resource.reload,
+  );
   const canDocument = !!session.user?.doctorId && ['doctor', 'admin'].includes(session.user.role);
   const documents = usePatientDocuments(patientId);
   const resultSubmission = useInvestigationResultSubmission(patientId, patientName, () => {
@@ -220,6 +227,8 @@ export function ClinicalWorkflowPanel({
   if (resource.loading && !data)
     return (
       <div>
+        {order.modal}
+        {order.hasPending && order.button}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
@@ -229,6 +238,8 @@ export function ClinicalWorkflowPanel({
   if (resource.error)
     return (
       <div>
+        {order.modal}
+        {order.hasPending && order.button}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
@@ -238,6 +249,8 @@ export function ClinicalWorkflowPanel({
   if (!data)
     return (
       <>
+        {order.modal}
+        {order.hasPending && order.button}
         {resultSubmission.controls}
         {decisions.controls}
         {completions.controls}
@@ -249,6 +262,7 @@ export function ClinicalWorkflowPanel({
   const procedures = data.procedures.filter((p) => filter === 'all' || p.status !== 'cancelled');
   return (
     <div className="cw-workspace">
+      {order.modal}
       {resultSubmission.controls}
       {decisions.controls}
       {completions.controls}
@@ -317,14 +331,7 @@ export function ClinicalWorkflowPanel({
             <Link className="button button-secondary" to="/clinic/investigations">
               Investigation review queue
             </Link>
-            {canDocument && (
-              <button
-                className="button button-primary"
-                onClick={() => setAction({ kind: 'order' })}
-              >
-                <Plus size={16} /> Order investigation
-              </button>
-            )}
+            {order.button}
           </div>
         </div>
         {investigations.length ? (
@@ -739,9 +746,6 @@ export function ClinicalWorkflowPanel({
           </Card>
         )}
       </section>
-      {action?.kind === 'order' && (
-        <OrderModal patientId={patientId} onClose={() => setAction(null)} onSaved={afterSave} />
-      )}
       {action?.kind === 'review' && (
         <InvestigationReviewModal
           investigationId={action.investigation.id}
@@ -838,60 +842,6 @@ function ClinicalForm({
   );
 }
 type ModalCallbacks = { onClose: () => void; onSaved: () => void };
-function OrderModal({ patientId, ...callbacks }: ModalCallbacks & { patientId: string }) {
-  return (
-    <ClinicalForm
-      title="Order an investigation"
-      endpoint="/api/investigations"
-      payload={(form) => ({
-        ...Object.fromEntries(form),
-        patientId,
-        dueDate: form.get('dueDate') || undefined,
-      })}
-      label="Save investigation order"
-      {...callbacks}
-    >
-      <Field label="Investigation name">
-        <input
-          name="title"
-          required
-          maxLength={300}
-          placeholder="Clinician-selected investigation"
-        />
-      </Field>
-      <div className="form-grid">
-        <Field label="Investigation type">
-          <select name="kind">
-            <option value="laboratory">Laboratory</option>
-            <option value="pathology">Pathology</option>
-            <option value="imaging">Imaging</option>
-            <option value="other">Other</option>
-          </select>
-        </Field>
-        <Field label="Requested by date" hint="Optional">
-          <input type="date" name="dueDate" min={today()} />
-        </Field>
-      </div>
-      <Field label="Clinical question / reason">
-        <textarea name="reason" required maxLength={8000} rows={3} />
-      </Field>
-      <Field label="Instructions for the patient">
-        <textarea
-          name="instructions"
-          required
-          maxLength={8000}
-          rows={3}
-          placeholder="Preparation and how to share the result"
-        />
-      </Field>
-      <div className="notice">
-        This records your order and instructions. It does not send a request to a laboratory or
-        interpret a result.
-      </div>
-    </ClinicalForm>
-  );
-}
-
 function CancellationModal({
   title,
   endpoint,

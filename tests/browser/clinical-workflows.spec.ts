@@ -90,7 +90,13 @@ test('clinician preserves amendments, reviews attached results, and documents a 
   await dialog
     .getByLabel('Instructions for the patient', { exact: true })
     .fill('Upload the synthetic report through the portal. No real investigation requested.');
+  await dialog.getByRole('button', { name: 'Review order', exact: true }).click();
+  await dialog.getByRole('checkbox').check();
   await dialog.getByRole('button', { name: 'Save investigation order', exact: true }).click();
+  await expect(
+    dialog.getByRole('heading', { name: 'Investigation ordered', exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(dialog).toBeHidden();
   const investigation = page
     .locator('.cw-investigation')

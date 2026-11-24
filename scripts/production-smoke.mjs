@@ -4457,13 +4457,41 @@ try {
       patientHeaders,
     )
   ).receipt.file;
-  const order = await ordinaryWrite('/investigations', {
+  const orderPath = '/investigations/order';
+  const orderFields = {
     patientId: resultPatient,
     title: 'Synthetic report receipt check',
     kind: 'laboratory',
     reason: 'Synthetic order',
     instructions: 'Synthetic instructions',
     dueDate: null,
+  };
+  const orderCommand = {
+    ...orderFields,
+    requestId: randomUUID(),
+    orderedByRole: verified.user.role,
+    doctorId: planAuthor.id,
+    reviewedConfirmed: true,
+  };
+  const ordered = await ordinaryWrite(orderPath, orderCommand);
+  const order = ordered.receipt.order;
+  assert.match(order.id, /^[a-f0-9-]{36}$/);
+  assert.equal(new Date(order.createdAt).toISOString(), order.createdAt);
+  assert.deepEqual(ordered.receipt, {
+    requestId: orderCommand.requestId,
+    actorId: verified.user.id,
+    orderedByRole: verified.user.role,
+    order: {
+      ...orderFields,
+      id: order.id,
+      doctorId: planAuthor.id,
+      doctorName: planAuthor.name,
+      createdAt: order.createdAt,
+      status: 'ordered',
+      cancellationReason: null,
+      results: [],
+      reviews: [],
+    },
   });
   const investigationPath = `/investigations/${order.id}`;
   const resultPath = investigationPath + '/results/submit';
@@ -4542,12 +4570,46 @@ try {
     supplement,
   );
   const visibleInvestigation = await ownInvestigation();
+  assert.equal(visibleInvestigation.status, 'cancelled');
+  assert.deepEqual(await ordinaryWrite(orderPath, orderCommand, verifiedHeaders, 200), ordered);
+  const pastDueOrder = { ...orderCommand, dueDate: '2000-01-01', requestId: randomUUID() };
+  const refusedOrder = await ordinaryWrite(orderPath, pastDueOrder, verifiedHeaders, 409);
+  assert.equal(refusedOrder.code, 'INVESTIGATION_NOT_ORDERED');
+  assert.deepEqual(refusedOrder.command, pastDueOrder);
+  assert.deepEqual(
+    await ordinaryWrite(orderPath, pastDueOrder, verifiedHeaders, 409),
+    refusedOrder,
+  );
+  assert.equal(
+    (await ordinaryWrite(orderPath, orderCommand, patientHeaders, 403)).receipt,
+    undefined,
+  );
+  const secondOrder = (await ordinaryWrite(orderPath, { ...orderCommand, requestId: randomUUID() }))
+    .receipt.order;
+  assert.notEqual(secondOrder.id, order.id);
+  const portalOrders = (
+    await reminderRead(`/patients/${resultPatient}/clinical-workflows`, patientHeaders)
+  ).investigations.filter((entry) => entry.title === order.title);
+  assert.deepEqual(portalOrders.map((entry) => entry.id).sort(), [order.id, secondOrder.id].sort());
+  const portalNotices = (await reminderRead('/activity?limit=100', patientHeaders)).items.filter(
+    (entry) =>
+      entry.title === 'Your clinician requested an investigation' && entry.detail === order.title,
+  );
+  assert.equal(portalNotices.length, 2);
+  for (const value of [portalOrders, portalNotices]) {
+    assert.equal(JSON.stringify(value).includes(orderCommand.requestId), false);
+    assert.equal(JSON.stringify(value).includes(pastDueOrder.requestId), false);
+  }
   assert.deepEqual(visibleInvestigation.results, [originalResult, supplement.receipt.result]);
   assert.equal(visibleInvestigation.reviews.length, 1);
   assert.equal(visibleInvestigation.reviews[0].resultId, originalResult.id);
   assert.ok(visibleInvestigation.reviews[0].publishedAt);
   const resultAudit = await reminderRead(
     `/search/audit?entityType=investigation&entityId=${order.id}`,
+  );
+  assert.equal(
+    resultAudit.items.filter((entry) => entry.action === 'ordered investigation').length,
+    1,
   );
   assert.equal(
     resultAudit.items.filter((row) => row.action === 'submitted unreviewed investigation result')
@@ -5181,7 +5243,7 @@ try {
     401,
   );
   console.log(
-    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, original doctor profile recovery after a fee change and booking pause, retained doctor edit confirmations and conflicting edits, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
+    `Production smoke passed (${image ? 'container' : 'local'}): fresh bootstrap, no demo data, secure session, migrations, private API guards, built SPA, independent versioned clinic settings/history/retries, reviewed weekly availability/history/booking protection, retained time-off edits/cancellation/overlap protection/retries, doctor booking pause/resume and existing-visit continuity, ordinary and waitlist booking receipts with definitive rejected-command retries, reviewed individual rescheduling and cancellation with retained-resource history and safe outcome retries, reviewed staff progression/no-show with exact outcomes after completion, permanent consultation notes/amendments with exact receipts and private projections, daily check-in and clinician review recovery after correction and completion, investigation order recovery after results and cancellation, investigation result recovery after review, publication and supplemental reports, procedure decision receipts after a changed choice and cancellation, recovered completion and aftercare for the reviewed visit, staff chart registration receipts after corrections and matching-name registrations, password-free staff creation checks after account changes and a closed request, original doctor profile recovery after a fee change and booking pause, retained doctor edit confirmations and conflicting edits, recurring appointment series/cancellations/rescheduling/retries, upcoming in-app reminders/deduplication/history/retries, external refunds/entry voids/corrected balances/reports, immutable care-summary copies/downloads/retries/selected attachment ZIPs, public library HTML/publication/sitemap, versioned knowledge edits/restoration/retries, security headers, registration, audited logout, password throttling.`,
   );
 } finally {
   if (child && child.exitCode === null) {

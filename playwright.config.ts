@@ -257,6 +257,11 @@ export default defineConfig({
       testMatch: /(?:^|\/)doctor-profile-edit\.spec\.ts/,
       use: { baseURL: 'http://127.0.0.1:5230' },
     },
+    {
+      name: 'investigation-order',
+      testMatch: /(?:^|\/)investigation-order\.spec\.ts/,
+      use: { baseURL: 'http://127.0.0.1:5231' },
+    },
   ],
   webServer: [
     {
@@ -547,6 +552,12 @@ export default defineConfig({
     {
       command: 'E2E_API_PORT=3058 E2E_VITE_PORT=5230 node scripts/e2e-server.mjs',
       url: 'http://127.0.0.1:5230/api/health',
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: 'E2E_API_PORT=3059 E2E_VITE_PORT=5231 node scripts/e2e-server.mjs',
+      url: 'http://127.0.0.1:5231/api/health',
       reuseExistingServer: false,
       timeout: 60000,
     },

@@ -95,9 +95,13 @@ export function notifyPatient(
   input: ActivityContent,
   excludeActorId?: string,
 ) {
-  for (const user of activeUsers(db))
-    if (user.role === 'patient' && user.patientId === patientId && user.id !== excludeActorId)
-      notify(db, user, patientId, 'patient', eventKey, input);
+  let delivered = true;
+  for (const user of activeUsers(db)) {
+    if (user.role !== 'patient' || user.patientId !== patientId || user.id === excludeActorId)
+      continue;
+    if (!notify(db, user, patientId, 'patient', eventKey, input)) delivered = false;
+  }
+  return delivered;
 }
 export function notifyClinicians(
   db: DB,

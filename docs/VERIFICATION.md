@@ -1,5 +1,17 @@
 # Release verification
 
+## 1.55.0 · Investigation order creation
+
+Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **799 API, backup and recovery tests** and **224 browser journeys across 49 projects** passed. TypeScript, the production build, formatting, whitespace and Compose configuration checks passed. The production dependency audit found zero vulnerabilities. A local Docker engine was unavailable for the container runtime check.
+
+On v1.54, a clinician lost the reply after ordering an investigation. Sending the same details again created a second order ID, a second entry in the patient's chart and a second portal notice. On v1.55, retrying the reviewed request recovers the first order ID and its original details. A clinician who deliberately reviews and submits two matching orders gets two IDs.
+
+Seven new API tests exercise simultaneous submissions from independent database connections, current account and doctor linkage, due dates across clinic midnight, eligible portal recipients, compatibility clients and recovery after restart. Failures writing an order, audit, notice or confirmation rolled back the whole submission. An exact retry after a result, publication and clinician rename returned the clinician name and instructions recorded at creation.
+
+Five Chrome journeys cover deliberate matching orders, a lost reply, a request that never arrived, a due date that elapsed before delivery, and pending submissions across patient navigation, reload and sign-in. A reply with mismatched details kept the order available for retry. The review, retry, refusal and confirmation screens passed automated accessibility checks at 320 pixels.
+
+The local production smoke test recovered the original order after results, publication and cancellation. Restoring a backup preserved the original order confirmation, the cancellation, the report links and a separate expired-date refusal. An upgrade from a v1.54 database preserved the two existing orders, their notices and audits, the attached result, the cancellation and all 42 appointments. The new request table began empty.
+
 ## 1.54.0 · Concurrent edits to doctor profiles
 
 Verified locally on **24 November 2026** with Node.js **24.22.3** and Google Chrome. All **792 API, backup and recovery tests** and **219 browser journeys across 48 projects** passed. TypeScript, the production build, local production smoke test, backup and restore rehearsal, formatting, whitespace and Compose configuration checks passed. The production dependency audit reported zero vulnerabilities. A local Docker engine was unavailable for the container runtime check.

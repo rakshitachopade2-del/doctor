@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Express } from 'express';
 import { z } from 'zod';
 import type { AuthRequest } from './app.ts';
+import { registerInvestigationOrders } from './investigation-order.ts';
 import { registerProcedureCompletion } from './procedure-completion.ts';
 import type { Appointment, Doctor, Encounter, Patient, User } from '../shared/types.ts';
 import type {
@@ -24,7 +25,7 @@ import type {
   ProcedureDecisionNotRecorded,
   ProcedureDecisionResponse,
 } from '../shared/procedure-decision.ts';
-import { clinicToday, get, id, insert, list, nowISO, type DB } from './db.ts';
+import { get, id, insert, list, nowISO, type DB } from './db.ts';
 import { notifyPatient, notifyClinicians } from './activity.ts';
 import {
   investigationRequestId,
@@ -111,16 +112,6 @@ const decisionCommand = decisionFields
     reviewedConfirmed: z.literal(true),
   })
   .strict();
-const date = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/)
-  .refine(
-    (value) =>
-      !Number.isNaN(Date.parse(`${value}T12:00:00Z`)) &&
-      new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value,
-    'Invalid calendar date.',
-  );
-
 export function registerClinical(app: Express, context: ClinicalContext) {
   const { db, actor, patientAccess, clinicianId, audit, fail } = context;
   db.exec(`
@@ -286,41 +277,16 @@ export function registerClinical(app: Express, context: ClinicalContext) {
     audit(req, 'viewed clinical workflows', 'patient', patientId);
     res.json(data);
   });
-  app.post('/api/investigations', (req: AuthRequest, res) => {
-    const identity = doctorIdentity(req);
-    const input = z
-      .object({
-        patientId: required,
-        title: required,
-        kind: z.enum(['laboratory', 'pathology', 'imaging', 'other']),
-        reason: text.min(1),
-        instructions: text.min(1),
-        dueDate: date.nullable().optional(),
-      })
-      .parse(req.body);
-    patientAccess(req, input.patientId);
-    if (input.dueDate && input.dueDate < clinicToday())
-      fail(400, 'Choose today or a future due date.');
-    const order: InvestigationOrder = {
-      ...input,
-      ...identity,
-      id: id(),
-      dueDate: input.dueDate ?? null,
-      status: 'ordered',
-      cancellationReason: null,
-      createdAt: nowISO(),
-    };
-    transaction(() => {
-      insert(db, 'investigations', order);
-      audit(req, 'ordered investigation', 'investigation', order.id);
-      notifyPatient(db, order.patientId, `investigation-ordered:${order.id}`, {
-        kind: 'investigation',
-        title: 'Your clinician requested an investigation',
-        detail: order.title,
-        href: '/my-care/record?tab=workflows',
-      });
-    });
-    res.status(201).json(investigationView(order));
+  registerInvestigationOrders(app, {
+    db,
+    transaction,
+    patientAccess,
+    audit,
+    fail,
+    authorize: (req) => {
+      const user = context.currentCareUser(req);
+      return { actorId: user.id, role: user.role, clinician: doctorIdentity(req) };
+    },
   });
   function resultContext(req: AuthRequest) {
     const user = context.currentCareUser(req);
